@@ -1,0 +1,8 @@
+[
+  {"id":"peasant","name":"평민","color":"#bfbfbf","desc":"아직 길을 정하지 않은 모험가입니다. 5레벨이 되면 마을의 각 길드에서 직업을 선택할 수 있습니다.","baseHp":50,"baseMp":30,"hpPerLevel":20,"mpPerLevel":10,"hpPerCon":8,"mpPerWis":8,"statWeights":{"str":1,"int":1,"wis":1,"con":1,"dex":1}},
+  {"id":"warrior","name":"전사","color":"#e05a47","desc":"강인한 체력과 무거운 무기로 적을 쓰러뜨리는 근접 전투의 달인입니다. 힘과 건강이 중요합니다.","baseHp":60,"baseMp":20,"hpPerLevel":40,"mpPerLevel":8,"hpPerCon":10,"mpPerWis":6,"statWeights":{"str":6,"con":3,"dex":1},"starterItems":["w_warrior_1","a_warrior_1"]},
+  {"id":"rogue","name":"도적","color":"#7a8a5a","desc":"빠른 손놀림과 은신으로 적의 급소를 노리는 그림자 속의 사냥꾼입니다. 민첩과 힘이 중요합니다.","baseHp":55,"baseMp":25,"hpPerLevel":32,"mpPerLevel":12,"hpPerCon":9,"mpPerWis":7,"statWeights":{"dex":5,"str":3,"con":2},"starterItems":["w_rogue_1","a_rogue_1"]},
+  {"id":"wizard","name":"마법사","color":"#6a7aff","desc":"불·물·바람·땅의 4원소를 다루는 마법의 대가입니다. 적의 속성에 맞는 원소를 고르세요. 지능과 지혜가 중요합니다.","baseHp":40,"baseMp":50,"hpPerLevel":18,"mpPerLevel":24,"hpPerCon":7,"mpPerWis":10,"statWeights":{"int":6,"wis":3,"con":1},"starterItems":["w_wizard_1","a_wizard_1"]},
+  {"id":"priest","name":"성직자","color":"#f0e6a0","desc":"신의 힘으로 동료를 치유하고 부활시키며, 빛의 권능으로 어둠을 심판합니다. 지혜가 가장 중요합니다.","baseHp":45,"baseMp":45,"hpPerLevel":22,"mpPerLevel":22,"hpPerCon":8,"mpPerWis":10,"statWeights":{"wis":6,"int":2,"con":2},"starterItems":["w_priest_1","a_priest_1"]},
+  {"id":"monk","name":"무도가","color":"#e0a030","desc":"단련된 육체와 기(氣)로 싸우는 무술가입니다. 연속 타격과 기공으로 적을 압도합니다. 민첩·힘·건강이 고루 중요합니다.","baseHp":60,"baseMp":30,"hpPerLevel":36,"mpPerLevel":14,"hpPerCon":10,"mpPerWis":8,"statWeights":{"dex":4,"str":3,"con":3},"starterItems":["w_monk_1","a_monk_1"]}
+]

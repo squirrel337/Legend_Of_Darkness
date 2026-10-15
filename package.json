@@ -1,0 +1,29 @@
+{
+  "name": "legend-of-darkness",
+  "version": "1.0.0",
+  "private": true,
+  "description": "어둠의 전설 스타일의 개인 서버용 2D MMORPG (게임 서버 + 웹 클라이언트 + 관리자 도구)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.10"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node dist/server.js",
+    "dev": "node scripts/build.mjs --dev",
+    "typecheck": "tsc -p tsconfig.server.json && tsc -p tsconfig.client.json",
+    "test": "node --import tsx --test --test-reporter=spec test/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "set-role": "node dist/server.js --set-role"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}
