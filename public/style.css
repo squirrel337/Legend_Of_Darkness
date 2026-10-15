@@ -247,6 +247,12 @@ select:focus {
   gap: 16px;
 }
 
+.create-grid > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .create-look {
   display: flex;
   flex-direction: column;

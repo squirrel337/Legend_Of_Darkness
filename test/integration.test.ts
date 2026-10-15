@@ -185,6 +185,19 @@ test('운영자 명령으로 다른 캐릭터를 성장시킨다', async () => {
   await player.waitFor('abilities', (m) => m.skills.includes('w_strike') && m.skills.includes('first_aid'), mark);
 });
 
+test('@이름 으로 대상을 지정하면 없는 캐릭터일 때 나에게 적용되지 않는다', async () => {
+  const me = srv.world.findPlayer('관리자')!;
+  const before = me.level;
+  const mark = admin.mark;
+  await admin.chat('/레벨업 @없는사람 10');
+  const err = await admin.waitFor('chat', (m) => m.ch === 'error', mark);
+  assert.match(err.text, /찾을 수 없습니다/);
+  assert.equal(me.level, before);
+  const pm = player.mark;
+  await admin.chat('/레벨업 @모험가 2');
+  await player.self((s) => s.level === 32, pm);
+});
+
 test('NPC 상점에서 물건을 산다', async () => {
   await admin.chat('/보내기 모험가 town 15 20');
   const p = srv.world.findPlayer('모험가')!;

@@ -70,10 +70,28 @@ function report(p: Player, r: AdminResult): void {
   else p.err(r.msg);
 }
 
-/** 첫 인자가 캐릭터 이름이면 대상, 아니면 자기 자신 */
+/** 사용자에게 그대로 보여 줄 명령어 오류 */
+class CommandError extends Error {}
+
+function exists(ctx: Ctx, name: string): boolean {
+  return !!ctx.world.findPlayer(name) || ctx.world.store.has(name);
+}
+
+/**
+ * 대상 캐릭터를 고릅니다.
+ *  - `@이름` 으로 쓰면 반드시 그 캐릭터 (없으면 오류)
+ *  - 첫 인자가 있는 캐릭터 이름이면 그 캐릭터
+ *  - 아니면 자기 자신
+ */
 function split(ctx: Ctx, args: string[], minRest: number): { target: string; rest: string[] } {
-  if (args.length > minRest && args[0] && (ctx.world.findPlayer(args[0]) || ctx.world.store.has(args[0]))) {
-    return { target: args[0], rest: args.slice(1) };
+  const first = args[0];
+  if (first?.startsWith('@')) {
+    const name = first.slice(1);
+    if (!name || !exists(ctx, name)) throw new CommandError(`'${name}' 캐릭터를 찾을 수 없습니다.`);
+    return { target: name, rest: args.slice(1) };
+  }
+  if (args.length > minRest && first && exists(ctx, first)) {
+    return { target: first, rest: args.slice(1) };
   }
   return { target: ctx.p.name, rest: args };
 }
@@ -90,6 +108,7 @@ const COMMANDS: Command[] = [
       p.sys('──── 명령어 ────');
       for (const l of lines) p.sys(l);
       p.sys('채팅 접두어: !외치기  @이름 귓속말  #그룹말');
+      if (p.isGm) p.sys('운영자 명령의 [이름] 자리에 @이름 을 쓰면 그 캐릭터가 없을 때 실수로 나에게 적용되지 않습니다. 예) /레벨업 @철수 10');
     },
   },
   {
@@ -294,7 +313,10 @@ const COMMANDS: Command[] = [
     run: (ctx, args) => {
       let target = ctx.p.name;
       let list = [...args];
-      if (list.length >= 2 && (ctx.world.findPlayer(list[0]!) || ctx.world.store.has(list[0]!))) {
+      if (list[0]?.startsWith('@')) {
+        target = split(ctx, list, 0).target;
+        list = list.slice(1);
+      } else if (list.length >= 2 && exists(ctx, list[0]!)) {
         const restQuery = list.slice(1).filter((x) => num(x) === null).join(' ');
         if (ctx.world.data.findItem(restQuery)) {
           target = list[0]!;
@@ -549,7 +571,8 @@ export async function runCommand(world: World, admin: AdminService, p: Player, l
   try {
     await cmd.run({ world, p, admin }, args.filter(Boolean), rest);
   } catch (e) {
-    p.err(`명령 실행 중 오류: ${(e as Error).message}`);
+    if (e instanceof CommandError) p.err(e.message);
+    else p.err(`명령 실행 중 오류: ${(e as Error).message}`);
   }
 }
 

@@ -90,6 +90,13 @@ export class GameData {
       if (!f.endsWith('.json')) continue;
       gd.addMap(readJson(path.join(mapDir, f)), f);
     }
+    // 마을 → 권장 레벨이 없는 맵 → 권장 레벨 순으로 정렬 (목록 표시용)
+    const ordered = [...gd.maps.values()].sort((a, b) => {
+      if (a.id === 'town' || b.id === 'town') return a.id === 'town' ? -1 : 1;
+      return (a.levelRange?.[0] ?? -1) - (b.levelRange?.[0] ?? -1);
+    });
+    gd.maps.clear();
+    for (const m of ordered) gd.maps.set(m.id, m);
     gd.crossCheck();
     return gd;
   }

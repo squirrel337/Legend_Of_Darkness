@@ -46,9 +46,9 @@ export class GmTool {
 
   /** 대상 이름을 앞에 붙여 명령을 보냅니다 */
   private cmd(name: string, ...args: (string | number)[]): void {
-    const t = this.target.value.trim();
+    const t = this.target.value.trim().replace(/^@/, '');
     const parts = [`/${name}`];
-    if (t) parts.push(t);
+    if (t) parts.push(`@${t}`);
     for (const a of args) if (String(a).trim() !== '') parts.push(String(a));
     this.game.sendChat(parts.join(' '));
   }
