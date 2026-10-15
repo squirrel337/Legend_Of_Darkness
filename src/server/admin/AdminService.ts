@@ -9,6 +9,10 @@ import {
   isClassId,
   isRole,
   isStatKey,
+  MAX_BONUS,
+  MAX_EXP_GRANT,
+  MAX_STAT_POINTS,
+  MAX_STAT_VALUE,
   NAME_REGEX,
   PASSWORD_MAX,
   PASSWORD_MIN,
@@ -111,7 +115,7 @@ export class AdminService {
   }
 
   addExp(actor: string, name: string, amount: number): AdminResult {
-    if (!Number.isFinite(amount) || amount <= 0) return fail('경험치 값이 올바르지 않습니다.');
+    if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_EXP_GRANT) return fail('경험치 값이 올바르지 않습니다. (1 ~ 1000조)');
     return this.edit(actor, 'addExp', name, (d, p) => {
       const lv = addExpToData(d, this.cfg, Math.floor(amount));
       if (p) p.send({ t: 'gain', exp: Math.floor(amount), gold: 0 });
@@ -120,7 +124,7 @@ export class AdminService {
   }
 
   setStat(actor: string, name: string, stat: StatKey | 'all', value: number): AdminResult {
-    if (!Number.isInteger(value) || value < 1 || value > 1_000_000) return fail('능력치 값은 1 이상의 정수여야 합니다.');
+    if (!Number.isInteger(value) || value < 1 || value > MAX_STAT_VALUE) return fail(`능력치 값은 1 ~ ${MAX_STAT_VALUE} 사이의 정수여야 합니다.`);
     if (stat !== 'all' && !isStatKey(stat)) return fail('능력치 이름이 올바르지 않습니다. (힘/지능/지혜/건강/민첩/all)');
     return this.edit(actor, 'setStat', name, (d) => {
       const keys = stat === 'all' ? STAT_KEYS : [stat];
@@ -134,9 +138,9 @@ export class AdminService {
   }
 
   addStatPoints(actor: string, name: string, n: number): AdminResult {
-    if (!Number.isInteger(n) || n === 0) return fail('포인트 값이 올바르지 않습니다.');
+    if (!Number.isInteger(n) || n === 0 || Math.abs(n) > MAX_STAT_POINTS) return fail(`포인트 값은 ±${MAX_STAT_POINTS} 이내의 정수여야 합니다.`);
     return this.edit(actor, 'addStatPoints', name, (d) => {
-      d.statPoints = Math.max(0, d.statPoints + n);
+      d.statPoints = Math.min(MAX_STAT_POINTS, Math.max(0, d.statPoints + n));
       return ok(`${d.name}의 능력치 포인트: ${d.statPoints}`);
     });
   }
@@ -156,7 +160,8 @@ export class AdminService {
   }
 
   setBonus(actor: string, name: string, hp: number, mp: number): AdminResult {
-    if (!Number.isInteger(hp) || !Number.isInteger(mp) || hp < 0 || mp < 0) return fail('보너스 값은 0 이상의 정수여야 합니다.');
+    if (!Number.isInteger(hp) || !Number.isInteger(mp) || hp < 0 || mp < 0 || hp > MAX_BONUS || mp > MAX_BONUS)
+      return fail(`보너스 값은 0 ~ ${MAX_BONUS} 사이의 정수여야 합니다.`);
     return this.edit(actor, 'setBonus', name, (d) => {
       d.bonusHp = hp;
       d.bonusMp = mp;

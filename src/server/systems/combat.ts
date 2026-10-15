@@ -249,7 +249,8 @@ function killMonster(world: World, m: Monster): void {
   let topDmg = 0;
   for (const [name, dmg] of m.damageBy) {
     const p = world.findPlayer(name);
-    if (p && p.map === map && dmg > topDmg) {
+    // 유령이 된 사람은 보상을 받지 않습니다 (살아서 마무리한 사람이 받음)
+    if (p && p.map === map && !p.isDead && dmg > topDmg) {
       top = p;
       topDmg = dmg;
     }

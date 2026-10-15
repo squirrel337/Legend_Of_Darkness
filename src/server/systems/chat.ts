@@ -22,7 +22,7 @@ export function sanitize(text: unknown): string {
 export async function handleChat(world: World, p: Player, raw: unknown): Promise<void> {
   const text = sanitize(raw);
   if (!text) return;
-  if (text.startsWith('/')) return runCommand(world, world.admin, p, text);
+  // 명령어(/외치기, /귓 등)도 같은 속도 제한을 받습니다. 운영자는 제외
   let bucket = buckets.get(p);
   if (!bucket) {
     bucket = new TokenBucket(5, 1);
@@ -32,6 +32,7 @@ export async function handleChat(world: World, p: Player, raw: unknown): Promise
     p.err('채팅을 너무 빠르게 보내고 있습니다.');
     return;
   }
+  if (text.startsWith('/')) return runCommand(world, world.admin, p, text);
   if (text.startsWith('!')) return shout(p, text.slice(1));
   if (text.startsWith('@')) {
     const body = text.slice(1);

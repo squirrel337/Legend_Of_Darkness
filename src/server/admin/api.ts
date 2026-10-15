@@ -1,7 +1,7 @@
 // 웹 관리자 페이지용 REST API (/api/admin/...)
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { CLASS_IDS, EQUIP_SLOTS, STAT_KEYS } from '../../shared/constants';
-import { AdminSessions, RateLimiter, safeEqual } from '../auth';
+import { AdminSessions, clientIp, RateLimiter, safeEqual } from '../auth';
 import { log } from '../log';
 import type { World } from '../world/World';
 import type { AdminResult } from './AdminService';
@@ -106,12 +106,7 @@ export class AdminApi {
   }
 
   private clientIp(req: IncomingMessage): string {
-    if (this.world.config.trustProxy) {
-      const fwd = req.headers['x-forwarded-for'];
-      const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
-      if (first) return first;
-    }
-    return req.socket.remoteAddress ?? '?';
+    return clientIp(req, this.world.config.trustProxy);
   }
 
   /** /api/admin 로 시작하는 요청을 처리합니다. 처리했으면 true */

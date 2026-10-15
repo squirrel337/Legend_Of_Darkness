@@ -47,6 +47,12 @@ export const SAY_RANGE = 12;
 export const LOOT_OWNER_MS = 30_000;
 export const GROUND_ITEM_TTL_MS = 180_000;
 
+/** 관리자가 줄 수 있는 값의 상한 (서버를 멈추게 하는 비정상적인 수를 막음) */
+export const MAX_STAT_POINTS = 1_000_000;
+export const MAX_STAT_VALUE = 1_000_000;
+export const MAX_EXP_GRANT = 1e15;
+export const MAX_BONUS = 1_000_000_000;
+
 export const NAME_MIN = 2;
 export const NAME_MAX = 12;
 /** 캐릭터 이름: 한글/영문으로 시작, 한글/영문/숫자 2~12자 */

@@ -94,8 +94,8 @@ export function removeItemQty(data: CharacterData, itemId: string, qty: number):
   return true;
 }
 
-/** 창고에 아이템을 넣습니다. 들어가지 못한 개수를 반환합니다. */
-export function addToStorage(data: CharacterData, def: ItemDef, qty: number): number {
+/** 창고에 아이템을 넣습니다. 들어가지 못한 개수를 반환합니다. force 면 칸 수 제한을 넘겨서라도 넣습니다. */
+export function addToStorage(data: CharacterData, def: ItemDef, qty: number, force = false): number {
   let left = qty;
   const max = stackSize(def);
   if (max > 1) {
@@ -108,7 +108,7 @@ export function addToStorage(data: CharacterData, def: ItemDef, qty: number): nu
       }
     }
   }
-  while (left > 0 && data.storage.length < STORAGE_SLOTS) {
+  while (left > 0 && (force || data.storage.length < STORAGE_SLOTS)) {
     const n = Math.min(left, max);
     data.storage.push({ item: def.id, qty: n });
     left -= n;
@@ -207,7 +207,8 @@ export function unequipToBag(data: CharacterData, gd: GameData, slot: EquipSlot)
   const def = gd.items.get(id);
   data.equipment[slot] = null;
   if (!def) return true;
-  if (addItem(data, def, 1) > 0) addToStorage(data, def, 1);
+  // 소지품이 가득 차면 창고로 (창고도 가득 차면 칸 수를 넘겨서라도 보관해 아이템을 잃지 않게 함)
+  if (addItem(data, def, 1) > 0) addToStorage(data, def, 1, true);
   return true;
 }
 

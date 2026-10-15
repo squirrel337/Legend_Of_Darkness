@@ -7,7 +7,7 @@ import { INVENTORY_SIZE } from '../src/shared/constants';
 import { expToNext } from '../src/shared/formulas';
 import { loadConfig } from '../src/server/config';
 import { GameData } from '../src/server/gamedata';
-import { CharacterStore, emptyEquipment, normalizeCharacter, type CharacterData } from '../src/server/storage';
+import { CharacterStore, emptyEquipment, normalizeCharacter, STORAGE_SLOTS, type CharacterData } from '../src/server/storage';
 import {
   addExpToData,
   addItem,
@@ -21,6 +21,7 @@ import {
   resetStatsOnData,
   setClassOnData,
   setLevelOnData,
+  unequipToBag,
 } from '../src/server/systems/character';
 
 const gd = GameData.load(path.resolve(import.meta.dirname, '..', 'gamedata'));
@@ -105,6 +106,19 @@ test('장비 조건 검사', () => {
   d.classId = 'warrior';
   assert.equal(equipError(d, sword), null);
   assert.equal(equipError(fresh(), sword, true), null, '운영자는 조건 무시');
+});
+
+test('소지품과 창고가 모두 가득 차도 벗긴 장비는 사라지지 않는다', () => {
+  const d = fresh();
+  d.equipment.weapon = 'w_warrior_1';
+  const pot = gd.items.get('pot_hp_1')!;
+  const sword = gd.items.get('w_common_1')!;
+  for (let i = 0; i < INVENTORY_SIZE; i++) d.inventory[i] = { item: sword.id, qty: 1 };
+  for (let i = 0; i < STORAGE_SLOTS; i++) d.storage.push({ item: pot.id, qty: pot.stack ?? 1 });
+  assert.ok(unequipToBag(d, gd, 'weapon'));
+  assert.equal(d.equipment.weapon, null);
+  assert.equal(d.storage.length, STORAGE_SLOTS + 1);
+  assert.deepEqual(d.storage.at(-1), { item: 'w_warrior_1', qty: 1 });
 });
 
 test('레벨에 맞는 최고 장비는 모두 착용 가능하다', () => {

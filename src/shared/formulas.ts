@@ -243,13 +243,11 @@ export function autoAllocate(weights: Partial<Record<StatKey, number>>, points: 
     out[k] += n;
     given += n;
   }
-  // 나머지는 가중치가 큰 순서대로
+  // 나머지(항상 키 개수보다 적음)는 가중치가 큰 순서대로. 아주 큰 수의 부동소수 오차에도 끝나도록 횟수를 제한
   const sorted = [...keys].sort((a, b) => (weights[b] ?? 0) - (weights[a] ?? 0));
-  let i = 0;
-  while (given < points) {
+  for (let i = 0; given < points && i < sorted.length * 2; i++) {
     out[sorted[i % sorted.length]!] += 1;
     given++;
-    i++;
   }
   return out;
 }

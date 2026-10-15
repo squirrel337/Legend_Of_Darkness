@@ -40,6 +40,7 @@ export class Player extends Creature {
   readonly msgBucket = new TokenBucket(60, 30);
   group: Group | null = null;
   pendingInviteFrom: string | null = null;
+  pendingInviteAt = 0;
   lastWhisperFrom: string | null = null;
   talkingTo: Npc | null = null;
   readonly loginAt = Date.now();
@@ -61,6 +62,14 @@ export class Player extends Creature {
     this.y = data.y;
     this.dir = data.dir;
     this.moveBucket = new TokenBucket(3, 1000 / (WALK_MS * 0.8));
+    // 저장된 재사용 대기와 상태 효과를 되살립니다 (다시 접속해서 초기화하지 못하게)
+    const now = Date.now();
+    for (const [ability, until] of Object.entries(data.cooldowns)) if (until > now) this.cooldowns.set(ability, until);
+    if (!data.ghost) {
+      for (const st of data.statusSave) {
+        if (st.until > now) this.statuses.set(st.id, { ...st, sourceId: id, nextTickAt: now + 1000 });
+      }
+    }
     this.recompute(false);
   }
 
@@ -298,6 +307,13 @@ export class Player extends Creature {
       this.data.y = this.y;
       this.data.dir = this.dir;
     }
+    const now = Date.now();
+    const cds: Record<string, number> = {};
+    for (const [ability, until] of this.cooldowns) if (until > now) cds[ability] = until;
+    this.data.cooldowns = cds;
+    this.data.statusSave = [...this.statuses.values()]
+      .filter((st) => st.until > now)
+      .map((st) => ({ id: st.id, until: st.until, potency: st.potency, sourceLevel: st.sourceLevel }));
     return this.data;
   }
 

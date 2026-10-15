@@ -25,6 +25,8 @@ export class World {
   readonly startedAt = Date.now();
   private nextId = 1;
   private timer: NodeJS.Timeout | null = null;
+  /** 처음 만든 캐릭터에게 관리자 권한을 줄 수 있는지 (서버를 켤 때 캐릭터 파일이 하나도 없었을 때만) */
+  private firstAdminAvailable: boolean;
   private lastSecond = 0;
   private lastRegen = 0;
   private lastSave = Date.now();
@@ -37,6 +39,7 @@ export class World {
   ) {
     this.groups = new GroupManager(this);
     this.admin = new AdminService(this);
+    this.firstAdminAvailable = store.filesAtLoad === 0;
     for (const def of data.maps.values()) {
       const map = new MapInstance(def);
       for (const n of def.npcs) {
@@ -126,13 +129,26 @@ export class World {
     };
   }
 
+  /** 첫 관리자 권한은 서버가 켜져 있는 동안 한 번만 줍니다 */
+  claimFirstAdmin(): boolean {
+    if (!this.firstAdminAvailable) return false;
+    this.firstAdminAvailable = false;
+    return true;
+  }
+
+  /** ADMIN_CHARACTERS 에 적힌 이름은 게임에서 새로 만들 수 없습니다 */
+  isReservedName(name: string): boolean {
+    return this.config.adminCharacters.includes(nameKey(name));
+  }
+
   findPlayer(name: string): Player | undefined {
     return this.players.get(nameKey(name));
   }
 
   /** 캐릭터가 게임에 들어옵니다 */
   enterGame(link: PlayerLink, data: CharacterData): Player {
-    if (this.config.adminCharacters.includes(nameKey(data.name)) && data.role !== 'admin') {
+    // 서버를 켜기 전부터 있던 캐릭터만 (켜진 뒤 누군가 그 이름으로 만든 캐릭터는 해당 없음)
+    if (this.isReservedName(data.name) && data.createdAt < this.startedAt && data.role !== 'admin') {
       data.role = 'admin';
       log.info(`${data.name} 에게 ADMIN_CHARACTERS 설정에 따라 관리자 권한을 부여했습니다.`);
     }
@@ -143,15 +159,17 @@ export class World {
     p.send({ t: 'welcome', selfId: p.id, data: this.data.clientData(this.publicInfo()) });
     let map = this.maps.get(data.mapId) ?? this.town;
     let spot = map.isWalkable(data.x, data.y) ? map.findFreeNear(data.x, data.y) : null;
-    if (!spot) spot = map.findFreeNear(map.def.spawn.x, map.def.spawn.y);
+    if (!spot) spot = map.findFreeNear(map.def.spawn.x, map.def.spawn.y, 40);
     if (!spot) {
       map = this.town;
-      spot = map.findFreeNear(map.def.spawn.x, map.def.spawn.y) ?? { ...map.def.spawn };
+      spot = map.findFreeNear(map.def.spawn.x, map.def.spawn.y, 60) ?? { ...map.def.spawn };
     }
     this.placePlayer(p, map, spot.x, spot.y, data.dir);
     p.markInv();
     p.markAbilities();
     p.markSelf();
+    const now = Date.now();
+    for (const [ability, until] of p.cooldowns) p.send({ t: 'cooldown', id: ability, ms: until - now });
     if (this.config.motd) p.send({ t: 'chat', ch: 'notice', text: this.config.motd });
     if (p.isDead) p.sys('유령 상태입니다. 신전의 사제에게 가면 부활할 수 있습니다. (R 키: 마을로 돌아가기)');
     if (p.data.statPoints > 0) p.sys(`분배하지 않은 능력치 포인트가 ${p.data.statPoints} 있습니다. (G 키)`);
@@ -190,7 +208,7 @@ export class World {
 
   /** 다른 맵(또는 같은 맵의 다른 위치)으로 이동시킵니다 */
   transfer(p: Player, map: MapInstance, x: number, y: number): void {
-    const spot = map.findFreeNear(x, y) ?? map.findFreeNear(map.def.spawn.x, map.def.spawn.y) ?? { x, y };
+    const spot = map.findFreeNear(x, y) ?? map.findFreeNear(map.def.spawn.x, map.def.spawn.y, 40) ?? { x, y };
     if (p.map === map) {
       map.move(p, spot.x, spot.y);
       map.broadcast({ t: 'jump', id: p.id, x: spot.x, y: spot.y, dir: p.dir });

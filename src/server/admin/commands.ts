@@ -1,5 +1,6 @@
 // 채팅 명령어 (/로 시작). 일반 명령어와 운영자(GM/관리자) 명령어
 import { CLASS_FALLBACK_NAMES, ROLE_NAMES, formatNumber, type ClassId, type Role, type StatKey } from '../../shared/constants';
+import { nameKey } from '../storage';
 import { ghostRecall } from '../systems/movement';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
@@ -91,12 +92,23 @@ function split(ctx: Ctx, args: string[], minRest: number): { target: string; res
   if (first?.startsWith('@')) {
     const name = first.slice(1);
     if (!name || !exists(ctx, name)) throw new CommandError(`'${name}' 캐릭터를 찾을 수 없습니다.`);
+    guard(ctx, name);
     return { target: name, rest: args.slice(1) };
   }
   if (args.length > minRest && first && exists(ctx, first)) {
+    guard(ctx, first);
     return { target: first, rest: args.slice(1) };
   }
   return { target: ctx.p.name, rest: args };
+}
+
+const RANK: Record<Role, number> = { player: 0, gm: 1, admin: 2 };
+
+/** 운영자(GM)는 자기와 같거나 높은 권한의 다른 캐릭터를 대상으로 할 수 없습니다. 관리자는 제한이 없습니다. */
+function guard(ctx: Ctx, name: string): void {
+  if (ctx.p.isAdmin || nameKey(name) === nameKey(ctx.p.name)) return;
+  const role = ctx.world.findPlayer(name)?.data.role ?? ctx.world.store.get(name)?.role ?? 'player';
+  if (RANK[role] >= RANK[ctx.p.data.role]) throw new CommandError('나와 같거나 높은 권한의 캐릭터에게는 쓸 수 없습니다.');
 }
 
 const COMMANDS: Command[] = [
@@ -326,6 +338,7 @@ const COMMANDS: Command[] = [
           list = list.slice(1);
         }
       }
+      guard(ctx, target);
       let qty = 1;
       const last = num(list[list.length - 1]);
       if (list.length > 1 && last !== null) {
@@ -409,6 +422,7 @@ const COMMANDS: Command[] = [
     desc: '다른 사람을 맵으로 보냅니다.',
     run: (ctx, args) => {
       if (!args[0] || !args[1]) return ctx.p.err('사용법: /보내기 이름 맵 [x y]');
+      guard(ctx, nm(args[0]));
       report(ctx.p, ctx.admin.teleport(ctx.p.name, nm(args[0]), args[1], num(args[2]) ?? undefined, num(args[3]) ?? undefined));
     },
   },
@@ -420,6 +434,7 @@ const COMMANDS: Command[] = [
     run: ({ world, p, admin }, args) => {
       const t = world.findPlayer(nm(args[0]));
       if (!t || !p.map) return p.err('접속 중인 사람이 아닙니다.');
+      guard({ world, p, admin }, t.name);
       report(p, admin.teleport(p.name, t.name, p.map.id, p.x, p.y));
     },
   },
@@ -497,6 +512,7 @@ const COMMANDS: Command[] = [
     desc: '접속을 강제로 종료시킵니다.',
     run: (ctx, args) => {
       if (!args[0]) return ctx.p.err('사용법: /추방 이름 [사유]');
+      guard(ctx, nm(args[0]));
       report(ctx.p, ctx.admin.kick(ctx.p.name, nm(args[0]), args.slice(1).join(' ') || undefined));
     },
   },

@@ -2,12 +2,12 @@
 import type http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { AdminApi } from './admin/api';
-import { RateLimiter } from './auth';
+import { clientIp } from './auth';
 import type { ServerConfig } from './config';
 import { GameData } from './gamedata';
 import { createHttpServer } from './http';
 import { log } from './log';
-import { Session } from './net/Session';
+import { defaultLimits, Session } from './net/Session';
 import { AuditLog, CharacterStore } from './storage';
 import { World } from './world/World';
 
@@ -32,16 +32,29 @@ export async function startServer(cfg: ServerConfig): Promise<RunningServer> {
   const api = new AdminApi(world);
   const server = createHttpServer(world, api);
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
-  const limits = { login: new RateLimiter(10, 60_000), create: new RateLimiter(10, 60 * 60_000) };
+  const limits = defaultLimits();
   const perIp = new Map<string, number>();
+  // 응답 없는 연결 정리 (30초마다 ping, 다음 차례까지 pong 이 없으면 끊음)
+  const alive = new WeakMap<object, boolean>();
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (alive.get(ws) === false) {
+        ws.terminate();
+        continue;
+      }
+      alive.set(ws, false);
+      try {
+        ws.ping();
+      } catch {
+        /* 이미 닫힘 */
+      }
+    }
+  }, 30_000);
 
   wss.on('connection', (ws, req) => {
-    let ip = req.socket.remoteAddress ?? '?';
-    if (cfg.trustProxy) {
-      const fwd = req.headers['x-forwarded-for'];
-      const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
-      if (first) ip = first;
-    }
+    alive.set(ws, true);
+    ws.on('pong', () => alive.set(ws, true));
+    const ip = clientIp(req, cfg.trustProxy);
     const count = (perIp.get(ip) ?? 0) + 1;
     if (count > cfg.maxConnectionsPerIp) {
       ws.close(4001, 'too many connections');
@@ -76,6 +89,7 @@ export async function startServer(cfg: ServerConfig): Promise<RunningServer> {
     async close() {
       if (closing) return;
       closing = true;
+      clearInterval(heartbeat);
       world.stop();
       for (const p of [...world.players.values()]) {
         p.send({ t: 'kick', reason: '서버 점검으로 접속이 종료됩니다.' });

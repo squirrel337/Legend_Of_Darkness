@@ -8,11 +8,13 @@ import {
   isClassId,
   isDir,
   isRole,
+  isStatusId,
   NAME_REGEX,
   type ClassId,
   type Dir,
   type EquipSlot,
   type Role,
+  type StatusId,
 } from '../shared/constants';
 import type { InvSlot } from '../shared/protocol';
 import type { StatBlock } from '../shared/types';
@@ -59,6 +61,17 @@ export interface CharacterData {
   deaths: number;
   playTimeSec: number;
   godMode: boolean;
+  /** 기술/마법 재사용 가능 시각 (다시 접속해도 유지) */
+  cooldowns: Record<string, number>;
+  /** 남아 있는 버프/디버프 (다시 접속해도 유지) */
+  statusSave: SavedStatus[];
+}
+
+export interface SavedStatus {
+  id: StatusId;
+  until: number;
+  potency: number;
+  sourceLevel: number;
 }
 
 export function nameKey(name: string): string {
@@ -150,7 +163,30 @@ export function normalizeCharacter(raw: unknown, knownItem?: (id: string) => boo
     deaths: int(r.deaths, 0, 0),
     playTimeSec: int(r.playTimeSec, 0, 0),
     godMode: r.godMode === true,
+    cooldowns: parseCooldowns(r.cooldowns),
+    statusSave: parseStatuses(r.statusSave),
   };
+}
+
+function parseCooldowns(v: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  for (const [k, t] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof t === 'number' && Number.isFinite(t) && k.length <= 64) out[k] = t;
+  }
+  return out;
+}
+
+function parseStatuses(v: unknown): SavedStatus[] {
+  if (!Array.isArray(v)) return [];
+  const out: SavedStatus[] = [];
+  for (const x of v) {
+    if (!x || typeof x !== 'object') continue;
+    const r = x as Record<string, unknown>;
+    if (!isStatusId(r.id)) continue;
+    out.push({ id: r.id, until: num(r.until, 0), potency: num(r.potency, 0), sourceLevel: num(r.sourceLevel, 1) });
+  }
+  return out;
 }
 
 function fileNameFor(name: string): string {
@@ -163,6 +199,8 @@ export class CharacterStore {
   private readonly dir: string;
   private readonly chars = new Map<string, CharacterData>();
   private writeChains = new Map<string, Promise<void>>();
+  /** 시작할 때 폴더에 있던 캐릭터 파일 수 (읽기에 실패한 파일 포함) */
+  filesAtLoad = 0;
 
   constructor(dataDir: string) {
     this.dir = path.join(dataDir, 'characters');
@@ -173,6 +211,7 @@ export class CharacterStore {
     fs.mkdirSync(this.dir, { recursive: true });
     for (const f of fs.readdirSync(this.dir)) {
       if (!f.endsWith('.json')) continue;
+      this.filesAtLoad++;
       const file = path.join(this.dir, f);
       try {
         const data = normalizeCharacter(JSON.parse(fs.readFileSync(file, 'utf8')), knownItem);
@@ -215,18 +254,23 @@ export class CharacterStore {
 
   /** 비동기 저장. 같은 캐릭터의 저장은 순서대로 처리됩니다. */
   save(data: CharacterData): Promise<void> {
-    const key = nameKey(data.name);
     const json = JSON.stringify(data, null, 1);
     const file = path.join(this.dir, fileNameFor(data.name));
+    return this.enqueue(data.name, async () => {
+      const tmp = `${file}.${process.pid}.tmp`;
+      await fs.promises.writeFile(tmp, json);
+      await fs.promises.rename(tmp, file);
+    });
+  }
+
+  /** 같은 캐릭터 파일에 대한 작업(저장/삭제)을 순서대로 실행합니다 */
+  private enqueue(name: string, job: () => Promise<void>): Promise<void> {
+    const key = nameKey(name);
     const prev = this.writeChains.get(key) ?? Promise.resolve();
     const next = prev
       .catch(() => undefined)
-      .then(async () => {
-        const tmp = `${file}.${process.pid}.tmp`;
-        await fs.promises.writeFile(tmp, json);
-        await fs.promises.rename(tmp, file);
-      })
-      .catch((e: Error) => log.error(`캐릭터 ${data.name} 저장 실패: ${e.message}`));
+      .then(job)
+      .catch((e: Error) => log.error(`캐릭터 ${name} 파일 작업 실패: ${e.message}`));
     this.writeChains.set(key, next);
     void next.finally(() => {
       if (this.writeChains.get(key) === next) this.writeChains.delete(key);
@@ -255,9 +299,9 @@ export class CharacterStore {
     const data = this.chars.get(key);
     if (!data) return false;
     this.chars.delete(key);
-    await (this.writeChains.get(key) ?? Promise.resolve());
+    // 앞선 저장이 끝난 뒤에 지우고, 그 사이 같은 이름으로 새로 만든 캐릭터의 저장은 삭제 뒤에 실행되게 합니다
     const file = path.join(this.dir, fileNameFor(data.name));
-    await fs.promises.rm(file, { force: true });
+    await this.enqueue(data.name, () => fs.promises.rm(file, { force: true }));
     return true;
   }
 }

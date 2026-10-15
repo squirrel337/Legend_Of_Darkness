@@ -27,8 +27,22 @@ import {
 } from './character';
 import { cleanseDebuffs, revivePlayer } from './combat';
 
-function npcFor(p: Player, npcId: unknown): Npc | null {
+/** 유령은 대화와 부활만, 잠들거나 마비된 상태에서는 아무 서비스도 쓸 수 없습니다 */
+const GHOST_KEYS = new Set(['close', 'back', 'talk', 'about', 'revive']);
+
+function blockedReason(p: Player, key?: string): string | null {
+  if (p.isDead) return key === undefined || GHOST_KEYS.has(key) ? null : '유령 상태에서는 할 수 없습니다. 먼저 신전의 사제에게 부활하세요.';
+  if (!p.canAct) return '지금은 움직일 수 없습니다.';
+  return null;
+}
+
+function npcFor(p: Player, npcId: unknown, key?: string): Npc | null {
   if (typeof npcId !== 'number' || !p.map) return null;
+  const blocked = blockedReason(p, key);
+  if (blocked) {
+    p.err(blocked);
+    return null;
+  }
   const e = p.map.entities.get(npcId);
   if (!e || e.kind !== 'npc') return null;
   if (Math.abs(e.x - p.x) > NPC_TALK_RANGE || Math.abs(e.y - p.y) > NPC_TALK_RANGE) {
@@ -45,6 +59,7 @@ function className(world: World, id: string): string {
 function mainOptions(world: World, p: Player, npc: Npc): DialogOption[] {
   const opts: DialogOption[] = [];
   npc.def.services.forEach((s, i) => {
+    if (p.isDead && s.type !== 'revive' && s.type !== 'talk') return;
     switch (s.type) {
       case 'shop':
         opts.push({ key: `shop:${i}`, label: s.label ?? '물건 사기' });
@@ -111,7 +126,7 @@ function service<T extends NpcService['type']>(npc: Npc, type: T, index?: number
 
 export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unknown): void {
   if (typeof keyRaw !== 'string' || keyRaw.length > 64) return;
-  const npc = npcFor(p, npcId);
+  const npc = npcFor(p, npcId, keyRaw.split(':')[0]);
   if (!npc) return;
   p.talkingTo = npc;
   const [key, arg, arg2] = keyRaw.split(':') as [string, string | undefined, string | undefined];
@@ -304,7 +319,7 @@ function hasShopItem(npc: Npc, itemId: string): boolean {
 }
 
 export function buy(world: World, p: Player, npcId: unknown, itemId: unknown, qtyRaw: unknown): void {
-  const npc = npcFor(p, npcId);
+  const npc = npcFor(p, npcId, 'service');
   if (!npc || typeof itemId !== 'string') return;
   if (!hasShopItem(npc, itemId)) return;
   const def = world.data.items.get(itemId);
@@ -321,7 +336,7 @@ export function buy(world: World, p: Player, npcId: unknown, itemId: unknown, qt
 }
 
 export function sell(world: World, p: Player, npcId: unknown, slot: unknown, qtyRaw: unknown): void {
-  const npc = npcFor(p, npcId);
+  const npc = npcFor(p, npcId, 'service');
   if (!npc || !npc.def.services.some((s) => s.type === 'buy')) return;
   if (typeof slot !== 'number' || !Number.isInteger(slot)) return;
   const s = p.data.inventory[slot];
@@ -341,7 +356,7 @@ export function sell(world: World, p: Player, npcId: unknown, slot: unknown, qty
 }
 
 export function learn(world: World, p: Player, npcId: unknown, abilityId: unknown): void {
-  const npc = npcFor(p, npcId);
+  const npc = npcFor(p, npcId, 'service');
   if (!npc || typeof abilityId !== 'string') return;
   const def = world.data.abilities.get(abilityId);
   if (!def || def.classId === 'monster') return;
@@ -361,7 +376,7 @@ export function learn(world: World, p: Player, npcId: unknown, abilityId: unknow
 }
 
 function storageNpc(p: Player, npcId: unknown): Npc | null {
-  const npc = npcFor(p, npcId);
+  const npc = npcFor(p, npcId, 'service');
   if (!npc || !npc.def.services.some((s) => s.type === 'storage')) return null;
   return npc;
 }

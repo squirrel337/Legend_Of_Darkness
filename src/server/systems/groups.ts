@@ -6,6 +6,7 @@ import type { Player } from '../world/Player';
 import type { World } from '../world/World';
 
 export const MAX_GROUP = 6;
+const INVITE_TTL_MS = 60_000;
 const SHARE_RANGE = 15;
 
 export class Group {
@@ -47,6 +48,7 @@ export class GroupManager {
     if (g && g.members.length >= MAX_GROUP) return from.err(`그룹은 최대 ${MAX_GROUP}명입니다.`);
     if (this.groupOf(to.name)) return from.err(`${to.name}님은 이미 다른 그룹에 있습니다.`);
     to.pendingInviteFrom = from.name;
+    to.pendingInviteAt = Date.now();
     to.send({ t: 'groupInvite', from: from.name });
     to.sys(`${from.name}님이 그룹에 초대했습니다. (/파티 수락 또는 /파티 거절)`);
     from.sys(`${to.name}님을 그룹에 초대했습니다.`);
@@ -62,8 +64,11 @@ export class GroupManager {
       return;
     }
     if (!from) return p.err('초대한 사람이 접속을 종료했습니다.');
+    if (Date.now() - p.pendingInviteAt > INVITE_TTL_MS) return p.err('그룹 초대가 만료되었습니다.');
     if (this.groupOf(p.name)) return p.err('이미 그룹에 속해 있습니다.');
     let g = this.groupOf(from.name);
+    // 초대한 뒤 다른 그룹에 들어갔다면 그 그룹장의 동의 없이 들어갈 수 없음
+    if (g && g.leader !== from.name) return p.err('초대한 사람이 더 이상 그룹장이 아니라서 초대가 무효가 되었습니다.');
     if (!g) {
       g = new Group(from.name);
       this.groups.add(g);

@@ -106,6 +106,13 @@ test('능력치 자동 분배는 포인트를 모두 사용한다', () => {
   assert.equal(out.int, 0);
 });
 
+test('능력치 자동 분배는 아주 큰 수에서도 바로 끝난다', () => {
+  // 2^53 을 넘는 수에서는 1을 더해도 값이 변하지 않아, 나머지 분배가 끝나지 않던 문제
+  const out = autoAllocate({ str: 4, con: 4, dex: 3 }, 15482362418670758);
+  assert.ok(Object.values(out).every((v) => Number.isFinite(v) && v >= 0));
+  assert.ok(out.str > 0 && out.con > 0 && out.dex > 0);
+});
+
 test('몬스터 능력치는 레벨에 따라 커지고 지정값이 우선한다', () => {
   const low = monsterStats({ id: 'a', name: 'a', level: 1, look: { body: 'rat', color: '#fff' } });
   const high = monsterStats({ id: 'b', name: 'b', level: 90, look: { body: 'rat', color: '#fff' } });

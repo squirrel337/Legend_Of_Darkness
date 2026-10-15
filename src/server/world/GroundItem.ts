@@ -15,6 +15,8 @@ export class GroundItem extends Entity {
     readonly owner: string | null,
     readonly ownerUntil: number,
     readonly expiresAt: number,
+    /** 플레이어가 직접 버린 물건이면 그 플레이어(nameKey). 전리품 등은 null */
+    readonly droppedBy: string | null = null,
   ) {
     super(id);
   }
