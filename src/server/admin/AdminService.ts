@@ -80,7 +80,7 @@ export class AdminService {
     if (!res.ok) return res;
     if (p) {
       p.recompute();
-      if (p.data.level > before) onLevelUp(p, p.data.level - before);
+      if (p.data.level > before) onLevelUp(p, p.data.level - before, { byAdmin: true });
       p.markInv();
       p.markAbilities();
       p.markSelf();

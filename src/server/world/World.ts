@@ -181,6 +181,8 @@ export class World {
     p.talkingTo = null;
     p.send({ t: 'map', map: map.view, entities: map.snapshotFor(p), x, y, dir: p.dir });
     map.add(p);
+    // 자기 자신의 모습은 다른 사람들에게 보내는 'add' 에서 빠지므로 따로 보냅니다
+    p.send({ t: 'add', e: p.snapshot() });
     p.data.mapId = map.id;
     p.markSelf();
     this.groups.touch(p);

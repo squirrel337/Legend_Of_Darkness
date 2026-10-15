@@ -1,0 +1,558 @@
+// 화면 그리기: 카메라, 타일/엔티티 깊이 정렬, 이름표, 효과, 어둠, 미니맵
+import { STATUS_INFO, TILE_H, TILE_W } from '../../shared/constants';
+import { tileInfo } from '../../shared/tiles';
+import { entityPos, type CEntity, type ClientState } from '../state';
+import { Effects, type Point } from './effects';
+import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
+import { drawGroundItem, drawHuman, drawMonster } from './sprites';
+import { drawFlame, drawLiquid, floorCanvas, objectSprite, wallCanvas } from './tiles';
+
+const ACT_MS = 320;
+const FONT = '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+
+interface Drawable {
+  depth: number;
+  order: number;
+  draw: () => void;
+}
+
+export class Renderer {
+  readonly canvas: HTMLCanvasElement;
+  private readonly ctx: CanvasRenderingContext2D;
+  private dark: HTMLCanvasElement;
+  private darkCtx: CanvasRenderingContext2D;
+  readonly effects = new Effects();
+  /** 화면 좌표 = 월드 좌표 + offset */
+  private offX = 0;
+  private offY = 0;
+  private dpr = 1;
+  private cssW = 0;
+  private cssH = 0;
+  mouse: { x: number; y: number } | null = null;
+  hoverTile: { x: number; y: number } | null = null;
+  hoverEntity: CEntity | null = null;
+  walkTarget: { x: number; y: number; until: number } | null = null;
+  private wallLike = new Map<number, string>();
+  private lights: { x: number; y: number; r: number; flicker: boolean }[] = [];
+  private mapKey = '';
+  private minimapBase: HTMLCanvasElement | null = null;
+
+  constructor(canvas: HTMLCanvasElement, private readonly state: ClientState) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d')!;
+    [this.dark, this.darkCtx] = makeCanvas(16, 16);
+  }
+
+  resize(): void {
+    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.cssW = this.canvas.clientWidth;
+    this.cssH = this.canvas.clientHeight;
+    this.canvas.width = Math.round(this.cssW * this.dpr);
+    this.canvas.height = Math.round(this.cssH * this.dpr);
+    this.dark.width = this.canvas.width;
+    this.dark.height = this.canvas.height;
+  }
+
+  /** 맵이 바뀌면 벽처럼 그릴 횃불 칸과 광원 목록을 다시 계산 */
+  private prepareMap(): void {
+    const map = this.state.map;
+    if (!map) return;
+    const key = map.id + ':' + map.tiles.length;
+    if (key === this.mapKey) return;
+    this.mapKey = key;
+    this.wallLike.clear();
+    this.lights = [];
+    const W = this.state.mapWidth;
+    for (let y = 0; y < map.tiles.length; y++) {
+      const row = map.tiles[y]!;
+      for (let x = 0; x < row.length; x++) {
+        const ch = row[x]!;
+        if (ch === 'j') {
+          // 주변에 벽이 2개 이상이면 벽에 달린 횃불로 그립니다
+          const counts = new Map<string, number>();
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+            const n = map.tiles[y + dy]?.[x + dx];
+            if (n && tileInfo(n).kind === 'wall') counts.set(n, (counts.get(n) ?? 0) + 1);
+          }
+          let best: string | null = null;
+          let bestN = 0;
+          for (const [k, v] of counts) if (v > bestN) [best, bestN] = [k, v];
+          if (best && bestN >= 2) this.wallLike.set(y * W + x, best);
+          this.lights.push({ x, y, r: 150, flicker: true });
+        } else if (ch === 'L') this.lights.push({ x, y, r: 90, flicker: true });
+        else if (ch === 'c') this.lights.push({ x, y, r: 80, flicker: false });
+      }
+    }
+    for (const w of map.warps) this.lights.push({ x: w.x, y: w.y, r: 90, flicker: false });
+    this.minimapBase = null;
+  }
+
+  worldToScreen(p: Point): Point {
+    return { sx: p.sx + this.offX, sy: p.sy + this.offY };
+  }
+
+  /** 엔티티 발 위치(월드 픽셀) */
+  entityPoint(e: CEntity, now: number): Point {
+    const p = entityPos(e, now);
+    return tileCenter(p.x, p.y);
+  }
+
+  /** CSS 픽셀 좌표 → 타일 */
+  screenToTile(mx: number, my: number): { x: number; y: number } {
+    return screenToTile(mx - this.offX, my - this.offY);
+  }
+
+  /** 마우스 아래의 엔티티 (스프라이트 영역 기준) */
+  pickEntity(mx: number, my: number, now: number): CEntity | null {
+    let best: CEntity | null = null;
+    let bestDepth = -Infinity;
+    for (const e of this.state.entities.values()) {
+      if (e.dying) continue;
+      const p = this.worldToScreen(this.entityPoint(e, now));
+      const h = e.type === 'item' ? 24 : 48;
+      const w = e.type === 'item' ? 14 : 15;
+      if (mx >= p.sx - w && mx <= p.sx + w && my >= p.sy - h && my <= p.sy + 4) {
+        const pos = entityPos(e, now);
+        const depth = pos.x + pos.y + (e.type === 'item' ? -0.5 : 0);
+        if (depth > bestDepth) {
+          best = e;
+          bestDepth = depth;
+        }
+      }
+    }
+    return best;
+  }
+
+  render(now: number): void {
+    const { ctx, state } = this;
+    const map = state.map;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = '#05050a';
+    ctx.fillRect(0, 0, this.cssW, this.cssH);
+    const me = state.me;
+    if (!map || !me) return;
+    this.prepareMap();
+
+    const focus = this.entityPoint(me, now);
+    this.offX = Math.round(this.cssW / 2 - focus.sx);
+    this.offY = Math.round(this.cssH / 2 - focus.sy + 30);
+
+    if (this.mouse) {
+      this.hoverTile = this.screenToTile(this.mouse.x, this.mouse.y);
+      this.hoverEntity = this.pickEntity(this.mouse.x, this.mouse.y, now);
+    } else {
+      this.hoverTile = null;
+      this.hoverEntity = null;
+    }
+
+    const W = state.mapWidth;
+    const H = state.mapHeight;
+    const minSX = -TILE_W - this.offX;
+    const maxSX = this.cssW + TILE_W - this.offX;
+    const minSY = -TILE_H - 120 - this.offY;
+    const maxSY = this.cssH + TILE_H + WALL_H - this.offY;
+    const visible = (x: number, y: number) => {
+      const t = tileTop(x, y);
+      return t.sx >= minSX && t.sx <= maxSX && t.sy >= minSY && t.sy <= maxSY;
+    };
+
+    ctx.save();
+    ctx.translate(this.offX, this.offY);
+
+    // 1) 바닥
+    for (let y = 0; y < H; y++) {
+      const row = map.tiles[y]!;
+      for (let x = 0; x < W; x++) {
+        if (!visible(x, y)) continue;
+        const ch = row[x]!;
+        const info = tileInfo(ch);
+        const t = tileTop(x, y);
+        if (info.kind === 'liquid') drawLiquid(ctx, info, t.sx, t.sy, x, y, now);
+        else if (info.kind === 'void' || info.kind === 'wall' || this.wallLike.has(y * W + x)) continue;
+        else ctx.drawImage(floorCanvas(ch, Math.floor(hash2(x, y) * 4)), t.sx - HALF_W, t.sy);
+      }
+    }
+
+    // 2) 워프 지점
+    for (const w of map.warps) {
+      if (!visible(w.x, w.y)) continue;
+      const c = tileCenter(w.x, w.y);
+      const pulse = 0.5 + 0.5 * Math.sin(now / 300 + w.x);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(c.sx, c.sy, 2, c.sx, c.sy, 26);
+      g.addColorStop(0, `rgba(140,200,255,${0.55 + pulse * 0.3})`);
+      g.addColorStop(1, 'rgba(80,120,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(c.sx, c.sy, 26, 13, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = `rgba(200,230,255,${0.6})`;
+      ctx.beginPath();
+      ctx.ellipse(c.sx, c.sy, 14 + pulse * 6, 7 + pulse * 3, now / 900, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 3) 마우스 칸 / 이동 목표
+    const ht = this.hoverTile;
+    if (ht && ht.x >= 0 && ht.y >= 0 && ht.x < W && ht.y < H) {
+      const t = tileTop(ht.x, ht.y);
+      diamondPath(ctx, t.sx, t.sy);
+      ctx.strokeStyle = state.walkable(ht.x, ht.y) ? 'rgba(255,255,255,0.35)' : 'rgba(255,80,80,0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    if (this.walkTarget && now < this.walkTarget.until) {
+      const t = tileTop(this.walkTarget.x, this.walkTarget.y);
+      diamondPath(ctx, t.sx, t.sy + 4, TILE_W - 16, TILE_H - 8);
+      ctx.strokeStyle = 'rgba(255,230,120,0.7)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // 4) 바닥 아이템
+    for (const e of state.entities.values()) {
+      if (e.type !== 'item' || !visible(e.x, e.y)) continue;
+      const c = tileCenter(e.x, e.y);
+      ctx.save();
+      ctx.translate(c.sx + ((e.id % 5) - 2) * 3, c.sy + ((e.id % 3) - 1) * 2);
+      drawGroundItem(ctx, e.item ? state.items.get(e.item) : undefined, e.qty ?? 1, now, e.id);
+      ctx.restore();
+    }
+
+    // 5) 대상 표시 (발밑 고리)
+    const target = state.targetId !== null ? state.entities.get(state.targetId) : undefined;
+    if (target && !target.dying) {
+      const c = this.entityPoint(target, now);
+      ctx.strokeStyle = target.type === 'monster' ? 'rgba(255,90,90,0.9)' : 'rgba(120,220,255,0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(c.sx, c.sy, 17, 8, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 6) 깊이 정렬 그리기
+    const list: Drawable[] = [];
+    for (let y = 0; y < H; y++) {
+      const row = map.tiles[y]!;
+      for (let x = 0; x < W; x++) {
+        const ch = row[x]!;
+        const info = tileInfo(ch);
+        const asWall = this.wallLike.get(y * W + x);
+        if (info.kind !== 'wall' && info.kind !== 'tree' && info.kind !== 'object' && !asWall) continue;
+        if (!visible(x, y)) continue;
+        const t = tileTop(x, y);
+        if (info.kind === 'wall' || asWall) {
+          list.push({
+            depth: x + y,
+            order: 0,
+            draw: () => {
+              ctx.drawImage(wallCanvas(asWall ?? ch), t.sx - HALF_W, t.sy - WALL_H);
+              if (asWall) drawFlame(ctx, t.sx, t.sy - WALL_H / 2 + 6, now, 0.9);
+            },
+          });
+        } else {
+          const spr = objectSprite(ch, Math.floor(hash2(x, y, 7) * 4));
+          list.push({
+            depth: x + y,
+            order: 0,
+            draw: () => {
+              const c = tileCenter(x, y);
+              ctx.drawImage(spr.canvas, c.sx - spr.ox, c.sy - spr.oy);
+              if (info.shape === 'torch') drawFlame(ctx, c.sx, c.sy - 44, now);
+            },
+          });
+        }
+      }
+    }
+    for (const e of state.entities.values()) {
+      if (e.type === 'item') continue;
+      const pos = entityPos(e, now);
+      if (!visible(Math.round(pos.x), Math.round(pos.y))) continue;
+      const depth = pos.moving ? Math.max(e.fromX + e.fromY, e.x + e.y) : pos.x + pos.y;
+      list.push({ depth, order: 1, draw: () => this.drawEntity(e, now) });
+    }
+    list.sort((a, b) => a.depth - b.depth || a.order - b.order);
+    for (const d of list) d.draw();
+
+    // 7) 효과
+    this.effects.draw(
+      ctx,
+      now,
+      (id) => {
+        const e = state.entities.get(id);
+        return e ? this.entityPoint(e, now) : null;
+      },
+      (p) => p,
+    );
+
+    // 8) 이름표, 체력바, 말풍선
+    for (const e of state.entities.values()) {
+      if (e.dying) continue;
+      const pos = entityPos(e, now);
+      if (!visible(Math.round(pos.x), Math.round(pos.y))) continue;
+      this.drawLabels(e, now);
+    }
+    ctx.restore();
+
+    // 9) 어둠
+    if (map.dark) this.drawDarkness(now);
+    if (state.self?.ghost) {
+      ctx.fillStyle = 'rgba(60,80,140,0.18)';
+      ctx.fillRect(0, 0, this.cssW, this.cssH);
+    }
+  }
+
+  private drawEntity(e: CEntity, now: number): void {
+    const ctx = this.ctx;
+    const c = this.entityPoint(e, now);
+    const pos = entityPos(e, now);
+    const walk = pos.moving ? pos.t : null;
+    const act = e.actStart && now - e.actStart < ACT_MS ? (now - e.actStart) / ACT_MS : null;
+    const flash = now - e.hitFlash < 120;
+    ctx.save();
+    ctx.translate(c.sx, c.sy);
+    if (e.type === 'player' || e.type === 'npc') {
+      if (e.look) {
+        // 버프 오라
+        if (e.statuses.includes('hide')) ctx.globalAlpha = e.id === this.state.selfId ? 0.45 : 0.18;
+        drawHuman(ctx, e.look, { dir: e.dir, walk, act, actKind: e.actKind, time: now + e.id * 97, ghost: e.ghost, flash });
+      }
+      if (e.role === 'admin' || e.role === 'gm') {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = 'rgba(255,215,0,0.9)';
+        ctx.beginPath();
+        ctx.moveTo(-4, -58);
+        ctx.lineTo(0, -64);
+        ctx.lineTo(4, -58);
+        ctx.lineTo(0, -55);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (e.type === 'monster') {
+      const def = e.def ? this.state.monsters.get(e.def) : undefined;
+      if (def) {
+        const fade = e.dying ? Math.min(1, (now - e.dying) / 500) : undefined;
+        drawMonster(ctx, def.look, { dir: e.dir, walk, act, time: now + e.id * 131, flash, fade });
+      }
+    }
+    // 상태 효과 표시 (발밑 작은 점들)
+    if (e.statuses.length && e.type !== 'npc') {
+      let i = 0;
+      for (const s of e.statuses) {
+        const info = STATUS_INFO[s];
+        if (!info) continue;
+        ctx.fillStyle = info.color;
+        ctx.beginPath();
+        ctx.arc(-10 + i * 6, 6, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+        i++;
+      }
+      if (e.statuses.includes('sleep')) {
+        ctx.fillStyle = '#c8d8ff';
+        ctx.font = `bold 11px ${FONT}`;
+        ctx.fillText('z', 10 + Math.sin(now / 300) * 2, -50);
+      }
+    }
+    ctx.restore();
+  }
+
+  private drawLabels(e: CEntity, now: number): void {
+    const ctx = this.ctx;
+    const c = this.entityPoint(e, now);
+    const hovered = this.hoverEntity === e;
+    const targeted = this.state.targetId === e.id;
+    const monsterDef = e.type === 'monster' && e.def ? this.state.monsters.get(e.def) : undefined;
+    const scale = monsterDef?.look.size ?? 1;
+    const top = c.sy - (e.type === 'item' ? 26 : 56 * Math.max(1, scale * 0.95));
+    ctx.textAlign = 'center';
+    let label: string | null = null;
+    let color = '#ffffff';
+    if (e.type === 'player') {
+      label = e.name;
+      color = e.ghost ? '#a8b8e8' : e.role === 'admin' || e.role === 'gm' ? '#ffd76b' : e.id === this.state.selfId ? '#b8ffb8' : '#ffffff';
+    } else if (e.type === 'npc') {
+      label = e.name;
+      color = '#ffe9a8';
+    } else if (e.type === 'monster' && (hovered || targeted || monsterDef?.boss)) {
+      label = `${e.name} Lv.${e.level}`;
+      color = monsterDef?.boss ? '#ff9f6b' : '#ffb0b0';
+    } else if (e.type === 'item' && hovered) {
+      label = e.item ? `${this.state.itemName(e.item)}${(e.qty ?? 1) > 1 ? ` x${e.qty}` : ''}` : `${(e.qty ?? 0).toLocaleString('ko-KR')} 골드`;
+      color = '#fff3a0';
+    }
+    if (label) {
+      ctx.font = `${e.type === 'npc' || hovered ? 'bold ' : ''}12px ${FONT}`;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.strokeText(label, c.sx, top);
+      ctx.fillStyle = color;
+      ctx.fillText(label, c.sx, top);
+      if (e.type === 'npc' && e.title) {
+        ctx.font = `11px ${FONT}`;
+        ctx.strokeText(`[${e.title}]`, c.sx, top - 13);
+        ctx.fillStyle = '#9fd3ff';
+        ctx.fillText(`[${e.title}]`, c.sx, top - 13);
+      }
+    }
+    // 체력바
+    const showHp =
+      (e.type === 'monster' && (targeted || hovered || now < e.showHpUntil || e.hpPct < 100)) ||
+      (e.type === 'player' && (e.hpPct < 100 || now < e.showHpUntil) && !e.ghost);
+    if (showHp) {
+      const w = 30;
+      const y = top + 4;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(c.sx - w / 2 - 1, y - 1, w + 2, 5);
+      ctx.fillStyle = e.type === 'monster' ? '#e04040' : '#40c060';
+      ctx.fillRect(c.sx - w / 2, y, (w * Math.max(0, e.hpPct)) / 100, 3);
+    }
+    // 말풍선
+    if (e.bubble && now < e.bubble.until) {
+      const text = e.bubble.text.length > 40 ? e.bubble.text.slice(0, 39) + '…' : e.bubble.text;
+      ctx.font = `12px ${FONT}`;
+      const tw = ctx.measureText(text).width;
+      const bx = c.sx - tw / 2 - 6;
+      const by = top - (e.type === 'npc' ? 40 : 30);
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, tw + 12, 18, 6);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillText(text, c.sx, by + 13);
+    }
+  }
+
+  private drawDarkness(now: number): void {
+    const d = this.darkCtx;
+    const me = this.state.me;
+    d.setTransform(1, 0, 0, 1, 0, 0);
+    d.globalCompositeOperation = 'source-over';
+    d.clearRect(0, 0, this.dark.width, this.dark.height);
+    d.fillStyle = 'rgba(4,4,12,0.86)';
+    d.fillRect(0, 0, this.dark.width, this.dark.height);
+    d.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    d.globalCompositeOperation = 'destination-out';
+    const hole = (x: number, y: number, r: number) => {
+      const g = d.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, 'rgba(0,0,0,1)');
+      g.addColorStop(0.55, 'rgba(0,0,0,0.75)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      d.fillStyle = g;
+      d.beginPath();
+      d.arc(x, y, r, 0, Math.PI * 2);
+      d.fill();
+    };
+    if (me) {
+      const p = this.worldToScreen(this.entityPoint(me, now));
+      hole(p.sx, p.sy - 20, 260);
+    }
+    for (const l of this.lights) {
+      const c = this.worldToScreen(tileCenter(l.x, l.y));
+      if (c.sx < -200 || c.sy < -200 || c.sx > this.cssW + 200 || c.sy > this.cssH + 200) continue;
+      const r = l.r * (l.flicker ? 0.93 + 0.07 * Math.sin(now / 120 + l.x * 3) : 1);
+      hole(c.sx, c.sy - 20, r);
+    }
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.drawImage(this.dark, 0, 0);
+    // 따뜻한 횃불빛
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = 'lighter';
+    for (const l of this.lights) {
+      if (!l.flicker) continue;
+      const c = this.worldToScreen(tileCenter(l.x, l.y));
+      if (c.sx < -200 || c.sy < -200 || c.sx > this.cssW + 200 || c.sy > this.cssH + 200) continue;
+      const g = this.ctx.createRadialGradient(c.sx, c.sy - 20, 0, c.sx, c.sy - 20, l.r * 0.7);
+      g.addColorStop(0, 'rgba(255,150,60,0.12)');
+      g.addColorStop(1, 'rgba(255,150,60,0)');
+      this.ctx.fillStyle = g;
+      this.ctx.beginPath();
+      this.ctx.arc(c.sx, c.sy - 20, l.r * 0.7, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
+  // ───────────────────────── 미니맵 ─────────────────────────
+
+  drawMinimap(canvas: HTMLCanvasElement, now: number): void {
+    const map = this.state.map;
+    if (!map) return;
+    const W = this.state.mapWidth;
+    const H = this.state.mapHeight;
+    const cw = 3;
+    const ch = 1.5;
+    const width = Math.ceil((W + H) * cw) + 4;
+    const height = Math.ceil((W + H) * ch) + 4;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      this.minimapBase = null;
+    }
+    const ox = H * cw + 2;
+    const oy = 2;
+    if (!this.minimapBase) {
+      const [base, b] = makeCanvas(width, height);
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const info = tileInfo(map.tiles[y]![x]);
+          if (info.kind === 'void') continue;
+          let color = info.color;
+          if (info.kind === 'wall') color = info.color2;
+          else if (info.kind === 'tree' || info.kind === 'object') color = info.color2;
+          b.fillStyle = color;
+          const sx = ox + (x - y) * cw;
+          const sy = oy + (x + y) * ch;
+          b.beginPath();
+          b.moveTo(sx, sy);
+          b.lineTo(sx + cw, sy + ch);
+          b.lineTo(sx, sy + ch * 2);
+          b.lineTo(sx - cw, sy + ch);
+          b.closePath();
+          b.fill();
+        }
+      }
+      for (const w of map.warps) {
+        b.fillStyle = '#7fd6ff';
+        b.fillRect(ox + (w.x - w.y) * cw - 2, oy + (w.x + w.y) * ch, 4, 3);
+      }
+      this.minimapBase = base;
+    }
+    const c = canvas.getContext('2d')!;
+    c.clearRect(0, 0, width, height);
+    c.drawImage(this.minimapBase, 0, 0);
+    for (const e of this.state.entities.values()) {
+      if (e.type === 'item' || e.dying) continue;
+      const pos = entityPos(e, now);
+      const sx = ox + (pos.x - pos.y) * cw;
+      const sy = oy + (pos.x + pos.y) * ch + ch;
+      if (e.id === this.state.selfId) continue;
+      c.fillStyle = e.type === 'monster' ? '#ff4d4d' : e.type === 'npc' ? '#ffe066' : '#6bd0ff';
+      c.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+    }
+    const me = this.state.me;
+    if (me) {
+      const pos = entityPos(me, now);
+      const sx = ox + (pos.x - pos.y) * cw;
+      const sy = oy + (pos.x + pos.y) * ch + ch;
+      c.fillStyle = '#ffffff';
+      c.strokeStyle = '#000000';
+      c.beginPath();
+      c.arc(sx, sy, 3, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
+    }
+  }
+
+  /** 화면에서 떠오르는 숫자 등을 위해 엔티티 위치를 노출 */
+  locate(id: number, now: number): Point | null {
+    const e = this.state.entities.get(id);
+    return e ? this.entityPoint(e, now) : null;
+  }
+}
+
+export { withAlpha, HALF_H };
