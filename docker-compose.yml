@@ -1,0 +1,21 @@
+# docker compose up -d --build 로 실행합니다.
+services:
+  lod:
+    build: .
+    container_name: legend-of-darkness
+    restart: unless-stopped
+    ports:
+      - "${PORT:-7777}:7777"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: "7777"
+      DATA_DIR: /app/data
+    volumes:
+      # 캐릭터와 설정이 저장되는 곳 (컨테이너를 지워도 남습니다)
+      - lod-data:/app/data
+      # 게임 데이터(아이템/몬스터/맵)를 직접 고쳐 쓰려면 아래 줄의 주석을 푸세요
+      # - ./gamedata:/app/gamedata:ro
+volumes:
+  lod-data:

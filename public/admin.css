@@ -1,0 +1,413 @@
+/* 관리자 페이지 */
+:root {
+  --bg: #f6f5f9;
+  --surface: #ffffff;
+  --surface-2: #f0eef5;
+  --text: #1d1a24;
+  --muted: #6b6578;
+  --line: #e2dfe9;
+  --accent: #6b4fd8;
+  --accent-ink: #ffffff;
+  --gold: #a07a10;
+  --good: #1f8a4c;
+  --bad: #c0392b;
+  --warn: #b7791f;
+  --font: 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0f0d14;
+    --surface: #17141f;
+    --surface-2: #1f1b2a;
+    --text: #ece8f4;
+    --muted: #9d96ad;
+    --line: #2d2839;
+    --accent: #9a84ff;
+    --accent-ink: #120f1a;
+    --gold: #e0b84a;
+    --good: #5ad08a;
+    --bad: #ff7a6b;
+    --warn: #f0b860;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+  font-size: 14px;
+}
+
+input,
+select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  min-width: 0;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.btn {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.btn.danger {
+  color: var(--bad);
+}
+
+.btn.small {
+  padding: 4px 9px;
+  font-size: 13px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* 로그인 */
+.login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.login-card {
+  width: min(380px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-card h1 {
+  font-size: 22px;
+}
+
+/* 레이아웃 */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.top h1 {
+  font-size: 18px;
+}
+
+.top .stats {
+  display: flex;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.nav {
+  display: flex;
+  gap: 4px;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  overflow-x: auto;
+}
+
+.nav button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.nav button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: bold;
+}
+
+main {
+  padding: 20px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.card .label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.card .value {
+  font-size: 26px;
+  font-weight: bold;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.box {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.box h2 {
+  font-size: 15px;
+  margin-bottom: 12px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+tbody tr.click {
+  cursor: pointer;
+}
+
+tbody tr.click:hover {
+  background: var(--surface-2);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.badge.on {
+  color: var(--good);
+}
+
+.badge.ban {
+  color: var(--bad);
+}
+
+.badge.admin {
+  color: var(--gold);
+}
+
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  max-width: min(420px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--good);
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  z-index: 10;
+}
+
+.toast.error {
+  border-left-color: var(--bad);
+}
+
+.detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.detail-head h2 {
+  font-size: 20px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.kv div {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.kv span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.kv b {
+  font-variant-numeric: tabular-nums;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  border-radius: 14px;
+  padding: 3px 4px 3px 10px;
+  font-size: 13px;
+}
+
+.chip button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.input-num {
+  width: 110px;
+}
+
+.input-wide {
+  flex: 1;
+  min-width: 180px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.back {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 600px) {
+  main {
+    padding: 12px;
+  }
+}

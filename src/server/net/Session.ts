@@ -68,16 +68,23 @@ export class Session implements PlayerLink {
   send(msg: S2C): void {
     if (this.closed) return;
     this.queue.push(msg);
-    if (!this.scheduled) {
-      this.scheduled = true;
-      setImmediate(() => this.flush());
-    }
+    this.touch();
+  }
+
+  touch(): void {
+    if (this.closed || this.scheduled) return;
+    this.scheduled = true;
+    setImmediate(() => this.flush());
   }
 
   private flush(): void {
-    this.scheduled = false;
-    if (this.closed) return;
+    if (this.closed) {
+      this.scheduled = false;
+      return;
+    }
+    // 바뀐 상태 메시지를 먼저 대기열에 넣고(이때는 아직 예약 중이라 다시 예약되지 않음) 한 번에 보냅니다
     this.player?.flushDirty();
+    this.scheduled = false;
     if (this.queue.length === 0) return;
     const batch = this.queue;
     this.queue = [];

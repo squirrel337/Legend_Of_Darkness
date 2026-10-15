@@ -21,6 +21,8 @@ export interface PlayerLink {
   readonly ip: string;
   send(msg: S2C): void;
   close(reason: string): void;
+  /** 바뀐 상태를 곧 보내도록 예약 */
+  touch(): void;
 }
 
 export class Player extends Creature {
@@ -251,17 +253,21 @@ export class Player extends Creature {
   markSelf(): void {
     this.dirtySelf = true;
     this.saveDirty = true;
+    this.link.touch();
   }
   markInv(): void {
     this.dirtyInv = true;
     this.saveDirty = true;
+    this.link.touch();
   }
   markAbilities(): void {
     this.dirtyAbilities = true;
     this.saveDirty = true;
+    this.link.touch();
   }
   markVitals(): void {
     this.dirtyVitals = true;
+    this.link.touch();
   }
 
   /** 바뀐 상태를 클라이언트로 보냅니다 (세션이 메시지를 내보내기 직전에 호출) */
