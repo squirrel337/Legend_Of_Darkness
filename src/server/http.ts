@@ -44,6 +44,10 @@ export function createHttpServer(world: World, api: AdminApi): http.Server {
       res.writeHead(400).end();
       return;
     }
+    if (pathname.includes('\0')) {
+      res.writeHead(400).end();
+      return;
+    }
     void (async () => {
       if (await api.handle(req, res, pathname)) return;
       if (pathname === '/api/status') {

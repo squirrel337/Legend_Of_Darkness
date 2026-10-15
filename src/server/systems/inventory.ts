@@ -7,6 +7,7 @@ import {
   ITEM_COOLDOWN_MS,
   isEquipSlot,
 } from '../../shared/constants';
+import { TokenBucket } from '../auth';
 import type { Player } from '../world/Player';
 import { addItem, canFit, equipError, takeFromSlot } from './character';
 import { applyStatus, cleanseDebuffs, healCreature, restoreMana } from './combat';
@@ -14,6 +15,19 @@ import { dropToGround } from './ground';
 import { gainExp } from './progression';
 
 const isSlot = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < INVENTORY_SIZE;
+
+/** 바닥에 버리기 속도 제한 (맵을 아이템으로 도배하지 못하게) */
+const dropBuckets = new WeakMap<Player, TokenBucket>();
+function canDrop(p: Player): boolean {
+  let b = dropBuckets.get(p);
+  if (!b) {
+    b = new TokenBucket(8, 2);
+    dropBuckets.set(p, b);
+  }
+  if (b.take()) return true;
+  p.err('물건을 너무 빠르게 버리고 있습니다.');
+  return false;
+}
 
 /** 아이템을 주고, 소지품이 꽉 차면 발밑에 떨어뜨립니다 */
 export function giveItem(p: Player, itemId: string, qty: number): boolean {
@@ -93,7 +107,7 @@ export function useItem(p: Player, slot: unknown, now = Date.now()): void {
 
 export function dropItem(p: Player, slot: unknown, qty: unknown): void {
   if (!isSlot(slot) || !p.map) return;
-  if (p.isDead) return;
+  if (p.isDead || !p.data.inventory[slot] || !canDrop(p)) return;
   const n = typeof qty === 'number' && Number.isInteger(qty) && qty > 0 ? qty : 1;
   const taken = takeFromSlot(p.data, slot, n);
   if (!taken) return;
@@ -105,6 +119,7 @@ export function dropGold(p: Player, amount: unknown): void {
   if (!p.map || p.isDead) return;
   if (typeof amount !== 'number' || !Number.isInteger(amount) || amount <= 0) return;
   if (amount > p.data.gold) return p.err('골드가 부족합니다.');
+  if (!canDrop(p)) return;
   p.data.gold -= amount;
   p.markInv();
   p.markSelf();

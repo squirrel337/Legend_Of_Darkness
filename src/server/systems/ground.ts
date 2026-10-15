@@ -4,6 +4,9 @@ import { GroundItem } from '../world/GroundItem';
 import type { MapInstance } from '../world/MapInstance';
 import type { World } from '../world/World';
 
+/** 맵 하나에 놓일 수 있는 바닥 아이템 수 (넘치면 가장 오래된 것부터 사라짐) */
+export const MAX_GROUND_ITEMS = 400;
+
 export function dropToGround(
   world: World,
   map: MapInstance,
@@ -14,6 +17,12 @@ export function dropToGround(
   owner: string | null,
 ): GroundItem | null {
   if (qty <= 0) return null;
+  while (map.items.size >= MAX_GROUND_ITEMS) {
+    let oldest: GroundItem | null = null;
+    for (const it of map.items) if (!oldest || it.expiresAt < oldest.expiresAt) oldest = it;
+    if (!oldest) break;
+    map.remove(oldest);
+  }
   const now = Date.now();
   const name = itemId ? (world.data.items.get(itemId)?.name ?? itemId) : `${formatNumber(qty)} 골드`;
   const it = new GroundItem(world.allocId(), itemId, qty, name, owner, now + LOOT_OWNER_MS, now + GROUND_ITEM_TTL_MS);
