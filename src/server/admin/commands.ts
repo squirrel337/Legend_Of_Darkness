@@ -73,6 +73,9 @@ function report(p: Player, r: AdminResult): void {
 /** 사용자에게 그대로 보여 줄 명령어 오류 */
 class CommandError extends Error {}
 
+/** 이름 인자의 앞쪽 @ 를 떼어 냅니다 */
+const nm = (s: string | undefined): string => (s ?? '').replace(/^@/, '');
+
 function exists(ctx: Ctx, name: string): boolean {
   return !!ctx.world.findPlayer(name) || ctx.world.store.has(name);
 }
@@ -126,7 +129,7 @@ const COMMANDS: Command[] = [
     level: 'player',
     usage: '/귓 이름 내용',
     desc: '귓속말을 보냅니다. (@이름 내용 도 가능)',
-    run: ({ world, p }, args) => whisper(world, p, args[0] ?? '', args.slice(1).join(' ')),
+    run: ({ world, p }, args) => whisper(world, p, nm(args[0]), args.slice(1).join(' ')),
   },
   {
     names: ['답장', 'r', 'reply'],
@@ -152,13 +155,13 @@ const COMMANDS: Command[] = [
     desc: '그룹(파티)을 관리합니다. #내용 으로 그룹 대화.',
     run: ({ world, p }, args) => {
       const sub = (args[0] ?? '').toLowerCase();
-      const name = args[1] ?? '';
+      const name = nm(args[1]);
       if (['초대', 'invite', 'i'].includes(sub)) return world.groups.invite(p, name);
       if (['수락', 'accept', 'a', 'y'].includes(sub)) return world.groups.reply(p, true);
       if (['거절', 'decline', 'n'].includes(sub)) return world.groups.reply(p, false);
       if (['탈퇴', 'leave', 'l'].includes(sub)) return world.groups.leave(p);
       if (['추방', 'kick', 'k'].includes(sub)) return world.groups.kick(p, name);
-      if (sub && world.findPlayer(sub)) return world.groups.invite(p, sub);
+      if (sub && world.findPlayer(nm(sub))) return world.groups.invite(p, nm(sub));
       p.err('사용법: /파티 초대 이름 | /파티 수락 | /파티 거절 | /파티 탈퇴 | /파티 추방 이름');
     },
   },
@@ -406,7 +409,7 @@ const COMMANDS: Command[] = [
     desc: '다른 사람을 맵으로 보냅니다.',
     run: (ctx, args) => {
       if (!args[0] || !args[1]) return ctx.p.err('사용법: /보내기 이름 맵 [x y]');
-      report(ctx.p, ctx.admin.teleport(ctx.p.name, args[0], args[1], num(args[2]) ?? undefined, num(args[3]) ?? undefined));
+      report(ctx.p, ctx.admin.teleport(ctx.p.name, nm(args[0]), args[1], num(args[2]) ?? undefined, num(args[3]) ?? undefined));
     },
   },
   {
@@ -415,7 +418,7 @@ const COMMANDS: Command[] = [
     usage: '/소환 이름',
     desc: '접속 중인 사람을 내 옆으로 데려옵니다.',
     run: ({ world, p, admin }, args) => {
-      const t = world.findPlayer(args[0] ?? '');
+      const t = world.findPlayer(nm(args[0]));
       if (!t || !p.map) return p.err('접속 중인 사람이 아닙니다.');
       report(p, admin.teleport(p.name, t.name, p.map.id, p.x, p.y));
     },
@@ -426,7 +429,7 @@ const COMMANDS: Command[] = [
     usage: '/찾아가기 이름',
     desc: '접속 중인 사람에게 갑니다.',
     run: ({ world, p, admin }, args) => {
-      const t = world.findPlayer(args[0] ?? '');
+      const t = world.findPlayer(nm(args[0]));
       if (!t || !t.map) return p.err('접속 중인 사람이 아닙니다.');
       report(p, admin.teleport(p.name, p.name, t.map.id, t.x, t.y));
     },
@@ -470,7 +473,7 @@ const COMMANDS: Command[] = [
     usage: '/정보 이름',
     desc: '캐릭터 정보를 봅니다.',
     run: ({ world, p, admin }, args) => {
-      const d = admin.characterDetail(args[0] ?? p.name);
+      const d = admin.characterDetail(nm(args[0]) || p.name);
       if (!d) return p.err('캐릭터를 찾을 수 없습니다.');
       const cls = world.data.classes.get(d.classId)?.name ?? d.classId;
       p.sys(
@@ -494,7 +497,7 @@ const COMMANDS: Command[] = [
     desc: '접속을 강제로 종료시킵니다.',
     run: (ctx, args) => {
       if (!args[0]) return ctx.p.err('사용법: /추방 이름 [사유]');
-      report(ctx.p, ctx.admin.kick(ctx.p.name, args[0], args.slice(1).join(' ') || undefined));
+      report(ctx.p, ctx.admin.kick(ctx.p.name, nm(args[0]), args.slice(1).join(' ') || undefined));
     },
   },
 
@@ -524,7 +527,7 @@ const COMMANDS: Command[] = [
     run: (ctx, args) => {
       const role = parseRole(args[1]);
       if (!args[0] || !role) return ctx.p.err('사용법: /권한 이름 일반|운영자|관리자');
-      report(ctx.p, ctx.admin.setRole(ctx.p.name, args[0], role));
+      report(ctx.p, ctx.admin.setRole(ctx.p.name, nm(args[0]), role));
     },
   },
   {
@@ -534,7 +537,7 @@ const COMMANDS: Command[] = [
     desc: '접속을 금지합니다.',
     run: (ctx, args) => {
       if (!args[0]) return ctx.p.err('사용법: /금지 이름 [사유]');
-      report(ctx.p, ctx.admin.ban(ctx.p.name, args[0], args.slice(1).join(' ')));
+      report(ctx.p, ctx.admin.ban(ctx.p.name, nm(args[0]), args.slice(1).join(' ')));
     },
   },
   {
@@ -544,7 +547,7 @@ const COMMANDS: Command[] = [
     desc: '접속 금지를 풉니다.',
     run: (ctx, args) => {
       if (!args[0]) return ctx.p.err('사용법: /금지해제 이름');
-      report(ctx.p, ctx.admin.unban(ctx.p.name, args[0]));
+      report(ctx.p, ctx.admin.unban(ctx.p.name, nm(args[0])));
     },
   },
 ];

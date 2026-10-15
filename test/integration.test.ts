@@ -198,6 +198,30 @@ test('@이름 으로 대상을 지정하면 없는 캐릭터일 때 나에게 �
   await player.self((s) => s.level === 32, pm);
 });
 
+test('길드장에게 전직하면 직업이 바뀌고 시작 장비를 착용한다', async () => {
+  const c = await Client.connect(srv.port);
+  create(c, '신입');
+  await c.waitFor('welcome');
+  const town = await c.waitFor('map', (m) => m.map.id === 'town');
+  const master = town.entities.find((e) => e.type === 'npc' && e.def === 'warrior_master')!;
+  // 레벨이 모자라면 거절
+  c.send({ t: 'talk', npc: master.id });
+  await admin.chat(`/보내기 @신입 town ${master.x + 2} ${master.y}`);
+  await new Promise((r) => setTimeout(r, 150));
+  let mark = c.mark;
+  c.send({ t: 'pick', npc: master.id, key: 'class:warrior:yes' });
+  assert.match((await c.waitFor('dialog', () => true, mark)).text, /레벨/);
+  await admin.chat('/레벨 @신입 5');
+  mark = c.mark;
+  c.send({ t: 'pick', npc: master.id, key: 'class:warrior:yes' });
+  const s = await c.self((x) => x.classId === 'warrior', mark);
+  assert.equal(s.equipment.weapon, 'w_warrior_1');
+  assert.equal(s.equipment.armor, 'a_warrior_1');
+  const inv = await c.waitFor('inv', (m) => m.slots.some((x) => x?.item === 'w_common_1'), mark);
+  assert.ok(inv.slots.some((x) => x?.item === 'a_common_1'), '원래 장비는 소지품으로');
+  c.close();
+});
+
 test('NPC 상점에서 물건을 산다', async () => {
   await admin.chat('/보내기 모험가 town 15 20');
   const p = srv.world.findPlayer('모험가')!;
@@ -288,8 +312,10 @@ test('관리자 REST API: 인증, 목록, 접속 중인 캐릭터 즉시 반영'
   assert.equal(login.status, 200);
   const token = login.json.token as string;
   const list = await http('/api/admin/characters', undefined, token);
-  const names = (list.json.characters as { name: string }[]).map((c) => c.name).sort();
-  assert.deepEqual(names, ['관리자', '모험가']);
+  const names = (list.json.characters as { name: string }[]).map((c) => c.name);
+  for (const n of ['관리자', '모험가', '신입']) assert.ok(names.includes(n), n);
+  const search = await http(`/api/admin/characters?q=${encodeURIComponent('모험')}`, undefined, token);
+  assert.deepEqual((search.json.characters as { name: string }[]).map((c) => c.name), ['모험가']);
   const mark = player.mark;
   const r = await http(`/api/admin/characters/${encodeURIComponent('모험가')}/setLevel`, { level: 77 }, token);
   assert.equal(r.status, 200, String(r.json.msg));
