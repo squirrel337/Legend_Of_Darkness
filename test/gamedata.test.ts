@@ -83,3 +83,14 @@ test('잘못된 데이터는 어디가 틀렸는지 알려 준다', () => {
   assert.throws(() => GameData.load(tmp), (e: unknown) => e instanceof GameDataError && e.message.includes('no_such_item'));
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('NPC 의상(outfit)은 직업 이름이어야 한다', () => {
+  for (const n of gd.npcs.values()) if (n.look.outfit) assert.ok(gd.classes.has(n.look.outfit), `${n.id}: ${n.look.outfit}`);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-gd-'));
+  fs.cpSync(DIR, tmp, { recursive: true });
+  const npcs = JSON.parse(fs.readFileSync(path.join(tmp, 'npcs.json'), 'utf8'));
+  npcs[0].look.outfit = 'pirate';
+  fs.writeFileSync(path.join(tmp, 'npcs.json'), JSON.stringify(npcs));
+  assert.throws(() => GameData.load(tmp), (e: unknown) => e instanceof GameDataError && e.message.includes('outfit'));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

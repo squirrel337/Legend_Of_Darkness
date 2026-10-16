@@ -139,6 +139,8 @@ test('길드장에게 전직하면 직업이 바뀌고 시작 장비를 착용�
   const s = await c.self((x) => x.classId === 'warrior', mark);
   assert.equal(s.equipment.weapon, 'w_warrior_1');
   assert.equal(s.equipment.armor, 'a_warrior_1');
+  // 직업 갑옷을 입으면 그 직업의 의상으로 보임
+  assert.equal(srv.world.findPlayer('신입')!.look().outfit, 'warrior');
   const inv = await c.waitFor('inv', (m) => m.slots.some((x) => x?.item === 'w_common_1'), mark);
   assert.ok(inv.slots.some((x) => x?.item === 'a_common_1'), '원래 장비는 소지품으로');
   c.close();

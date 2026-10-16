@@ -185,6 +185,7 @@ export class GameData {
     if (this.npcs.has(n.id)) fail(where, '중복된 id 입니다.');
     if (!isStr(n.name)) fail(where, 'name 이 필요합니다.');
     if (!isObj(n.look)) fail(where, 'look 이 필요합니다.');
+    if (n.look.outfit !== undefined && !isClassId(n.look.outfit)) fail(where, `look.outfit 은 ${CLASS_IDS.join('/')} 중 하나여야 합니다.`);
     if (!Array.isArray(n.services)) fail(where, 'services 배열이 필요합니다.');
     for (const s of n.services) {
       if (!isObj(s) || !SERVICE_TYPES.includes(s.type as string)) fail(where, `알 수 없는 서비스 ${JSON.stringify(s)}`);

@@ -1,8 +1,17 @@
 // 접속 / 캐릭터 만들기 화면
 import { HAIR_COLORS, HAIR_STYLES, NAME_REGEX, PASSWORD_MIN, type Dir } from '../../shared/constants';
-import type { PublicServerInfo } from '../../shared/types';
-import { drawHuman } from '../render/sprites';
+import type { HumanLook, PublicServerInfo } from '../../shared/types';
+import { drawChibi, portraitUrl } from '../render/chibi';
 import { h } from './dom';
+
+/** 접속 화면 아래에 늘어선 직업별 캐릭터 일러스트 */
+const LINEUP: { name: string; look: HumanLook; flip?: boolean }[] = [
+  { name: '전사', look: { gender: 'm', hairStyle: 0, hairColor: '#5a3a22', body: '#b0b8c0', body2: '#ff5c5c', outfit: 'warrior', weapon: 'sword', weaponColor: '#ff7b6b', helmet: '#c9cfd6', shield: '#b0b8c0' } },
+  { name: '도적', look: { gender: 'f', hairStyle: 5, hairColor: '#e8d08a', body: '#3c3f5a', body2: '#ff5c5c', outfit: 'rogue', weapon: 'dagger', weaponColor: '#c9c9c9' } },
+  { name: '마법사', look: { gender: 'm', hairStyle: 2, hairColor: '#d0d0d0', body: '#7a2a5a', body2: '#ffe680', outfit: 'wizard', weapon: 'staff', weaponColor: '#ff8a5a' } },
+  { name: '성직자', look: { gender: 'f', hairStyle: 2, hairColor: '#2a4d8f', body: '#ffffff', body2: '#7fb7ff', outfit: 'priest', weapon: 'mace', weaponColor: '#ffe680' }, flip: true },
+  { name: '무도가', look: { gender: 'f', hairStyle: 3, hairColor: '#8b5a2b', body: '#b03030', body2: '#ffe680', outfit: 'monk', weapon: 'claw', weaponColor: '#c9c9c9' }, flip: true },
+];
 
 export interface LoginHandlers {
   login(name: string, password: string): void;
@@ -56,7 +65,7 @@ export class LoginScreen {
     const cpass2 = h('input', { type: 'password', placeholder: '비밀번호 확인', autocomplete: 'new-password', maxLength: 64 });
     const invite = h('input', { type: 'text', placeholder: '관리자에게 받은 초대 코드', maxLength: 100 });
     this.inviteRow = h('label', { class: 'hidden' }, '초대 코드', invite);
-    this.preview = h('canvas', { class: 'preview', width: 120, height: 130 });
+    this.preview = h('canvas', { class: 'preview', width: 150, height: 170 });
     const genderBtns = (['m', 'f'] as const).map((g) =>
       h('button', { type: 'button', class: `btn small ${g === this.gender ? 'active' : ''}`, onclick: () => this.setGender(g, genderBtns) }, g === 'm' ? '남자' : '여자'),
     );
@@ -137,6 +146,18 @@ export class LoginScreen {
         this.msg,
         h('div', { class: 'login-foot' }, '이 게임은 어둠의 전설에서 영감을 받아 새로 만든 팬 프로젝트이며, 넥슨의 공식 서비스가 아닙니다.'),
       ),
+      h(
+        'div',
+        { class: 'login-lineup', 'aria-hidden': 'true' },
+        ...LINEUP.map((c) =>
+          h(
+            'div',
+            { class: 'lineup-card' },
+            h('img', { src: portraitUrl(c.look, 170, 210, 3.0, c.flip ? 2 : 1), alt: '', draggable: false }),
+            h('span', null, c.name),
+          ),
+        ),
+      ),
     );
     root.appendChild(this.el);
     const tick = (t: number) => {
@@ -178,13 +199,13 @@ export class LoginScreen {
     const ctx = this.preview.getContext('2d')!;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.preview.width, this.preview.height);
-    ctx.translate(60, 112);
-    ctx.scale(2, 2);
+    ctx.translate(75, 156);
+    ctx.scale(2.2, 2.2);
     const dir = (Math.floor(t / 1500) % 4) as Dir;
-    drawHuman(
+    drawChibi(
       ctx,
-      { gender: this.gender, hairStyle: this.hairStyle, hairColor: HAIR_COLORS[this.hairColor]!, body: '#8a7a66', weapon: 'stick', weaponColor: '#8a6a45' },
-      { dir, walk: (t % 600) / 600, act: null, time: t },
+      { gender: this.gender, hairStyle: this.hairStyle, hairColor: HAIR_COLORS[this.hairColor]!, body: '#a08a6a', weapon: 'stick', weaponColor: '#8a6a45' },
+      { dir, walk: (t % 460) / 460, step: Math.floor(t / 460) & 1, act: null, time: t },
     );
   }
 

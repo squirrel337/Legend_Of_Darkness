@@ -13,7 +13,9 @@ import { Net } from './net';
 import { Renderer } from './render/renderer';
 import { ClientState, entityFromSnapshot, entityPos, snapTo, startMove, type CEntity } from './state';
 import { ChatBox } from './ui/chat';
+import { CharWindow } from './ui/charwin';
 import { h } from './ui/dom';
+import { BottomFrame } from './ui/frame';
 import { GmTool } from './ui/gm';
 import { Help } from './ui/help';
 import { Hud } from './ui/hud';
@@ -31,8 +33,10 @@ export class Game {
   readonly state = new ClientState();
   readonly net = new Net();
   readonly renderer: Renderer;
+  frame!: BottomFrame;
   hud!: Hud;
   chat!: ChatBox;
+  charWin!: CharWindow;
   panel!: Panel;
   windows!: Windows;
   gm!: GmTool;
@@ -96,12 +100,15 @@ export class Game {
     if (this.ingame) return;
     this.ingame = true;
     this.root.classList.add('ingame');
-    this.hud = new Hud(this.root, this);
-    this.panel = new Panel(this.root, this);
-    this.chat = new ChatBox(this.root, (text) => this.sendChat(text));
+    document.body.classList.add('ingame');
+    this.frame = new BottomFrame(this.root);
+    this.chat = new ChatBox(this.root, this.frame, (text) => this.sendChat(text));
+    this.hud = new Hud(this.root, this.frame, this);
     this.windows = new Windows(this.root, this);
     this.gm = new GmTool(this.root, this);
     this.help = new Help(this.root);
+    this.charWin = new CharWindow(this.root, this);
+    this.panel = new Panel(this.frame, this);
     this.renderer.resize();
   }
 
@@ -143,7 +150,10 @@ export class Game {
         st.self = m.s;
         st.gold = m.s.gold;
         this.hud.updateSelf();
+        this.hud.updateFace();
+        this.panel.updateButtons();
         if (this.panel.tab === 'stats') this.panel.render('stats');
+        this.charWin.refresh();
         if (prev && prev.role !== m.s.role) this.gm.close();
         break;
       }
@@ -162,6 +172,7 @@ export class Game {
         if (this.panel.tab === 'inv') this.panel.render('inv');
         this.hud.updateGold();
         this.windows.refreshShopGold();
+        this.charWin.refresh();
         break;
       case 'abilities':
         st.skills = m.skills;
@@ -192,7 +203,10 @@ export class Game {
           old.statuses = e.statuses;
           snapTo(old, e.x, e.y);
         } else st.entities.set(e.id, e);
-        if (e.id === st.selfId) this.hud.updateMap();
+        if (e.id === st.selfId) {
+          this.hud.updateMap();
+          this.hud.updateFace();
+        }
         break;
       }
       case 'remove': {
@@ -273,6 +287,10 @@ export class Game {
         e.level = m.level;
         e.classId = m.classId;
         e.role = m.role;
+        if (e.id === st.selfId) {
+          this.charWin.refresh();
+          this.hud.updateFace();
+        }
         break;
       }
       case 'statuses': {
@@ -343,9 +361,9 @@ export class Game {
         this.hud.tick();
         this.windows.checkDistance();
       }
-      if (now - this.lastMinimap > 150) {
+      if (now - this.lastMinimap > 150 && this.hud.showMinimap) {
         this.lastMinimap = now;
-        this.renderer.drawMinimap(this.panel.minimap, now);
+        this.renderer.drawMinimap(this.hud.minimap, now);
       }
     } else if (this.ingame) {
       this.renderer.render(now);
@@ -685,8 +703,14 @@ export class Game {
         return this.panel.setTab('skills');
       case 'KeyD':
         return this.panel.setTab('spells');
+      case 'KeyF':
+        return this.panel.setTab('chat');
       case 'KeyG':
         return this.panel.setTab('stats');
+      case 'KeyC':
+        return this.charWin.toggle();
+      case 'KeyM':
+        return this.hud.toggleMinimap();
       case 'KeyH':
         return this.help.toggle();
       case 'KeyE':
@@ -717,6 +741,7 @@ export class Game {
       case 'Escape':
         if (this.help.open) return this.help.toggle(false);
         if (this.windows.closeTop()) return;
+        if (this.charWin.open) return this.charWin.close();
         if (this.gm.open) return this.gm.close();
         this.state.targetId = null;
         this.path = [];

@@ -252,6 +252,8 @@ export interface HumanLook {
   /** 옷 색 */
   body: string;
   body2?: string;
+  /** 옷 모양 (직업 의상). 없으면 평민 옷 */
+  outfit?: ClassId;
   /** 손에 든 무기 모양 */
   weapon?: IconShape;
   weaponColor?: string;

@@ -1,7 +1,8 @@
 // 떠 있는 창들: NPC 대화, 상점, 기술 배우기, 창고, 그룹 초대, 입력 상자
 import type { DialogOption, InvSlot } from '../../shared/protocol';
 import type { Game } from '../game';
-import { iconUrl } from '../render/icons';
+import { portraitUrl } from '../render/chibi';
+import { abilityIconUrl, iconUrl } from '../render/icons';
 import { fmt, h, makeDraggable } from './dom';
 import { abilityTooltip, itemTooltip } from './tooltip';
 
@@ -124,7 +125,16 @@ export class Windows {
         ),
       ),
     );
-    this.dialog.show(title ? `${name} — ${title}` : name, h('div', { class: 'dialog-text' }, ...paragraphs), opts);
+    const look = this.game.state.entities.get(npc)?.look;
+    this.dialog.show(
+      title ? `${name} — ${title}` : name,
+      h(
+        'div',
+        { class: 'dialog-wrap' },
+        look ? h('div', { class: 'npc-portrait' }, h('img', { src: portraitUrl(look, 150, 190, 2.9), alt: name, draggable: false })) : null,
+        h('div', { class: 'dialog-main' }, h('div', { class: 'dialog-text' }, ...paragraphs), opts),
+      ),
+    );
   }
 
   /** 대화창이 열려 있을 때 숫자키로 선택지 고르기 */
@@ -207,7 +217,7 @@ export class Windows {
       const row = h(
         'div',
         { class: `shop-row ${a.learned ? 'learned' : can ? '' : 'unusable'}` },
-        h('img', { src: iconUrl(def.icon, 30), alt: '' }),
+        h('img', { src: abilityIconUrl(def.icon, 30), alt: '' }),
         h('div', { class: 'shop-name' }, def.name, h('small', null, ` ${def.kind === 'skill' ? '기술' : '마법'} · Lv.${a.level}`)),
         h('div', { class: 'shop-price' }, a.price ? `${fmt(a.price)} G` : '무료'),
         a.learned

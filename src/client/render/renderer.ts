@@ -4,7 +4,8 @@ import { tileInfo } from '../../shared/tiles';
 import { entityPos, type CEntity, type ClientState } from '../state';
 import { Effects, type Point } from './effects';
 import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
-import { drawGroundItem, drawHuman, drawMonster } from './sprites';
+import { drawChibiFast, type ChibiPose } from './chibi';
+import { drawGroundItem, drawMonster } from './sprites';
 import { drawFlame, drawLiquid, floorCanvas, objectSprite, wallCanvas } from './tiles';
 
 const ACT_MS = 320;
@@ -36,6 +37,8 @@ export class Renderer {
   private lights: { x: number; y: number; r: number; flicker: boolean }[] = [];
   private mapKey = '';
   private minimapBase: HTMLCanvasElement | null = null;
+  /** 반투명/번쩍임 효과를 위해 캐릭터 하나를 먼저 그리는 작은 캔버스 */
+  private spriteBuf: [HTMLCanvasElement, CanvasRenderingContext2D] | null = null;
 
   constructor(canvas: HTMLCanvasElement, private readonly state: ClientState) {
     this.canvas = canvas;
@@ -109,8 +112,8 @@ export class Renderer {
     for (const e of this.state.entities.values()) {
       if (e.dying) continue;
       const p = this.worldToScreen(this.entityPoint(e, now));
-      const h = e.type === 'item' ? 24 : 48;
-      const w = e.type === 'item' ? 14 : 15;
+      const h = e.type === 'item' ? 24 : e.type === 'monster' ? 48 : 58;
+      const w = e.type === 'item' ? 14 : e.type === 'monster' ? 15 : 14;
       if (mx >= p.sx - w && mx <= p.sx + w && my >= p.sy - h && my <= p.sy + 4) {
         const pos = entityPos(e, now);
         const depth = pos.x + pos.y + (e.type === 'item' ? -0.5 : 0);
@@ -314,27 +317,34 @@ export class Renderer {
     ctx.save();
     ctx.translate(c.sx, c.sy);
     if (e.type === 'player' || e.type === 'npc') {
-      if (e.look) {
-        // 버프 오라
-        if (e.statuses.includes('hide')) ctx.globalAlpha = e.id === this.state.selfId ? 0.45 : 0.18;
-        drawHuman(ctx, e.look, { dir: e.dir, walk, act, actKind: e.actKind, time: now + e.id * 97, ghost: e.ghost, flash });
+      const look = e.look;
+      if (look) {
+        const pose: ChibiPose = { dir: e.dir, walk, step: (e.x + e.y) & 1, act, actKind: e.actKind, time: now + e.id * 97, ghost: e.ghost };
+        const hidden = e.statuses.includes('hide');
+        const alpha = hidden ? (e.id === this.state.selfId ? 0.45 : 0.18) : e.ghost ? 0.62 : 1;
+        if (alpha < 1 || flash) this.drawBuffered((b) => drawChibiFast(b, look, pose, this.dpr), alpha, flash);
+        else drawChibiFast(ctx, look, pose, this.dpr);
       }
       if (e.role === 'admin' || e.role === 'gm') {
-        ctx.globalAlpha = 1;
         ctx.fillStyle = 'rgba(255,215,0,0.9)';
+        ctx.strokeStyle = 'rgba(60,40,0,0.8)';
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(-4, -58);
-        ctx.lineTo(0, -64);
-        ctx.lineTo(4, -58);
-        ctx.lineTo(0, -55);
+        ctx.moveTo(-4, -70);
+        ctx.lineTo(0, -76);
+        ctx.lineTo(4, -70);
+        ctx.lineTo(0, -67);
         ctx.closePath();
         ctx.fill();
+        ctx.stroke();
       }
     } else if (e.type === 'monster') {
       const def = e.def ? this.state.monsters.get(e.def) : undefined;
       if (def) {
         const fade = e.dying ? Math.min(1, (now - e.dying) / 500) : undefined;
-        drawMonster(ctx, def.look, { dir: e.dir, walk, act, time: now + e.id * 131, flash, fade });
+        const pose = { dir: e.dir, walk, act, time: now + e.id * 131, ...(fade !== undefined ? { fade } : {}) };
+        if (flash) this.drawBuffered((b) => drawMonster(b, def.look, pose), 1, true);
+        else drawMonster(ctx, def.look, pose);
       }
     }
     // 상태 효과 표시 (발밑 작은 점들)
@@ -352,9 +362,45 @@ export class Renderer {
       if (e.statuses.includes('sleep')) {
         ctx.fillStyle = '#c8d8ff';
         ctx.font = `bold 11px ${FONT}`;
-        ctx.fillText('z', 10 + Math.sin(now / 300) * 2, -50);
+        ctx.fillText('z', 10 + Math.sin(now / 300) * 2, -62);
       }
     }
+    ctx.restore();
+  }
+
+  /**
+   * 작은 캔버스에 먼저 그린 뒤 투명도/번쩍임을 적용해 옮겨 그립니다.
+   * (겹친 부분이 진해지지 않고, 번쩍임이 배경까지 하얗게 만들지 않음)
+   */
+  private drawBuffered(draw: (b: CanvasRenderingContext2D) => void, alpha: number, flash: boolean): void {
+    const W = 200;
+    const H = 190;
+    const OX = 100;
+    const OY = 165;
+    const s = this.dpr;
+    if (!this.spriteBuf) this.spriteBuf = makeCanvas(W * s, H * s);
+    const [buf, b] = this.spriteBuf;
+    if (buf.width !== Math.ceil(W * s)) {
+      buf.width = Math.ceil(W * s);
+      buf.height = Math.ceil(H * s);
+    }
+    b.setTransform(1, 0, 0, 1, 0, 0);
+    b.globalCompositeOperation = 'source-over';
+    b.globalAlpha = 1;
+    b.clearRect(0, 0, buf.width, buf.height);
+    b.setTransform(s, 0, 0, s, OX * s, OY * s);
+    draw(b);
+    if (flash) {
+      b.setTransform(1, 0, 0, 1, 0, 0);
+      b.globalCompositeOperation = 'source-atop';
+      b.fillStyle = 'rgba(255,255,255,0.6)';
+      b.fillRect(0, 0, buf.width, buf.height);
+      b.globalCompositeOperation = 'source-over';
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.drawImage(buf, -OX, -OY, W, H);
     ctx.restore();
   }
 
@@ -365,7 +411,7 @@ export class Renderer {
     const targeted = this.state.targetId === e.id;
     const monsterDef = e.type === 'monster' && e.def ? this.state.monsters.get(e.def) : undefined;
     const scale = monsterDef?.look.size ?? 1;
-    const top = c.sy - (e.type === 'item' ? 26 : 56 * Math.max(1, scale * 0.95));
+    const top = c.sy - (e.type === 'item' ? 26 : e.type === 'monster' ? 56 * Math.max(1, scale * 0.95) : 66);
     ctx.textAlign = 'center';
     let label: string | null = null;
     let color = '#ffffff';

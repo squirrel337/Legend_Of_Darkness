@@ -1,27 +1,24 @@
-// 오른쪽 창: 미니맵 + 소지품/기술/마법/능력치 탭
-import {
-  ELEMENT_NAMES,
-  EQUIP_SLOTS,
-  EQUIP_SLOT_NAMES,
-  INVENTORY_SIZE,
-  STAT_KEYS,
-  STAT_NAMES,
-  circleOf,
-  type EquipSlot,
-} from '../../shared/constants';
+// 아래 패널의 가운데 칸(소지품/기술/마법/대화/능력치)과 오른쪽 단추들
+import { ELEMENT_NAMES, INVENTORY_SIZE, STAT_KEYS, STAT_NAMES, circleOf } from '../../shared/constants';
 import type { Game } from '../game';
-import { iconUrl } from '../render/icons';
+import { abilityIconUrl, iconUrl } from '../render/icons';
 import { clear, fmt, h } from './dom';
+import { svgIcon, type BottomFrame } from './frame';
 import { abilityTooltip, itemTooltip } from './tooltip';
 
-export type TabId = 'inv' | 'skills' | 'spells' | 'stats';
-const TAB_KEYS: Record<TabId, string> = { inv: 'A', skills: 'S', spells: 'D', stats: 'G' };
-const TAB_NAMES: Record<TabId, string> = { inv: '소지품', skills: '기술', spells: '마법', stats: '능력치' };
+export type TabId = 'inv' | 'skills' | 'spells' | 'chat' | 'stats';
+const TABS: { id: TabId; key: string; name: string; icon: string }[] = [
+  { id: 'inv', key: 'A', name: '소지품', icon: 'bag' },
+  { id: 'skills', key: 'S', name: '기술', icon: 'sword' },
+  { id: 'spells', key: 'D', name: '마법', icon: 'spark' },
+  { id: 'chat', key: 'F', name: '대화', icon: 'talk' },
+  { id: 'stats', key: 'G', name: '능력치', icon: 'stats' },
+];
 const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
+/** 칸 수 (3줄 x 16칸) */
+const PANE_SLOTS = 48;
 
 export class Panel {
-  readonly el: HTMLElement;
-  readonly minimap: HTMLCanvasElement;
   private readonly tabs = new Map<TabId, HTMLButtonElement>();
   private readonly bodies = new Map<TabId, HTMLElement>();
   tab: TabId = 'skills';
@@ -29,38 +26,51 @@ export class Panel {
   /** 상점 판매/창고 맡기기 모드일 때 소지품 클릭 동작 */
   invMode: 'normal' | 'sell' | 'deposit' = 'normal';
   private readonly invModeBanner: HTMLElement;
-  collapsed = false;
+  private readonly gmBtn: HTMLButtonElement;
+  private readonly recallBtn: HTMLButtonElement;
 
   constructor(
-    root: HTMLElement,
+    frame: BottomFrame,
     private readonly game: Game,
   ) {
-    this.minimap = h('canvas', { class: 'minimap' });
-    const tabBar = h('div', { class: 'panel-tabs' });
-    for (const id of ['inv', 'skills', 'spells', 'stats'] as TabId[]) {
-      const b = h('button', { class: 'ptab', onclick: () => this.setTab(id) }, TAB_NAMES[id], h('small', null, TAB_KEYS[id]));
-      this.tabs.set(id, b);
-      tabBar.appendChild(b);
-      this.bodies.set(id, h('div', { class: 'panel-body hidden' }));
+    const tabRow = h('div', { class: 'tab-btns' });
+    for (const t of TABS) {
+      const b = h('button', { class: 'tab-btn', title: `${t.name} (${t.key})`, onclick: () => this.setTab(t.id) }, svgIcon(t.icon), h('span', { class: 'k' }, t.key));
+      this.tabs.set(t.id, b);
+      tabRow.appendChild(b);
+      const body = h('div', { class: `pane-body pane-${t.id} hidden` });
+      this.bodies.set(t.id, body);
+      frame.pane.appendChild(body);
     }
     this.invModeBanner = h('div', { class: 'inv-mode hidden' });
-    const toggle = h('button', { class: 'panel-toggle', title: '창 접기/펴기', onclick: () => this.toggle() }, '≡');
-    this.el = h(
-      'div',
-      { class: 'panel' },
-      toggle,
-      h('div', { class: 'minimap-wrap' }, this.minimap),
-      tabBar,
-      this.invModeBanner,
-      ...this.bodies.values(),
+    frame.pane.appendChild(this.invModeBanner);
+    const menu = (icon: string, label: string, title: string, onclick: () => void) =>
+      h('button', { class: 'menu-btn', title, onclick }, svgIcon(icon), h('span', null, label));
+    this.gmBtn = menu('crown', '운영자', '운영자 도구 (F2)', () => game.gm.toggle());
+    this.recallBtn = menu('home', '귀환', '유령일 때 마을로 돌아가기 (R)', () => game.recall());
+    this.gmBtn.classList.add('hidden');
+    this.recallBtn.classList.add('hidden');
+    frame.right.append(
+      tabRow,
+      h(
+        'div',
+        { class: 'menu-btns' },
+        menu('person', '캐릭터', '캐릭터 정보와 장비 (C)', () => game.charWin.toggle()),
+        menu('map', '지도', '지도 켜기/끄기 (M)', () => game.hud.toggleMinimap()),
+        menu('help', '도움말', '조작 방법 (H)', () => game.help.toggle()),
+        this.gmBtn,
+        this.recallBtn,
+      ),
     );
-    root.appendChild(this.el);
+    this.bodies.get('chat')!.appendChild(game.chat.log);
     this.setTab('skills');
   }
 
-  toggle(): void {
-    this.collapsed = !this.collapsed;
-    this.el.classList.toggle('collapsed', this.collapsed);
+  /** 권한/유령 상태에 따라 단추를 보이거나 숨깁니다 */
+  updateButtons(): void {
+    const s = this.game.state.self;
+    this.gmBtn.classList.toggle('hidden', !s || s.role === 'player');
+    this.recallBtn.classList.toggle('hidden', !s?.ghost);
   }
 
   setTab(id: TabId): void {
@@ -68,23 +78,26 @@ export class Panel {
     for (const [k, b] of this.tabs) b.classList.toggle('active', k === id);
     for (const [k, b] of this.bodies) b.classList.toggle('hidden', k !== id);
     this.render(id);
-    if (this.collapsed) this.toggle();
+    if (id === 'chat') {
+      const log = this.game.chat.log;
+      log.scrollTop = log.scrollHeight;
+    }
   }
 
   setInvMode(mode: 'normal' | 'sell' | 'deposit'): void {
     this.invMode = mode;
     this.invModeBanner.classList.toggle('hidden', mode === 'normal');
     this.invModeBanner.textContent =
-      mode === 'sell' ? '판매 모드: 팔 물건을 클릭하세요 (Shift+클릭: 전부)' : mode === 'deposit' ? '창고 모드: 맡길 물건을 클릭하세요' : '';
+      mode === 'sell' ? '판매: 팔 물건을 클릭 (Shift+클릭: 전부)' : mode === 'deposit' ? '창고: 맡길 물건을 클릭' : '';
     if (mode !== 'normal') this.setTab('inv');
-    else this.render('inv');
+    else if (this.tab === 'inv') this.render('inv');
   }
 
   render(id: TabId = this.tab): void {
     if (id === 'inv') this.renderInventory();
     else if (id === 'skills') this.renderAbilities('skill');
     else if (id === 'spells') this.renderAbilities('spell');
-    else this.renderStats();
+    else if (id === 'stats') this.renderStats();
   }
 
   private renderInventory(): void {
@@ -120,15 +133,7 @@ export class Panel {
       this.wireDrag(slot, 'inv', i);
       grid.appendChild(slot);
     }
-    body.append(
-      grid,
-      h(
-        'div',
-        { class: 'inv-foot' },
-        h('span', null, `${fmt(st.gold)} 골드`),
-        h('span', { class: 'hint' }, '클릭: 사용/장비 · 우클릭: 버리기 · 끌어서 이동'),
-      ),
-    );
+    body.appendChild(grid);
   }
 
   private wireDrag(el: HTMLElement, kind: 'inv' | 'skill' | 'spell', idx: number): void {
@@ -155,29 +160,24 @@ export class Panel {
     clear(body);
     const st = this.game.state;
     const list = kind === 'skill' ? st.skills : st.spells;
-    if (list.length === 0) {
-      body.appendChild(
-        h(
-          'div',
-          { class: 'empty-msg' },
-          kind === 'skill'
-            ? '배운 기술이 없습니다. 5레벨이 되면 길드에서 직업을 고르고 기술을 배울 수 있습니다.'
-            : '배운 마법이 없습니다. 마법사/성직자 길드에서 마법을 배울 수 있습니다.',
-        ),
-      );
-      return;
-    }
     const grid = h('div', { class: 'slot-grid' });
     this.cdEls.clear();
-    list.forEach((id, i) => {
-      const def = st.abilities.get(id);
-      if (!def) return;
+    for (let i = 0; i < PANE_SLOTS; i++) {
+      const id = list[i];
+      const def = id ? st.abilities.get(id) : undefined;
+      if (!id || !def) {
+        const empty = h('div', { class: 'slot empty' }, i < 10 ? h('span', { class: 'hotkey' }, HOTKEYS[i]) : null);
+        // 빈 칸에 놓으면 맨 뒤로 옮김
+        if (list.length > 0) this.wireDrag(empty, kind, list.length - 1);
+        grid.appendChild(empty);
+        continue;
+      }
       const cd = h('div', { class: 'cd' });
       this.cdEls.set(id, cd);
       const slot = h(
         'div',
         { class: 'slot ability', draggable: true },
-        h('img', { src: iconUrl(def.icon), alt: def.name, draggable: false }),
+        h('img', { src: abilityIconUrl(def.icon), alt: def.name, draggable: false }),
         cd,
         i < 10 ? h('span', { class: 'hotkey' }, HOTKEYS[i]) : null,
         def.mp ? h('span', { class: 'mp-cost' }, String(def.mp)) : null,
@@ -186,8 +186,19 @@ export class Panel {
       this.game.tooltip.attach(slot, () => abilityTooltip(def));
       this.wireDrag(slot, kind, i);
       grid.appendChild(slot);
-    });
-    body.append(grid, h('div', { class: 'inv-foot' }, h('span', { class: 'hint' }, '숫자키/클릭: 사용 · 마법은 클릭으로 지정한 대상에게')));
+    }
+    body.appendChild(grid);
+    if (list.length === 0) {
+      body.appendChild(
+        h(
+          'div',
+          { class: 'pane-empty' },
+          kind === 'skill'
+            ? '배운 기술이 없습니다. 5레벨이 되면 마을의 길드에서 직업을 고르고 기술을 배울 수 있습니다.'
+            : '배운 마법이 없습니다. 마법사·성직자 길드에서 마법을 배울 수 있습니다.',
+        ),
+      );
+    }
   }
 
   /** 매 프레임: 재사용 대기 표시 */
@@ -201,7 +212,7 @@ export class Panel {
       }
       const p = (cd.end - now) / (cd.end - cd.start);
       el.style.display = 'block';
-      el.style.background = `conic-gradient(rgba(0,0,0,0.65) ${p * 360}deg, transparent 0)`;
+      el.style.background = `conic-gradient(rgba(0,0,0,0.68) ${p * 360}deg, transparent 0)`;
     }
   }
 
@@ -211,22 +222,7 @@ export class Panel {
     const st = this.game.state;
     const s = st.self;
     if (!s) return;
-    const cls = st.className(s.classId);
-    const eqGrid = h('div', { class: 'equip-grid' });
-    for (const slot of EQUIP_SLOTS) {
-      const id = s.equipment[slot];
-      const def = id ? st.items.get(id) : undefined;
-      const el = h(
-        'div',
-        { class: `slot equip ${def ? '' : 'empty'}`, title: EQUIP_SLOT_NAMES[slot] },
-        def ? h('img', { src: iconUrl(def.icon), alt: def.name }) : h('span', { class: 'eq-label' }, EQUIP_SLOT_NAMES[slot]),
-      );
-      if (def) {
-        el.addEventListener('click', () => this.game.net.send({ t: 'unequip', eq: slot as EquipSlot }));
-        this.game.tooltip.attach(el, () => itemTooltip(def));
-      }
-      eqGrid.appendChild(el);
-    }
+    const row = (a: string, b: string) => h('div', { class: 'kv' }, h('span', null, a), h('b', null, b));
     const statRows = STAT_KEYS.map((k) => {
       const base = s.base[k];
       const total = s.stats[k];
@@ -248,30 +244,41 @@ export class Panel {
           : null,
       );
     });
-    const row = (a: string, b: string) => h('div', { class: 'kv' }, h('span', null, a), h('b', null, b));
+    const pct = s.expNext > 0 ? Math.min(100, (s.exp / s.expNext) * 100) : 100;
     body.append(
       h(
         'div',
-        { class: 'char-card' },
-        h('div', { class: 'char-name' }, s.name),
-        h('div', { class: 'char-sub' }, `${cls} · ${s.level}레벨 · ${circleOf(s.level)}서클`),
+        { class: 'stats-cols' },
+        h(
+          'div',
+          { class: 'stats-col' },
+          h('div', { class: 'char-name' }, s.name),
+          h('div', { class: 'char-sub' }, `${st.className(s.classId)} · ${s.level}레벨 · ${circleOf(s.level)}서클`),
+          row('경험치', s.expNext > 0 ? `${fmt(s.exp)} / ${fmt(s.expNext)}` : `만렙 (${fmt(s.exp)})`),
+          h('div', { class: 'bar tiny exp' }, h('div', { class: 'bar-fill exp', style: { width: `${pct}%` } })),
+          h('button', { class: 'btn small', onclick: () => this.game.charWin.toggle(true) }, '장비·일러스트 (C)'),
+        ),
+        h(
+          'div',
+          { class: 'stats-col' },
+          h('div', { class: 'section-title' }, s.statPoints > 0 ? `능력치 · 남은 포인트 ${s.statPoints}` : '능력치'),
+          ...statRows,
+        ),
+        h(
+          'div',
+          { class: 'stats-col' },
+          h('div', { class: 'section-title' }, '전투'),
+          row('최대 체력/마나', `${fmt(s.maxHp)} / ${fmt(s.maxMp)}`),
+          row('AC', String(s.stats.ac)),
+          row('무기 피해', `${s.stats.dmgMin}~${s.stats.dmgMax}${s.stats.dmgBonus ? ` +${s.stats.dmgBonus}` : ''}`),
+          row('명중 / 마법', `+${s.stats.hit}% / +${s.stats.magic}%`),
+          row('공격/방어 속성', `${ELEMENT_NAMES[s.stats.offense]} / ${ELEMENT_NAMES[s.stats.defense]}`),
+        ),
       ),
-      h('div', { class: 'section-title' }, '장비 (클릭: 벗기)'),
-      eqGrid,
-      h('div', { class: 'section-title' }, `능력치 ${s.statPoints > 0 ? `— 남은 포인트 ${s.statPoints}` : ''}`),
-      ...statRows,
-      h('div', { class: 'section-title' }, '전투 정보'),
-      row('최대 체력 / 마나', `${fmt(s.maxHp)} / ${fmt(s.maxMp)}`),
-      row('AC (낮을수록 단단함)', String(s.stats.ac)),
-      row('무기 피해', `${s.stats.dmgMin} ~ ${s.stats.dmgMax}${s.stats.dmgBonus ? ` +${s.stats.dmgBonus}` : ''}`),
-      row('명중 / 마법 위력', `+${s.stats.hit}% / +${s.stats.magic}%`),
-      row('공격 / 방어 속성', `${ELEMENT_NAMES[s.stats.offense]} / ${ELEMENT_NAMES[s.stats.defense]}`),
-      row('승급 보너스', `체력 +${fmt(s.bonusHp)} / 마나 +${fmt(s.bonusMp)}`),
-      row('처치 / 사망', `${fmt(s.kills)} / ${fmt(s.deaths)}`),
     );
   }
 
-  /** 단축키 1~0 → 현재 탭의 칸 번호 */
+  /** 단축키 1~0 → 현재 칸 번호 */
   hotkeyIndex(key: string): number {
     return HOTKEYS.indexOf(key);
   }

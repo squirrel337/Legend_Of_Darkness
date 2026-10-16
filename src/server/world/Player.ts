@@ -170,6 +170,8 @@ export class Player extends Creature {
       body: armor?.icon.color ?? '#8a7a66',
     };
     if (armor?.icon.color2) look.body2 = armor.icon.color2;
+    // 직업 전용 갑옷이면 그 직업의 의상으로 그립니다
+    if (armor?.classes?.length) look.outfit = armor.classes[0];
     if (weapon) {
       look.weapon = weapon.icon.shape;
       look.weaponColor = weapon.icon.color;

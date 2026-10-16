@@ -16,6 +16,47 @@ export function iconUrl(spec: IconSpec, size = 34): string {
   return url;
 }
 
+/**
+ * 기술/마법 아이콘: 구릿빛 바탕에 그린 뒤 전체를 따뜻한 구릿빛으로 물들입니다 (원래 색은 조금 남김).
+ * 클래식 어둠의 전설의 주황·갈색 기술 아이콘 느낌을 냅니다.
+ */
+export function abilityIconUrl(spec: IconSpec, size = 34): string {
+  const key = `ability|${spec.shape}|${spec.color}|${spec.color2 ?? ''}|${size}`;
+  let url = urlCache.get(key);
+  if (!url) {
+    const [c, ctx] = makeCanvas(size, size);
+    const g = ctx.createRadialGradient(size * 0.45, size * 0.4, 1, size / 2, size / 2, size * 0.72);
+    g.addColorStop(0, '#9a5a24');
+    g.addColorStop(1, '#2e1608');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    drawIcon(ctx, spec, size);
+    ctx.globalCompositeOperation = 'color';
+    ctx.fillStyle = 'rgba(222,132,52,0.74)';
+    ctx.fillRect(0, 0, size, size);
+    ctx.globalCompositeOperation = 'source-over';
+    // 살짝 밝게 + 테두리 (돋을새김)
+    ctx.fillStyle = 'rgba(255,200,130,0.08)';
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = 'rgba(255,214,150,0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0.5, size - 0.5);
+    ctx.lineTo(0.5, 0.5);
+    ctx.lineTo(size - 0.5, 0.5);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.moveTo(size - 0.5, 0.5);
+    ctx.lineTo(size - 0.5, size - 0.5);
+    ctx.lineTo(0.5, size - 0.5);
+    ctx.stroke();
+    url = c.toDataURL();
+    urlCache.set(key, url);
+  }
+  return url;
+}
+
 /** size x size 영역 (0,0 기준)에 아이콘을 그립니다 */
 export function drawIcon(ctx: CanvasRenderingContext2D, spec: IconSpec, size: number): void {
   ctx.save();
