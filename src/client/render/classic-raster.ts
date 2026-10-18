@@ -46,9 +46,15 @@ export function toneOf(m: Mat, light: number): number {
 /** 2x2 바이어 행렬 (-0.5 ~ 0.25): 명암 경계에 체크무늬 섞기 */
 const BAYER = [-0.5, 0.0, 0.25, -0.25];
 
-/** 점 위치에 따른 명암 단계 (경계가 체크무늬로 섞여 손으로 찍은 느낌) */
+/**
+ * 점 위치에 따른 명암 단계 (그림자 쪽 경계가 체크무늬로 섞여 손으로 찍은 느낌).
+ * 밝은 면 경계는 체크무늬 없이 또렷하게: 원기둥(몸통·옷)의 빛은 가장 밝은 곳(약 0.86)이 문턱(0.8)에 가까워
+ * 체크무늬가 여러 칸 넓이로 번져 옷감이 지저분해 보이므로 (원작 옷은 밝은 면이 깨끗한 띠)
+ */
 export function toneAt(m: Mat, light: number, x: number, y: number, dither: number): number {
-  return toneOf(m, light + BAYER[((y & 1) << 1) | (x & 1)]! * dither);
+  if (light >= T_HI) return m.t[3];
+  const l = light + BAYER[((y & 1) << 1) | (x & 1)]! * dither;
+  return l < T_DARK ? m.t[0] : l < T_SH ? m.t[1] : m.t[2];
 }
 
 /** 한 가지 색만 쓰는 재질 */
