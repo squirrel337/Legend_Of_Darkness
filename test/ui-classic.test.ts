@@ -10,6 +10,7 @@ import {
   BUBBLE_LINE_H,
   BUBBLE_MAX_LINES,
   BUBBLE_TEXT_W,
+  FontGate,
   LABEL_FONT,
   LABEL_OUTLINE,
   PIXEL_FONT,
@@ -161,7 +162,7 @@ test('말풍선 모양: 정수 픽셀, 바탕과 테두리가 겹치지 않고, 
     [108, 4, -77],
   ] as const) {
     const s = bubbleShape(textW, n, ax, 200);
-    assert.equal(s.w, Math.max(19, textW + 16));
+    assert.equal(s.w, textW + 19); // 원작 R2: 한 줄을 꽉 채운 108px → 127px
     assert.equal(s.h, 12 * n + 7); // 원작 R2: 3줄 = 43px
     assert.equal(s.tipY, 200);
     assert.equal(s.tipX, ax);
@@ -194,8 +195,9 @@ test('말풍선 모양: 정수 픽셀, 바탕과 테두리가 겹치지 않고, 
     }
     assert.deepEqual(rows.get(s.tipY), [s.tipX]);
     assert.equal(Math.min(...rows.keys()), s.y);
-    // 글자는 테두리 안쪽: 첫 줄 위 2px, 왼쪽 7px 여백, 마지막 줄 아래 4px 여백
+    // 글자는 테두리 안쪽: 첫 줄 위 2px, 왼쪽 7px·오른쪽 10px 여백(원작 R2 와 같음), 마지막 줄 아래 4px 여백
     assert.equal(s.textX, s.x + 8);
+    assert.equal(s.x + s.w - 1 - (s.textX + textW), 10);
     assert.equal(s.baseline - 11, s.y + 3);
     assert.equal(s.y + s.h - 1 - (s.baseline + (n - 1) * BUBBLE_LINE_H - 1), 5);
   }
@@ -258,6 +260,78 @@ test('이름표 글자: 1px 외곽선(8방향)을 먼저, 본색을 마지막에
   }
   assert.equal(ctx.textAlign, 'left');
   assert.equal(ctx.textBaseline, 'alphabetic');
+});
+
+// ───────────────────────── 글꼴 기다리기 ─────────────────────────
+
+/** 대기 중인 프라미스 콜백까지 모두 돌립니다 */
+const settle = () => new Promise<void>((r) => setImmediate(r));
+
+test('글꼴 문: 도트 글꼴을 받을 때까지 닫혀 있다가 받으면 열리고, 줄바꿈 캐시 번호가 바뀐다', async () => {
+  const loads: string[] = [];
+  let resolve!: () => void;
+  let timeout!: () => void;
+  let waited = 0;
+  const gate = new FontGate(
+    () => ({
+      load: (font, text) => {
+        loads.push(`${font}|${text}`);
+        return new Promise<void>((r) => (resolve = r));
+      },
+    }),
+    3000,
+    (fn, ms) => {
+      timeout = fn;
+      waited = ms;
+    },
+  );
+  assert.equal(gate.ready(), false);
+  assert.equal(gate.ready(), false);
+  // 한 번만, 캔버스와 같은 12px 도트 글꼴을 한글·영문이 든 글자로 받음
+  assert.deepEqual(loads, [`12px "${PIXEL_FONT}"|가A`]);
+  assert.equal(waited, 3000);
+  const gen = gate.gen;
+  resolve();
+  await settle();
+  assert.equal(gate.ready(), true);
+  assert.equal(gate.gen, gen + 1);
+  // 이미 받았으면 기다리는 시간이 지나도 그대로
+  timeout();
+  assert.equal(gate.gen, gen + 1);
+});
+
+test('글꼴 문: 받지 못하면 기다린 뒤 대체 글꼴로 열리고, 나중에라도 받으면 다시 잰다', async () => {
+  let resolve!: () => void;
+  let timeout!: () => void;
+  const slow = new FontGate(
+    () => ({ load: () => new Promise<void>((r) => (resolve = r)) }),
+    3000,
+    (fn) => (timeout = fn),
+  );
+  assert.equal(slow.ready(), false);
+  timeout();
+  assert.equal(slow.ready(), true);
+  const gen = slow.gen;
+  resolve();
+  await settle();
+  assert.equal(slow.gen, gen + 1, '늦게 받은 글꼴로 다시 재도록 번호가 바뀜');
+  // 받기가 실패하거나(거부) 글꼴 문자열에서 바로 오류가 나도 열림
+  const failed = new FontGate(() => ({ load: () => Promise.reject(new Error('404')) }), 3000, () => {});
+  assert.equal(failed.ready(), false);
+  await settle();
+  assert.equal(failed.ready(), true);
+  const broken = new FontGate(
+    () => ({
+      load: () => {
+        throw new SyntaxError('bad font');
+      },
+    }),
+    3000,
+    () => {},
+  );
+  assert.equal(broken.ready(), true);
+  // document.fonts 가 없는 곳(서버 쪽 테스트 등)에서는 바로 열림
+  assert.equal(new FontGate(() => undefined).ready(), true);
 });
 
 // ───────────────────────── 이름표 규칙 ─────────────────────────

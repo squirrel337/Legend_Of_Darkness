@@ -21,8 +21,12 @@ export const BUBBLE_MAX_LINES = 4;
 /** 말풍선이 사라지기 전에 흐려지는 시간 */
 export const BUBBLE_FADE_MS = 300;
 export const BUBBLE_LINE_H = 12;
-/** 말풍선 테두리 안쪽의 글자 둘레 여백 (왼쪽·오른쪽, 위, 아래) */
-const PAD_X = 7;
+/**
+ * 말풍선 테두리 안쪽의 글자 둘레 여백. 원작 R2 의 말풍선을 잰 값으로, 오른쪽이 왼쪽보다 3px 넓어
+ * 한 줄을 꽉 채운(108px) 말풍선의 폭이 원작과 같은 127px 이 됩니다.
+ */
+const PAD_LEFT = 7;
+const PAD_RIGHT = 10;
 const PAD_TOP = 2;
 const PAD_BOTTOM = 4;
 /** 도트 글꼴 한글 한 글자의 높이 (기준선 위 11줄) */
@@ -224,7 +228,7 @@ export interface BubbleShape {
  */
 export function bubbleShape(textW: number, lines: number, anchorX: number, tipY: number, minX = -Infinity, maxX = Infinity): BubbleShape {
   const n = Math.max(1, Math.floor(lines));
-  const w = Math.max(2 * (CORNER + TAIL_HALF + 1) + 1, Math.ceil(textW) + 2 * (1 + PAD_X));
+  const w = Math.max(2 * (CORNER + TAIL_HALF + 1) + 1, Math.ceil(textW) + 1 + PAD_LEFT + PAD_RIGHT + 1);
   const h = 1 + PAD_TOP + GLYPH_H + (n - 1) * BUBBLE_LINE_H + PAD_BOTTOM + 1;
   const ax = Math.round(anchorX);
   let x = Math.round(ax - w / 2);
@@ -285,7 +289,7 @@ export function bubbleShape(textW: number, lines: number, anchorX: number, tipY:
     tipY: b + TAIL_H,
     fill,
     border,
-    textX: x + 1 + PAD_X,
+    textX: x + 1 + PAD_LEFT,
     baseline: y + 1 + PAD_TOP + GLYPH_H,
   };
 }
@@ -307,46 +311,69 @@ export function drawBubble(ctx: PixelCtx, lines: readonly string[], shape: Bubbl
 
 // ───────────────────────── 글꼴 준비 ─────────────────────────
 
-interface FontSetLike {
+/** document.fonts 중 이 모듈이 쓰는 부분 */
+export interface FontSetLike {
   load(font: string, text?: string): Promise<unknown>;
 }
 
-/** 0: 시작 전, 1: 받는 중, 2: 준비됨 (받았거나, 기다리다 대체 글꼴로 넘어감) */
-let fontState: 0 | 1 | 2 = 0;
-/** 글꼴이 바뀔 때마다 늘어나는 번호 (줄바꿈 결과 캐시를 버리는 데 씀) */
-let fontGen = 0;
-
 /**
- * 도트 글꼴을 받기 시작하고, 지금 이름표·말풍선을 그려도 되는지 알려 줍니다.
- * 받기 전에 그리면 대체 글꼴로 잠깐 보였다가 바뀌므로, 받을 때까지(최대 FONT_WAIT_MS) 글자는 그리지 않습니다.
+ * 도트 글꼴을 기다리는 문. 처음 물어볼 때 글꼴을 받기 시작하고, 받을 때까지(최대 waitMs) 닫혀 있습니다.
+ * 받기 전에 그리면 대체 글꼴로 잠깐 보였다가 바뀌므로 그동안 글자는 그리지 않고,
+ * 받지 못한 채 시간이 지나면 대체 글꼴로 그리다가 나중에라도 받으면 그때부터 도트 글꼴로 바뀝니다.
  */
-export function labelFontReady(): boolean {
-  if (fontState === 0) {
-    const fonts = (globalThis as { document?: { fonts?: FontSetLike } }).document?.fonts;
-    if (!fonts) {
-      fontState = 2;
-      return true;
-    }
-    fontState = 1;
-    const done = () => {
-      fontState = 2;
-      fontGen++;
-    };
-    fonts.load(`${LABEL_PX}px "${PIXEL_FONT}"`, '가A').then(done, done);
-    setTimeout(() => {
-      if (fontState !== 1) return;
-      fontState = 2;
-      fontGen++;
-    }, FONT_WAIT_MS);
+export class FontGate {
+  /** 0: 시작 전, 1: 받는 중, 2: 열림 (받았거나, 기다리다 대체 글꼴로 넘어감) */
+  private state: 0 | 1 | 2 = 0;
+  /** 글꼴이 바뀔 수 있을 때마다 늘어나는 번호 (잰 폭으로 만든 줄바꿈 캐시를 버리는 데 씀) */
+  gen = 0;
+
+  constructor(
+    private readonly fonts: () => FontSetLike | undefined,
+    private readonly waitMs = FONT_WAIT_MS,
+    private readonly later: (fn: () => void, ms: number) => unknown = (fn, ms) => setTimeout(fn, ms),
+  ) {}
+
+  /** 지금 이름표·말풍선 글자를 그려도 되는지 */
+  ready(): boolean {
+    if (this.state === 0) this.start();
+    return this.state === 2;
   }
-  return fontState === 2;
+
+  private start(): void {
+    const fonts = this.fonts();
+    if (!fonts) {
+      this.state = 2;
+      return;
+    }
+    this.state = 1;
+    const done = () => {
+      this.state = 2;
+      this.gen++;
+    };
+    try {
+      fonts.load(`${LABEL_PX}px "${PIXEL_FONT}"`, '가A').then(done, done);
+    } catch {
+      done();
+      return;
+    }
+    this.later(() => {
+      if (this.state === 1) done();
+    }, this.waitMs);
+  }
+}
+
+const fontGate = new FontGate(() => (globalThis as { document?: { fonts?: FontSetLike } }).document?.fonts);
+
+/** 이름표·말풍선 글자를 그려도 되는지 (도트 글꼴을 받을 때까지, 최대 FONT_WAIT_MS 동안 false) */
+export function labelFontReady(): boolean {
+  return fontGate.ready();
 }
 
 const wrapCache = new Map<string, { lines: string[]; width: number }>();
 
 /** 말풍선 줄바꿈과 가장 긴 줄의 폭 (같은 글은 다시 재지 않음). ctx.font 는 이름표 글꼴이어야 합니다 */
 export function bubbleLines(ctx: PixelCtx, text: string): { lines: string[]; width: number } {
-  const key = `${fontGen}\u0000${text}`;
+  const key = `${fontGate.gen}\u0000${text}`;
   let v = wrapCache.get(key);
   if (!v) {
     const measure = (s: string) => ctx.measureText(s).width;
