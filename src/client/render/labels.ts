@@ -41,6 +41,10 @@ const CORNER = 5;
 const TAIL_H = 3;
 const TAIL_HALF = 3;
 
+/**
+ * 말풍선 바탕과 테두리·글자 색. 원작 R2 화면을 재면 말풍선 안의 풀빛이 바깥의 49% 라 50% 검정 바탕이고,
+ * 테두리와 글자는 흰색입니다 (docs/art-direction.md 의 '흰 바탕·검은 글씨' 는 R2 화면과 다름).
+ */
 export const BUBBLE_FILL = 'rgba(0,0,0,0.5)';
 export const BUBBLE_INK = '#ffffff';
 export const LABEL_OUTLINE = 'rgba(0,0,0,0.85)';
