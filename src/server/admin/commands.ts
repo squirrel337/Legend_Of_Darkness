@@ -1,5 +1,5 @@
 // 채팅 명령어 (/로 시작). 일반 명령어와 운영자(GM/관리자) 명령어
-import { CLASS_FALLBACK_NAMES, ROLE_NAMES, formatNumber, type ClassId, type Role, type StatKey } from '../../shared/constants';
+import { CLASS_FALLBACK_NAMES, CLASS_IDS, ROLE_NAMES, formatNumber, type ClassId, type Role, type StatKey } from '../../shared/constants';
 import { nameKey } from '../storage';
 import { ghostRecall } from '../systems/movement';
 import type { Player } from '../world/Player';
@@ -38,6 +38,9 @@ const STAT_ALIASES: Record<string, StatKey | 'all'> = {
   모두: 'all',
   all: 'all',
 };
+
+/** 평민을 뺀 직업 이름 목록 (사용법 안내용) */
+const CLASS_LIST = CLASS_IDS.filter((c) => c !== 'peasant').map((c) => CLASS_FALLBACK_NAMES[c]);
 
 export function parseClass(s: string | undefined): ClassId | null {
   if (!s) return null;
@@ -236,7 +239,7 @@ const COMMANDS: Command[] = [
     run: (ctx, args) => {
       const { target, rest } = split(ctx, args, 0);
       const cls = rest[0] ? parseClass(rest[0]) : null;
-      if (rest[0] && !cls) return ctx.p.err('직업: 전사/도적/마법사/성직자/무도가');
+      if (rest[0] && !cls) return ctx.p.err(`직업: ${CLASS_LIST.join('/')}`);
       report(ctx.p, ctx.admin.maxOut(ctx.p.name, target, cls ?? undefined));
     },
   },
@@ -292,12 +295,12 @@ const COMMANDS: Command[] = [
   {
     names: ['직업', 'class'],
     level: 'gm',
-    usage: '/직업 [이름] 전사|도적|마법사|성직자|무도가|평민',
+    usage: `/직업 [이름] ${CLASS_LIST.join('|')}|평민`,
     desc: '직업을 바꿉니다.',
     run: (ctx, args) => {
       const { target, rest } = split(ctx, args, 1);
       const cls = parseClass(rest[0]);
-      if (!cls) return ctx.p.err('사용법: /직업 [이름] 전사|도적|마법사|성직자|무도가|평민');
+      if (!cls) return ctx.p.err(`사용법: /직업 [이름] ${CLASS_LIST.join('|')}|평민`);
       report(ctx.p, ctx.admin.setClass(ctx.p.name, target, cls));
     },
   },

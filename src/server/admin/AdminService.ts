@@ -456,6 +456,7 @@ export class AdminService {
   spawnMonster(actor: Player, query: string, count: number): AdminResult {
     const def = this.world.data.findMonster(query);
     if (!def) return fail(`'${query}' 몬스터를 찾을 수 없습니다.`);
+    if (def.summon) return fail('소환수는 소환할 수 없습니다.');
     const map = actor.map;
     if (!map) return fail('맵에 있지 않습니다.');
     if (map.safe) return fail('안전 지대(마을)에는 몬스터를 소환할 수 없습니다.');
@@ -481,7 +482,8 @@ export class AdminService {
     if (!map) return fail('맵에 있지 않습니다.');
     let n = 0;
     for (const m of [...map.monsters]) {
-      if (m.def.passive) continue;
+      // 허수아비와 플레이어의 소환수는 남겨 둡니다
+      if (m.def.passive || m.owner) continue;
       m.dead = true;
       map.remove(m, 'death');
       m.spawner?.onDeath(m, Date.now());

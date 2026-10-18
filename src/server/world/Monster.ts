@@ -14,7 +14,8 @@ export class Monster extends Creature {
   mp = 0;
   homeX = 0;
   homeY = 0;
-  target: Player | null = null;
+  /** 노리는 대상. 야생 몬스터는 플레이어나 소환수, 소환수는 야생 몬스터 */
+  target: Creature | null = null;
   nextMoveAt = 0;
   nextAttackAt = 0;
   nextSpellAt = 0;
@@ -74,6 +75,10 @@ export class Monster extends Creature {
   }
   get blocks(): boolean {
     return !this.dead;
+  }
+  /** 플레이어가 부른 소환수인지 */
+  get isSummon(): boolean {
+    return this.owner !== null;
   }
 
   snapshot(): MonsterSnapshot {
