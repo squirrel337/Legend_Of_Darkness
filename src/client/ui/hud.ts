@@ -256,6 +256,8 @@ export class Hud {
   }
 
   notice(text: string, kind: 'info' | 'warn' | 'good' = 'info'): void {
+    // 아래 메시지 줄에도 남김
+    this.game.chat.notice(text, kind);
     const n = h('div', { class: `notice ${kind}` }, text);
     this.notices.appendChild(n);
     while (this.notices.children.length > 4) this.notices.firstChild?.remove();

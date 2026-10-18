@@ -2,6 +2,7 @@
 import { STATUS_INFO, TILE_H, TILE_W } from '../../shared/constants';
 import { tileInfo } from '../../shared/tiles';
 import { entityPos, isAlly, type CEntity, type ClientState } from '../state';
+import { LABEL_FONT, LABEL_PX, bubbleAlpha, bubbleLines, bubbleShape, bubbleText, drawBubble, drawOutlinedText, entityLabel, labelFontReady } from './labels';
 import { Effects, type Point } from './effects';
 import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
 import { ambienceFor, type Ambience } from './ambience';
@@ -15,7 +16,20 @@ import { drawFlame, objectSprite, wallCanvas } from './tiles';
 const ACT_MS = 320;
 /** 어둠 캔버스는 CSS 픽셀의 이 배수만큼 작게 그립니다 (부드러운 빛 구멍뿐이라 늘려도 티가 나지 않음) */
 const DARK_SCALE = 2;
-const FONT = '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+/** 캔버스 글자 글꼴: 고전 도트 글꼴(갈무리 모노 11) → 굴림·돋움 → 예전 글꼴 (labels.ts) */
+const FONT = LABEL_FONT;
+/** 운영자 왕관의 높이 (CSS px) */
+const CROWN_H = 9;
+
+/** 운영자 왕관의 아래 끝: 도트 캐릭터의 머리(모자) 꼭대기 3px 위, 유령은 떠 있는 만큼 3px 더 (발에서 위로 CSS px) */
+function crownBase(e: CEntity): number {
+  return (e.look ? classicHeadTop(e.look) : CLASSIC_HEAD_TOP) + 3 + (e.ghost ? 3 : 0);
+}
+
+/** 말풍선이 내려오면 안 되는 사람의 머리 꼭대기 (모자 포함, 유령은 가장 높이 떴을 때까지; 발에서 위로 CSS px) */
+function personClearTop(e: CEntity): number {
+  return (e.look ? classicHeadTop(e.look) : CLASSIC_HEAD_TOP) + (e.ghost ? 5 : 0);
+}
 
 interface Drawable {
   depth: number;
@@ -367,7 +381,7 @@ export class Renderer {
       }
       if (e.role === 'admin' || e.role === 'gm') {
         // 운영자 왕관: 머리(모자) 바로 위. 숨기·유령이면 몸과 같은 투명도 (숨은 운영자의 자리가 왕관으로 드러나지 않게)
-        const top = -(look ? classicHeadTop(look) : CLASSIC_HEAD_TOP) - 3 - (e.ghost ? 3 : 0);
+        const top = -crownBase(e);
         const a0 = ctx.globalAlpha;
         ctx.globalAlpha = a0 * alpha;
         ctx.fillStyle = 'rgba(255,215,0,0.9)';
@@ -375,7 +389,7 @@ export class Renderer {
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(-4, top - 3);
-        ctx.lineTo(0, top - 9);
+        ctx.lineTo(0, top - CROWN_H);
         ctx.lineTo(4, top - 3);
         ctx.lineTo(0, top);
         ctx.closePath();
@@ -463,45 +477,49 @@ export class Renderer {
   private drawLabels(e: CEntity, now: number): void {
     const ctx = this.ctx;
     const c = this.entityPoint(e, now);
+    // 도트 글자와 말풍선 테두리가 번지지 않도록 정수 픽셀에 맞춥니다
+    const ax = Math.round(c.sx);
+    const ay = Math.round(c.sy);
     const hovered = this.hoverEntity === e;
     const targeted = this.state.targetId === e.id;
     const monsterDef = e.type === 'monster' && e.def ? this.state.monsters.get(e.def) : undefined;
     const scale = monsterDef?.look.size ?? 1;
-    // 소환수 이름은 늘 보이므로 몸 크기에 맞춰 낮게 (주인 이름표와 겹치지 않게)
+    const ally = isAlly(e);
+    const person = e.type === 'player' || e.type === 'npc';
+    // 사람의 머리 꼭대기 (도트 캐릭터마다 모자 높이가 달라 겉모습에서 잼)
+    const head = person ? personClearTop(e) : 0;
+    // 이름표 기준선 (사람은 머리 위, 키 큰 모자면 그만큼 위로; 소환수는 몸 크기에 맞춰 낮게)
     const top =
-      c.sy -
-      (e.type === 'item' ? 26 : isAlly(e) ? 30 + 18 * scale : e.type === 'monster' ? 56 * Math.max(1, scale * 0.95) : 66);
-    ctx.textAlign = 'center';
-    let label: string | null = null;
-    let color = '#ffffff';
-    if (e.type === 'player') {
-      label = e.name;
-      color = e.ghost ? '#a8b8e8' : e.role === 'admin' || e.role === 'gm' ? '#ffd76b' : e.id === this.state.selfId ? '#b8ffb8' : '#ffffff';
-    } else if (e.type === 'npc') {
-      label = e.name;
-      color = '#ffe9a8';
-    } else if (e.type === 'monster' && isAlly(e)) {
-      label = e.ownerName ? `${e.name} (${e.ownerName})` : e.name;
-      color = '#8dff9a';
-    } else if (e.type === 'monster' && (hovered || targeted || monsterDef?.boss)) {
-      label = `${e.name} Lv.${e.level}`;
-      color = monsterDef?.boss ? '#ff9f6b' : '#ffb0b0';
-    } else if (e.type === 'item' && hovered) {
-      label = e.item ? `${this.state.itemName(e.item)}${(e.qty ?? 1) > 1 ? ` x${e.qty}` : ''}` : `${(e.qty ?? 0).toLocaleString('ko-KR')} 골드`;
-      color = '#fff3a0';
-    }
-    if (label) {
-      ctx.font = `${e.type === 'npc' || hovered ? 'bold ' : ''}${isAlly(e) ? 11 : 12}px ${FONT}`;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-      ctx.strokeText(label, c.sx, top);
-      ctx.fillStyle = color;
-      ctx.fillText(label, c.sx, top);
-      if (e.type === 'npc' && e.title) {
-        ctx.font = `11px ${FONT}`;
-        ctx.strokeText(`[${e.title}]`, c.sx, top - 13);
-        ctx.fillStyle = '#9fd3ff';
-        ctx.fillText(`[${e.title}]`, c.sx, top - 13);
+      ay - Math.round(e.type === 'item' ? 26 : ally ? 30 + 18 * scale : e.type === 'monster' ? 56 * Math.max(1, scale * 0.95) : Math.max(66, head + 6));
+    // 말풍선이 내려오면 안 되는 선: 머리 꼭대기, 보이는 이름표·체력바의 윗선
+    let clear = person ? ay - head : top + 3;
+    // 운영자는 머리 위 왕관(drawEntity)까지 피하고, 이름표도 왕관을 가리지 않게 그 위에
+    const crown = e.role === 'admin' || e.role === 'gm';
+    const crownTop = crown ? ay - crownBase(e) - CROWN_H : 0;
+    if (crown) clear = Math.min(clear, crownTop - 1);
+    const nameY = crown ? Math.min(top, crownTop - 2) : top;
+    // 글꼴을 받는 동안(최대 몇 초)은 대체 글꼴로 번쩍이지 않게 글자를 그리지 않습니다
+    const fontOk = labelFontReady();
+    const font = `${LABEL_PX}px ${FONT}`;
+    // 이름표: 원작처럼 마우스를 올렸거나 대상으로 고른 것만 (12px, 1px 외곽선). 나머지는 매 프레임 따질 것도 없음
+    const label =
+      hovered || targeted
+        ? entityLabel(e, {
+            hovered,
+            targeted,
+            selfId: this.state.selfId,
+            ally,
+            boss: !!monsterDef?.boss,
+            itemName: e.type === 'item' && e.item ? this.state.itemName(e.item) : undefined,
+          })
+        : null;
+    if (label && fontOk) {
+      ctx.font = font;
+      drawOutlinedText(ctx, label.text, ax, nameY, label.color);
+      clear = Math.min(clear, nameY - LABEL_PX);
+      if (label.title) {
+        drawOutlinedText(ctx, label.title, ax, nameY - LABEL_PX - 2, '#9fd3ff');
+        clear = Math.min(clear, nameY - 2 * LABEL_PX - 2);
       }
     }
     // 체력바
@@ -512,25 +530,20 @@ export class Renderer {
       const w = 30;
       const y = top + 4;
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillRect(c.sx - w / 2 - 1, y - 1, w + 2, 5);
-      ctx.fillStyle = e.type === 'monster' && !isAlly(e) ? '#e04040' : '#40c060';
-      ctx.fillRect(c.sx - w / 2, y, (w * Math.max(0, e.hpPct)) / 100, 3);
+      ctx.fillRect(ax - w / 2 - 1, y - 1, w + 2, 5);
+      ctx.fillStyle = e.type === 'monster' && !ally ? '#e04040' : '#40c060';
+      ctx.fillRect(ax - w / 2, y, Math.round((w * Math.max(0, e.hpPct)) / 100), 3);
+      clear = Math.min(clear, y - 1);
     }
-    // 말풍선
-    if (e.bubble && now < e.bubble.until) {
-      const text = e.bubble.text.length > 40 ? e.bubble.text.slice(0, 39) + '…' : e.bubble.text;
-      ctx.font = `12px ${FONT}`;
-      const tw = ctx.measureText(text).width;
-      const bx = c.sx - tw / 2 - 6;
-      const by = top - (e.type === 'npc' ? 40 : 30);
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.beginPath();
-      ctx.roundRect(bx, by, tw + 12, 18, 6);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fillText(text, c.sx, by + 13);
+    // 말풍선: `이름: 대사`, 원작처럼 글자 단위 줄바꿈, 끝나기 전에 흐려짐. 화면 밖으로 나가지 않게 가로로 밀어 넣음
+    if (e.bubble && fontOk) {
+      const alpha = bubbleAlpha(now, e.bubble.until);
+      if (alpha > 0) {
+        ctx.font = font;
+        const { lines, width } = bubbleLines(ctx, bubbleText(e.name, e.bubble.text));
+        const shape = bubbleShape(width, lines.length, ax, clear - 2, 2 - this.offX, this.cssW - 2 - this.offX);
+        drawBubble(ctx, lines, shape, alpha);
+      }
     }
   }
 
