@@ -41,8 +41,9 @@ const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isElement = (v: unknown) => typeof v === 'string' && (ELEMENTS as readonly string[]).includes(v);
 
-const TARGETINGS = ['front', 'around', 'around8', 'self', 'enemy', 'ally', 'enemyArea', 'line'];
-const EFFECT_TYPES = ['physical', 'magic', 'heal', 'status', 'cleanse', 'revive', 'restoreMp', 'sacrifice', 'dash'];
+const TARGETINGS = ['front', 'around', 'around8', 'self', 'enemy', 'ally', 'enemyArea', 'line', 'party'];
+const EFFECT_TYPES = ['physical', 'magic', 'heal', 'status', 'cleanse', 'revive', 'restoreMp', 'sacrifice', 'dash', 'summon'];
+const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
 const SERVICE_TYPES = ['shop', 'buy', 'class', 'revive', 'heal', 'ascend', 'teleport', 'resetStats', 'storage', 'talk'];
 const BODY_PLANS = [
   'rat',
@@ -128,6 +129,10 @@ export class GameData {
     }
     if (it.dmg !== undefined && (!Array.isArray(it.dmg) || it.dmg.length !== 2 || !it.dmg.every(isNum) || it.dmg[0] > it.dmg[1]))
       fail(where, 'dmg 는 [최소, 최대] 형식이어야 합니다.');
+    if (it.range !== undefined) {
+      if (!isInt(it.range, 1, 10)) fail(where, 'range 는 1~10 정수여야 합니다.');
+      if (it.slot !== 'weapon') fail(where, 'range 는 무기에만 쓸 수 있습니다.');
+    }
     if (!isNum(it.price) || it.price < 0) fail(where, 'price 는 0 이상이어야 합니다.');
     if (it.stack !== undefined && (!Number.isInteger(it.stack) || it.stack < 1)) fail(where, 'stack 은 1 이상의 정수여야 합니다.');
     if (it.classes) for (const c of it.classes) if (!isClassId(c)) fail(where, `알 수 없는 직업 ${c}`);
@@ -155,6 +160,16 @@ export class GameData {
       if (!isObj(e) || !EFFECT_TYPES.includes(e.type as string)) fail(where, `알 수 없는 효과 ${JSON.stringify(e)}`);
       if (e.type === 'status' && !isStatusId(e.status)) fail(where, `알 수 없는 상태 ${String(e.status)}`);
       if ((e.type === 'magic' || e.type === 'heal') && e.stat !== undefined && !isStatKey(e.stat)) fail(where, `알 수 없는 능력치 ${String(e.stat)}`);
+      if (e.type === 'physical') {
+        if (e.hits !== undefined && !isInt(e.hits, 1, 5)) fail(where, 'physical.hits 는 1~5 정수여야 합니다.');
+        if (e.lifesteal !== undefined && (!isNum(e.lifesteal) || e.lifesteal < 0 || e.lifesteal > 1)) fail(where, 'physical.lifesteal 은 0~1 이어야 합니다.');
+      }
+      if (e.type === 'summon') {
+        if (!isStr(e.monster)) fail(where, 'summon.monster 가 필요합니다.');
+        if (!isNum(e.durationMs) || e.durationMs <= 0) fail(where, 'summon.durationMs 는 0보다 커야 합니다.');
+        if (!isInt(e.max, 1, 5)) fail(where, 'summon.max 는 1~5 정수여야 합니다.');
+        if (e.count !== undefined && !isInt(e.count, 1, 3)) fail(where, 'summon.count 는 1~3 정수여야 합니다.');
+      }
     }
     if (!isObj(a.icon)) fail(where, 'icon 이 필요합니다.');
     this.abilities.set(a.id, a);
@@ -243,6 +258,18 @@ export class GameData {
     }
     for (const c of this.classes.values())
       for (const id of c.starterItems ?? []) if (!this.items.has(id)) fail(`classes.json(${c.id})`, `시작 아이템 '${id}' 이 없습니다.`);
+    // 소환 기술은 summon: true 인 몬스터만 부를 수 있고, 소환수는 맵에 생성되지 않습니다
+    for (const a of this.abilities.values()) {
+      for (const e of a.effects) {
+        if (e.type !== 'summon') continue;
+        const m = this.monsters.get(e.monster);
+        if (!m) fail(`abilities.json(${a.id})`, `소환할 몬스터 '${e.monster}' 이 없습니다.`);
+        if (!m.summon) fail(`abilities.json(${a.id})`, `'${e.monster}' 은 소환수(summon: true)가 아닙니다.`);
+      }
+    }
+    for (const m of this.maps.values())
+      for (const s of m.spawns)
+        if (this.monsters.get(s.monster)?.summon) fail(`maps(${m.id})`, `소환수 '${s.monster}' 은 맵에 생성할 수 없습니다.`);
   }
 
   clientData(server: PublicServerInfo): ClientGameData {
@@ -258,6 +285,7 @@ export class GameData {
         level: m.level,
         look: m.look,
         ...(m.boss ? { boss: true } : {}),
+        ...(m.summon ? { summon: true } : {}),
       })),
       maps: [...this.maps.values()].map((m) => ({ id: m.id, name: m.name, ...(m.levelRange ? { levelRange: m.levelRange } : {}) })),
       server,

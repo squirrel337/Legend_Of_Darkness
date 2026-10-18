@@ -27,6 +27,8 @@ export class Panel {
   invMode: 'normal' | 'sell' | 'deposit' = 'normal';
   private readonly invModeBanner: HTMLElement;
   private readonly gmBtn: HTMLButtonElement;
+  /** 자동사냥 단추 (켜져 있으면 'on' 클래스) */
+  readonly autoBtn: HTMLButtonElement;
   private readonly recallBtn: HTMLButtonElement;
 
   constructor(
@@ -47,6 +49,8 @@ export class Panel {
     const menu = (icon: string, label: string, title: string, onclick: () => void) =>
       h('button', { class: 'menu-btn', title, onclick }, svgIcon(icon), h('span', null, label));
     this.gmBtn = menu('crown', '운영자', '운영자 도구 (F2)', () => game.gm.toggle());
+    this.autoBtn = menu('auto', '자동', '자동사냥 켜기/끄기 (Z)', () => game.toggleAuto());
+    this.autoBtn.classList.add('auto-btn');
     this.recallBtn = menu('home', '귀환', '유령일 때 마을로 돌아가기 (R)', () => game.recall());
     this.gmBtn.classList.add('hidden');
     this.recallBtn.classList.add('hidden');
@@ -58,6 +62,7 @@ export class Panel {
         menu('person', '캐릭터', '캐릭터 정보와 장비 (C)', () => game.charWin.toggle()),
         menu('map', '지도', '지도 켜기/끄기 (M)', () => game.hud.toggleMinimap()),
         menu('help', '도움말', '조작 방법 (H)', () => game.help.toggle()),
+        this.autoBtn,
         this.gmBtn,
         this.recallBtn,
       ),

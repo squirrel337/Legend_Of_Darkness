@@ -38,6 +38,7 @@ const ICONS: Record<string, string> = {
   help: '<circle cx="12" cy="12" r="9" fill="currentColor"/><path d="M9.2 9.4 Q9.4 6.6 12.2 6.6 Q15 6.8 14.8 9.4 Q14.6 11 12.4 12 V14" fill="none" stroke="#2a1608" stroke-width="2" stroke-linecap="round"/><circle cx="12.4" cy="17.2" r="1.3" fill="#2a1608"/>',
   crown: '<path d="M3.5 18 L2.5 7.5 L8 11.5 L12 4.5 L16 11.5 L21.5 7.5 L20.5 18 Z" fill="currentColor"/><rect x="3.5" y="18.6" width="17" height="2.2" fill="currentColor"/>',
   home: '<path d="M3 11.5 L12 3.5 L21 11.5 H18.5 V20.5 H14 V15 H10 V20.5 H5.5 V11.5 Z" fill="currentColor"/>',
+  auto: '<path d="M12 3.5 A8.5 8.5 0 1 1 3.6 13.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M1.2 10.6 L3.8 14.4 L7.2 11.6 Z" fill="currentColor"/><path d="M9.5 8 L16 12 L9.5 16 Z" fill="currentColor"/>',
 };
 
 export function svgIcon(name: keyof typeof ICONS | string): SVGSVGElement {

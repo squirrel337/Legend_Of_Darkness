@@ -361,7 +361,12 @@ export function canFight(p: Player): string | null {
   return null;
 }
 
-export function playerAssail(world: World, p: Player, now = Date.now()): void {
+/**
+ * 평타. targetId 는 원거리 무기(활)로 노릴 대상 (근접 무기는 무시하고 앞 칸을 칩니다).
+ * TODO(원거리): 사거리 안의 대상 공격은 아직 구현되지 않았습니다.
+ */
+export function playerAssail(world: World, p: Player, targetId?: unknown, now = Date.now()): void {
+  void targetId;
   const map = p.map;
   if (!map || p.isDead || !p.canAct) return;
   if (now < p.nextAssailAt) return;
@@ -485,6 +490,20 @@ function resolveTargets(ctx: CastContext): Creature[] | string {
       for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]] as const) {
         const c = map.creatureAt(t.x + dx, t.y + dy);
         if (c && c !== t && hostile(caster, c)) out.push(c);
+      }
+      return out;
+    }
+    case 'party': {
+      // 자신 + 같은 맵, 사거리 안의 살아 있는 그룹원
+      const out: Creature[] = [caster];
+      if (isPlayer(caster)) {
+        const g = caster.world.groups.groupOf(caster.name);
+        if (g) {
+          for (const name of g.members) {
+            const mate: Player | undefined = caster.world.findPlayer(name);
+            if (mate && mate !== caster && mate.map === map && !mate.isDead && chebyshev(caster, mate) <= range) out.push(mate);
+          }
+        }
       }
       return out;
     }

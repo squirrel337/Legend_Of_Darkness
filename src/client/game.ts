@@ -344,6 +344,9 @@ export class Game {
         break;
       case 'pong':
         break;
+      case 'auto':
+        this.onAuto(m);
+        break;
     }
   }
 
@@ -438,6 +441,26 @@ export class Game {
       me.dir = d;
       this.net.send({ t: 'turn', dir: d });
     }
+  }
+
+  // ───────────────────────── 자동사냥 ─────────────────────────
+  // TODO(자동사냥): 설정 창, 상태 표시, 이동 처리. 아래 메서드 이름은 유지하세요.
+
+  /** 서버가 알려 준 자동사냥 상태 */
+  autoOn = false;
+
+  /** 자동사냥 켜기/끄기 (Z 키, 패널의 '자동' 단추) */
+  toggleAuto(): void {
+    this.hud.notice('자동사냥은 아직 준비 중입니다.', 'warn');
+  }
+
+  private onAuto(m: Extract<S2C, { t: 'auto' }>): void {
+    this.autoOn = m.on;
+  }
+
+  /** 사용자가 직접 움직이면 자동사냥을 끕니다 */
+  private cancelAuto(): void {
+    if (this.autoOn) this.net.send({ t: 'auto', on: false });
   }
 
   // ───────────────────────── 행동 ─────────────────────────
@@ -557,6 +580,7 @@ export class Game {
   private walkTo(x: number, y: number, pending: Pending): void {
     const me = this.state.me;
     if (!me) return;
+    this.cancelAuto();
     const path = this.findPath(me.x, me.y, x, y, pending !== null && pending.kind !== 'pickup');
     if (!path) {
       this.hud.notice('그곳으로 갈 수 없습니다.', 'warn');
@@ -678,6 +702,7 @@ export class Game {
     const dir = ARROWS[e.key];
     if (dir !== undefined) {
       e.preventDefault();
+      this.cancelAuto();
       if (!this.heldDirs.includes(dir)) this.heldDirs.push(dir);
       return;
     }
@@ -711,6 +736,8 @@ export class Game {
         return this.charWin.toggle();
       case 'KeyM':
         return this.hud.toggleMinimap();
+      case 'KeyZ':
+        return this.toggleAuto();
       case 'KeyH':
         return this.help.toggle();
       case 'KeyE':

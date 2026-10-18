@@ -15,6 +15,8 @@ import { Creature } from './entities';
 import type { World } from './World';
 import type { Npc } from './Npc';
 import type { Group } from '../systems/groups';
+import type { AutoRun } from '../systems/autohunt';
+import type { Monster } from './Monster';
 
 /** 플레이어와 연결된 네트워크 세션 */
 export interface PlayerLink {
@@ -41,6 +43,10 @@ export class Player extends Creature {
   group: Group | null = null;
   pendingInviteFrom: string | null = null;
   pendingInviteAt = 0;
+  /** 거느린 소환수 */
+  readonly summons = new Set<Monster>();
+  /** 자동사냥 상태 (꺼져 있으면 null) */
+  auto: AutoRun | null = null;
   lastWhisperFrom: string | null = null;
   talkingTo: Npc | null = null;
   readonly loginAt = Date.now();
@@ -231,6 +237,7 @@ export class Player extends Creature {
         magic: d.magic,
         offense: d.offense,
         defense: d.defense,
+        range: d.range,
       },
       bonusHp: this.data.bonusHp,
       bonusMp: this.data.bonusMp,

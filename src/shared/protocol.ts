@@ -1,4 +1,5 @@
 // WebSocket 메시지 형식 (JSON). 서버는 한 번에 여러 메시지를 배열로 묶어 보낼 수 있습니다.
+import type { AutoSettings, AutoState } from './autohunt';
 import type { ClassId, Dir, Element, EquipSlot, Role, StatKey, StatusId } from './constants';
 import type {
   AbilityDef,
@@ -37,6 +38,10 @@ export interface MonsterSnapshot extends EntityBase {
   level: number;
   hpPct: number;
   statuses: StatusId[];
+  /** 소환수면 주인(플레이어) 엔티티 id */
+  ownerId?: number;
+  /** 소환수면 주인 이름 */
+  ownerName?: string;
 }
 
 export interface NpcSnapshot extends EntityBase {
@@ -71,6 +76,8 @@ export interface SelfStats {
   magic: number;
   offense: Element;
   defense: Element;
+  /** 무기 사거리 (1 = 근접) */
+  range: number;
 }
 
 export interface SelfState {
@@ -122,6 +129,8 @@ export interface PublicMonsterDef {
   level: number;
   look: MonsterLook;
   boss?: boolean;
+  /** 소환수 전용 */
+  summon?: boolean;
 }
 
 export interface ClientGameData {
@@ -193,7 +202,9 @@ export type S2C =
   | { t: 'levelUp'; level: number }
   | { t: 'gain'; exp: number; gold: number }
   | { t: 'pong'; ts: number }
-  | { t: 'kick'; reason: string };
+  | { t: 'kick'; reason: string }
+  /** 자동사냥 상태. reason 은 꺼진 이유 등 */
+  | { t: 'auto'; on: boolean; state?: AutoState; reason?: string };
 
 // ───────────────────────── 클라이언트 → 서버 ─────────────────────────
 
@@ -210,7 +221,8 @@ export type C2S =
     }
   | { t: 'walk'; dir: Dir; x: number; y: number }
   | { t: 'turn'; dir: Dir }
-  | { t: 'attack' }
+  /** 평타. target 은 원거리 무기일 때 노릴 대상 (없으면 가까운 적) */
+  | { t: 'attack'; target?: number }
   | { t: 'ability'; id: string; target?: number }
   | { t: 'useItem'; slot: number }
   | { t: 'equip'; slot: number }
@@ -233,6 +245,8 @@ export type C2S =
   | { t: 'stat'; stat: StatKey; n: number }
   | { t: 'recall' }
   | { t: 'groupReply'; accept: boolean }
+  /** 자동사냥 켜기/끄기 (켤 때 설정을 함께 보냄) */
+  | { t: 'auto'; on: boolean; settings?: AutoSettings }
   | { t: 'ping'; ts: number };
 
 export type C2SType = C2S['t'];

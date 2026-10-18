@@ -141,6 +141,8 @@ export interface DerivedStats {
   magic: number;
   offense: Element;
   defense: Element;
+  /** 무기 사거리 (1 = 근접, 활은 더 김) */
+  range: number;
 }
 
 export interface DerivedInput {
@@ -171,6 +173,7 @@ export function computeDerived(input: DerivedInput): DerivedStats {
     magic: 0,
     offense: 'none',
     defense: 'none',
+    range: 1,
   };
   let hpBonus = input.bonusHp;
   let mpBonus = input.bonusMp;
@@ -194,6 +197,7 @@ export function computeDerived(input: DerivedInput): DerivedStats {
     if (item.offense) d.offense = item.offense;
     if (item.defense) d.defense = item.defense;
   }
+  if (weapon?.range && weapon.range > 1) d.range = weapon.range;
   if (weapon?.dmg) {
     d.dmgMin = weapon.dmg[0];
     d.dmgMax = weapon.dmg[1];
@@ -213,7 +217,9 @@ export function computeDerived(input: DerivedInput): DerivedStats {
 
 /** 평타/물리 스킬의 기본 피해 (속성/AC/치명타 적용 전) */
 export function physicalBase(d: DerivedStats, level: number, weaponRoll: number): number {
-  return (weaponRoll + d.str * 0.8 + d.dex * 0.2 + d.dmgBonus) * levelScale(level);
+  // 원거리 무기(활)는 민첩이 주로, 근접 무기는 힘이 주로 반영됩니다
+  const statPart = d.range > 1 ? d.dex * 0.8 + d.str * 0.2 : d.str * 0.8 + d.dex * 0.2;
+  return (weaponRoll + statPart + d.dmgBonus) * levelScale(level);
 }
 
 /** 마법 피해/회복의 기본값 */

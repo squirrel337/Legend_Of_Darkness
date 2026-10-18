@@ -21,6 +21,7 @@ import { playerAssail, playerUseAbility } from '../systems/combat';
 import { dropGold, dropItem, equipFromSlot, moveItem, pickup, unequip, useItem } from '../systems/inventory';
 import { ghostRecall, handleTurn, handleWalk } from '../systems/movement';
 import { buy, deposit, depositGold, learn, pickOption, sell, talkToNpc, withdraw, withdrawGold } from '../systems/npc';
+import { handleAuto } from '../systems/autohunt';
 import { allocateStat } from '../systems/progression';
 import type { Player, PlayerLink } from '../world/Player';
 import type { World } from '../world/World';
@@ -276,7 +277,7 @@ export class Session implements PlayerLink {
       case 'turn':
         return handleTurn(p, m.dir);
       case 'attack':
-        return playerAssail(w, p);
+        return playerAssail(w, p, m.target);
       case 'ability':
         return playerUseAbility(w, p, m.id, m.target);
       case 'useItem':
@@ -321,6 +322,8 @@ export class Session implements PlayerLink {
         return ghostRecall(w, p);
       case 'groupReply':
         return w.groups.reply(p, m.accept === true);
+      case 'auto':
+        return handleAuto(w, p, m);
       case 'ping':
         return this.send({ t: 'pong', ts: Number(m.ts) || 0 });
     }

@@ -146,6 +146,11 @@ const DEFAULT_TRIM: Record<ClassId, string> = {
   wizard: '#e8c35a',
   priest: '#d4af37',
   monk: '#c0392b',
+  summoner: '#e05a7a',
+  bard: '#e8b84a',
+  beastkin: '#c8803a',
+  archer: '#6fae4a',
+  gladiator: '#c83a2a',
 };
 
 function buildPalette(look: HumanLook, outfit: ClassId, ghost: boolean): Palette {

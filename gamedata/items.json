@@ -174,5 +174,15 @@
   {"id":"mat_lich_dust","name":"리치의 가루","type":"material","price":1200,"stack":100,"icon":{"shape":"orb","color":"#c8c0a8"},"desc":"상점에 팔 수 있는 전리품."},
   {"id":"mat_demon_horn","name":"마족의 뿔","type":"material","price":1600,"stack":100,"icon":{"shape":"bone","color":"#6a1a1a"},"desc":"상점에 팔 수 있는 전리품."},
   {"id":"mat_dragon_scale","name":"용의 비늘","type":"material","price":2400,"stack":100,"icon":{"shape":"scale","color":"#5a2a8a"},"desc":"상점에 팔 수 있는 전리품."},
-  {"id":"mat_dark_essence","name":"어둠의 정수","type":"material","price":4000,"stack":100,"icon":{"shape":"orb","color":"#2a0a3a"},"desc":"상점에 팔 수 있는 전리품."}
+  {"id":"mat_dark_essence","name":"어둠의 정수","type":"material","price":4000,"stack":100,"icon":{"shape":"orb","color":"#2a0a3a"},"desc":"상점에 팔 수 있는 전리품."},
+  {"id":"w_summoner_1","name":"입문자의 마도서","type":"equip","slot":"weapon","level":5,"classes":["summoner"],"dmg":[3,5],"bonus":{"int":1,"magic":6,"mp":10},"price":800,"icon":{"shape":"book","color":"#8b8b8b"}},
+  {"id":"a_summoner_1","name":"계약자의 예복","type":"equip","slot":"armor","level":5,"classes":["summoner"],"ac":-2,"bonus":{"mp":25},"price":800,"icon":{"shape":"robe","color":"#a83a4a","color2":"#8b8b8b"}},
+  {"id":"w_bard_1","name":"낡은 류트","type":"equip","slot":"weapon","level":5,"classes":["bard"],"dmg":[4,7],"bonus":{"wis":1,"magic":4,"mp":8},"price":800,"icon":{"shape":"lute","color":"#8b8b8b"}},
+  {"id":"a_bard_1","name":"떠돌이 악사의 옷","type":"equip","slot":"armor","level":5,"classes":["bard"],"ac":-3,"bonus":{"mp":15,"hp":10},"price":800,"icon":{"shape":"leather","color":"#3a6a9a","color2":"#8b8b8b"}},
+  {"id":"w_beastkin_1","name":"짐승 발톱","type":"equip","slot":"weapon","level":5,"classes":["beastkin"],"dmg":[6,11],"price":800,"icon":{"shape":"gauntlet","color":"#8b8b8b"}},
+  {"id":"a_beastkin_1","name":"털가죽 허리감개","type":"equip","slot":"armor","level":5,"classes":["beastkin"],"ac":-4,"bonus":{"hp":25},"price":800,"icon":{"shape":"leather","color":"#7a5230","color2":"#8b8b8b"}},
+  {"id":"w_archer_1","name":"사냥꾼의 활","type":"equip","slot":"weapon","level":5,"classes":["archer"],"dmg":[6,10],"range":6,"price":800,"icon":{"shape":"bow","color":"#8b8b8b"}},
+  {"id":"a_archer_1","name":"사냥꾼 조끼","type":"equip","slot":"armor","level":5,"classes":["archer"],"ac":-3,"bonus":{"hp":15,"dex":1},"price":800,"icon":{"shape":"leather","color":"#4a6a3a","color2":"#8b8b8b"}},
+  {"id":"w_gladiator_1","name":"훈련용 쌍검","type":"equip","slot":"weapon","level":5,"classes":["gladiator"],"dmg":[6,11],"price":800,"icon":{"shape":"dualsword","color":"#8b8b8b"}},
+  {"id":"a_gladiator_1","name":"투사의 가죽 갑주","type":"equip","slot":"armor","level":5,"classes":["gladiator"],"ac":-4,"bonus":{"hp":20},"price":800,"icon":{"shape":"armor","color":"#8a3a2a","color2":"#8b8b8b"}}
 ]

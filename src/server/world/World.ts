@@ -8,6 +8,8 @@ import type { GameData } from '../gamedata';
 import { log } from '../log';
 import { nameKey, type AuditLog, type CharacterData, type CharacterStore } from '../storage';
 import { monsterRegen, monsterTick } from '../systems/ai';
+import { autoHuntTick, stopAuto } from '../systems/autohunt';
+import { dismissSummons, onOwnerMoved, summonTick } from '../systems/summons';
 import { tickStatuses } from '../systems/combat';
 import { GroupManager } from '../systems/groups';
 import { MapInstance } from './MapInstance';
@@ -87,6 +89,7 @@ export class World {
 
     for (const map of this.maps.values()) {
       for (const sp of map.spawners) sp.tick(now);
+      summonTick(this, map, now);
       const active = map.players.size > 0;
       for (const m of map.monsters) {
         if (active) monsterTick(this, m, now);
@@ -98,6 +101,7 @@ export class World {
     }
     for (const p of this.players.values()) {
       tickStatuses(p, now);
+      autoHuntTick(this, p, now);
       if (regen && !p.isDead && p.map) {
         const r = regenAmounts(p.derived, p.map.safe, now - p.lastCombatAt < 6000);
         const hp = Math.min(p.maxHp - p.hp, r.hp);
@@ -181,6 +185,8 @@ export class World {
   /** 캐릭터가 게임에서 나갑니다 (저장 포함) */
   leaveGame(p: Player): void {
     if (this.players.get(nameKey(p.name)) !== p) return;
+    stopAuto(p);
+    dismissSummons(this, p);
     this.groups.onLogout(p);
     p.syncData();
     p.data.playTimeSec += Math.floor((Date.now() - p.loginAt) / 1000);
@@ -204,6 +210,7 @@ export class World {
     p.data.mapId = map.id;
     p.markSelf();
     this.groups.touch(p);
+    onOwnerMoved(this, p);
   }
 
   /** 다른 맵(또는 같은 맵의 다른 위치)으로 이동시킵니다 */
