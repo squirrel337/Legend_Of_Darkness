@@ -17,6 +17,8 @@ const TABS: { id: TabId; key: string; name: string; icon: string }[] = [
 const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 /** 칸 수 (3줄 x 16칸) */
 const PANE_SLOTS = 48;
+const AUTO_TITLE_OFF = '자동사냥 켜기 (Z) · 오른쪽 클릭/Shift+Z: 설정';
+const AUTO_TITLE_ON = '자동사냥 끄기 (Z) · 오른쪽 클릭/Shift+Z: 설정';
 
 export class Panel {
   private readonly tabs = new Map<TabId, HTMLButtonElement>();
@@ -49,8 +51,12 @@ export class Panel {
     const menu = (icon: string, label: string, title: string, onclick: () => void) =>
       h('button', { class: 'menu-btn', title, onclick }, svgIcon(icon), h('span', null, label));
     this.gmBtn = menu('crown', '운영자', '운영자 도구 (F2)', () => game.gm.toggle());
-    this.autoBtn = menu('auto', '자동', '자동사냥 켜기/끄기 (Z)', () => game.toggleAuto());
+    this.autoBtn = menu('auto', '자동', AUTO_TITLE_OFF, () => game.toggleAuto());
     this.autoBtn.classList.add('auto-btn');
+    this.autoBtn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      game.openAutoSettings();
+    });
     this.recallBtn = menu('home', '귀환', '유령일 때 마을로 돌아가기 (R)', () => game.recall());
     this.gmBtn.classList.add('hidden');
     this.recallBtn.classList.add('hidden');
@@ -69,6 +75,12 @@ export class Panel {
     );
     this.bodies.get('chat')!.appendChild(game.chat.log);
     this.setTab('skills');
+  }
+
+  /** 자동사냥 단추: 켜져 있으면 빛나는 모양 */
+  setAuto(on: boolean): void {
+    this.autoBtn.classList.toggle('on', on);
+    this.autoBtn.title = on ? AUTO_TITLE_ON : AUTO_TITLE_OFF;
   }
 
   /** 권한/유령 상태에 따라 단추를 보이거나 숨깁니다 */

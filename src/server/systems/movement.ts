@@ -2,6 +2,10 @@
 import { DIR_DX, DIR_DY, isDir } from '../../shared/constants';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
+import { stopAuto } from './autohunt';
+
+/** 직접 조작하면 자동사냥을 멈춥니다 */
+const MANUAL_STOP = '직접 움직여서 자동사냥을 멈췄습니다.';
 
 function correct(p: Player): void {
   p.send({ t: 'pos', x: p.x, y: p.y, dir: p.dir });
@@ -10,6 +14,7 @@ function correct(p: Player): void {
 export function handleWalk(world: World, p: Player, dir: unknown, fromX: unknown, fromY: unknown, now = Date.now()): void {
   const map = p.map;
   if (!map || !isDir(dir)) return;
+  if (p.auto) stopAuto(p, MANUAL_STOP);
   if (fromX !== p.x || fromY !== p.y) return correct(p);
   if (p.hasStatus('sleep') || p.hasStatus('paralyze')) return correct(p);
   if (!p.moveBucket.take(1, now)) return correct(p);
@@ -40,7 +45,9 @@ export function handleWalk(world: World, p: Player, dir: unknown, fromX: unknown
 }
 
 export function handleTurn(p: Player, dir: unknown): void {
-  if (!p.map || !isDir(dir) || p.dir === dir) return;
+  if (!p.map || !isDir(dir)) return;
+  if (p.auto) stopAuto(p, MANUAL_STOP);
+  if (p.dir === dir) return;
   p.dir = dir;
   p.map.broadcast({ t: 'turn', id: p.id, dir }, p);
 }

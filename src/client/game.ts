@@ -12,6 +12,7 @@ import type { PublicServerInfo } from '../shared/types';
 import { Net } from './net';
 import { Renderer } from './render/renderer';
 import { ClientState, entityFromSnapshot, entityPos, snapTo, startMove, type CEntity } from './state';
+import { AutoHuntUi, installAutoKeys } from './ui/autohunt';
 import { ChatBox } from './ui/chat';
 import { CharWindow } from './ui/charwin';
 import { h } from './ui/dom';
@@ -230,7 +231,7 @@ export class Game {
       }
       case 'turn': {
         const e = st.entities.get(m.id);
-        if (e && e.id !== st.selfId) e.dir = m.dir;
+        if (e && (e.id !== st.selfId || this.autoOn)) e.dir = m.dir;
         break;
       }
       case 'jump': {
@@ -254,7 +255,7 @@ export class Game {
         if (!e) break;
         e.actKind = m.a;
         e.actStart = now;
-        if (e.id !== st.selfId) e.dir = m.dir;
+        if (e.id !== st.selfId || this.autoOn) e.dir = m.dir;
         break;
       }
       case 'dmg': {
@@ -379,6 +380,8 @@ export class Game {
     const me = st.me;
     const self = st.self;
     if (!me || !self) return;
+    // 자동사냥 중에는 서버가 걷게 합니다 (클라이언트는 걷기를 보내지 않음)
+    if (this.autoOn) return;
     const pos = entityPos(me, now);
     if (pos.moving && pos.t < 0.82) return;
     const held = this.heldDirs.length ? this.heldDirs[this.heldDirs.length - 1]! : null;
@@ -444,23 +447,78 @@ export class Game {
   }
 
   // ───────────────────────── 자동사냥 ─────────────────────────
-  // TODO(자동사냥): 설정 창, 상태 표시, 이동 처리. 아래 메서드 이름은 유지하세요.
+  // 자동사냥은 서버가 대신 움직이고 싸웁니다. 켜져 있는 동안 클라이언트는 걷기를 보내지 않고,
+  // 서버가 보내는 걸음/방향을 그대로 그립니다. 방향키나 땅 클릭으로 직접 움직이면 꺼집니다.
 
   /** 서버가 알려 준 자동사냥 상태 */
   autoOn = false;
+  private autoUiInst: AutoHuntUi | null = null;
+  /** 사용자가 끄기를 눌렀는지 (꺼진 이유 알림의 색) */
+  private autoUserOff = false;
+  /** Shift+Z: 자동사냥 설정 창, Esc: 닫기 (해제 함수) */
+  private readonly autoKeysOff = installAutoKeys(
+    () => this.ingame,
+    () => this.openAutoSettings(),
+    () => this.autoUiInst?.closeSettings() ?? false,
+  );
+
+  private get autoUi(): AutoHuntUi {
+    this.autoUiInst ??= new AutoHuntUi(this.root, this);
+    return this.autoUiInst;
+  }
 
   /** 자동사냥 켜기/끄기 (Z 키, 패널의 '자동' 단추) */
   toggleAuto(): void {
-    this.hud.notice('자동사냥은 아직 준비 중입니다.', 'warn');
+    if (!this.ingame) return;
+    if (this.autoOn) {
+      this.autoUserOff = true;
+      this.net.send({ t: 'auto', on: false });
+      this.setAutoLocal(false);
+      return;
+    }
+    this.autoUserOff = false;
+    this.path = [];
+    this.pending = null;
+    this.net.send({ t: 'auto', on: true, settings: this.autoUi.settings() });
+  }
+
+  /** 자동사냥 설정 창 (Shift+Z, '자동' 단추 오른쪽 클릭) */
+  openAutoSettings(): void {
+    if (this.ingame) this.autoUi.openSettings();
+  }
+
+  /** 설정 창에서 값을 바꿨을 때: 켜져 있으면 새 설정으로 이어 갑니다 */
+  autoSettingsChanged(): void {
+    if (this.autoOn) this.net.send({ t: 'auto', on: true, settings: this.autoUi.settings() });
+  }
+
+  private setAutoLocal(on: boolean, state?: Extract<S2C, { t: 'auto' }>['state']): void {
+    this.autoOn = on;
+    this.panel.setAuto(on);
+    this.autoUi.setState(on, state);
   }
 
   private onAuto(m: Extract<S2C, { t: 'auto' }>): void {
-    this.autoOn = m.on;
+    const was = this.autoOn;
+    if (m.on) {
+      // 서버가 움직이므로 클릭 이동 예약은 버립니다
+      this.path = [];
+      this.pending = null;
+      this.heldDirs = [];
+    }
+    this.setAutoLocal(m.on, m.state);
+    if (m.on && !was) this.hud.notice('자동사냥을 시작합니다. (Z: 끄기 · Shift+Z: 설정)', 'good');
+    if (!m.on && m.reason) this.hud.notice(m.reason, this.autoUserOff ? 'info' : 'warn');
+    if (!m.on) this.autoUserOff = false;
   }
 
   /** 사용자가 직접 움직이면 자동사냥을 끕니다 */
   private cancelAuto(): void {
-    if (this.autoOn) this.net.send({ t: 'auto', on: false });
+    if (!this.autoOn) return;
+    this.autoUserOff = true;
+    this.net.send({ t: 'auto', on: false });
+    // 서버의 답을 기다리지 않고 바로 직접 조작으로 넘어갑니다
+    this.setAutoLocal(false);
   }
 
   // ───────────────────────── 행동 ─────────────────────────
