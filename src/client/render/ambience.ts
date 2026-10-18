@@ -35,12 +35,13 @@ export const MAP_AMBIENCE: Readonly<Record<string, AmbienceKind>> = {
 };
 
 export const AMBIENCES: Readonly<Record<AmbienceKind, Ambience>> = {
-  // 낮 (R2): 가장자리만 살짝
-  day: { kind: 'day', palette: 'r2', tint: null, vignette: { inner: 0.72, outer: 1.55, alpha: 0.42, color: [10, 12, 6] } },
+  // 낮 (R2): 원작 광장은 모서리까지 고르게 밝아 가장자리만 아주 살짝
+  day: { kind: 'day', palette: 'r2', tint: null, vignette: { inner: 0.78, outer: 1.55, alpha: 0.2, color: [10, 12, 6] } },
   // 흐림: 살짝 회청색, 중간 비네트
   overcast: { kind: 'overcast', palette: 'r3', tint: [90, 98, 112, 0.16], vignette: { inner: 0.52, outer: 1.42, alpha: 0.66, color: [8, 10, 14] } },
-  // 저녁 숲길 (R1): 어두운 청록 기운, 모서리는 거의 검정, 캐릭터 둘레만 넓게 밝음
-  dusk: { kind: 'dusk', palette: 'r1', tint: [4, 12, 12, 0.13], vignette: { inner: 0.4, outer: 1.28, alpha: 0.97, color: [2, 5, 4] } },
+  // 저녁 숲길 (R1): 옅은 청록 기운, 모서리는 거의 검정, 캐릭터 둘레만 넓게 밝음.
+  // 색조가 짙으면 가운데 흙길·풀빛까지 잿빛으로 죽어 원작보다 어둡고 흐려 보이므로 아주 옅게
+  dusk: { kind: 'dusk', palette: 'r1', tint: [4, 12, 12, 0.06], vignette: { inner: 0.4, outer: 1.28, alpha: 0.97, color: [2, 5, 4] } },
   // 던전: 빛 구멍 어둠 위에 비네트
   dark: { kind: 'dark', palette: 'r1', tint: null, vignette: { inner: 0.42, outer: 1.3, alpha: 0.82, color: [2, 2, 6] } },
 };
