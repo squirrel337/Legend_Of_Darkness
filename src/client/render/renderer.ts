@@ -4,7 +4,8 @@ import { tileInfo } from '../../shared/tiles';
 import { entityPos, isAlly, type CEntity, type ClientState } from '../state';
 import { Effects, type Point } from './effects';
 import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
-import { drawChibiFast, type ChibiPose } from './chibi';
+import type { ChibiPose } from './chibi';
+import { CLASSIC_HALF_WIDTH, CLASSIC_HEAD_TOP, classicHeadTop, drawClassicFast } from './classic';
 import { drawGroundItem, drawMonster } from './sprites';
 import { drawFlame, drawLiquid, floorCanvas, objectSprite, wallCanvas } from './tiles';
 
@@ -113,8 +114,8 @@ export class Renderer {
     for (const e of this.state.entities.values()) {
       if (e.dying) continue;
       const p = this.worldToScreen(this.entityPoint(e, now));
-      const h = e.type === 'item' ? 24 : e.type === 'monster' ? 48 : 58;
-      const w = e.type === 'item' ? 14 : e.type === 'monster' ? 15 : 14;
+      const h = e.type === 'item' ? 24 : e.type === 'monster' ? 48 : e.look ? classicHeadTop(e.look) + 2 : CLASSIC_HEAD_TOP;
+      const w = e.type === 'item' ? 14 : e.type === 'monster' ? 15 : CLASSIC_HALF_WIDTH;
       if (mx >= p.sx - w && mx <= p.sx + w && my >= p.sy - h && my <= p.sy + 4) {
         const pos = entityPos(e, now);
         const depth = pos.x + pos.y + (e.type === 'item' ? -0.5 : 0) - (isAlly(e) ? 1000 : 0);
@@ -332,18 +333,20 @@ export class Renderer {
         };
         const hidden = e.statuses.includes('hide');
         const alpha = hidden ? (e.id === this.state.selfId ? 0.45 : 0.18) : e.ghost ? 0.62 : 1;
-        if (alpha < 1 || flash) this.drawBuffered((b) => drawChibiFast(b, look, pose, this.dpr), alpha, flash);
-        else drawChibiFast(ctx, look, pose, this.dpr);
+        if (alpha < 1 || flash) this.drawBuffered((b) => drawClassicFast(b, look, pose, this.dpr), alpha, flash);
+        else drawClassicFast(ctx, look, pose, this.dpr);
       }
       if (e.role === 'admin' || e.role === 'gm') {
+        // 운영자 왕관: 머리(모자) 바로 위
+        const top = -(look ? classicHeadTop(look) : CLASSIC_HEAD_TOP) - 3 - (e.ghost ? 3 : 0);
         ctx.fillStyle = 'rgba(255,215,0,0.9)';
         ctx.strokeStyle = 'rgba(60,40,0,0.8)';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(-4, -70);
-        ctx.lineTo(0, -76);
-        ctx.lineTo(4, -70);
-        ctx.lineTo(0, -67);
+        ctx.moveTo(-4, top - 3);
+        ctx.lineTo(0, top - 9);
+        ctx.lineTo(4, top - 3);
+        ctx.lineTo(0, top);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
@@ -381,7 +384,9 @@ export class Renderer {
       if (e.statuses.includes('sleep')) {
         ctx.fillStyle = '#c8d8ff';
         ctx.font = `bold 11px ${FONT}`;
-        ctx.fillText('z', 10 + Math.sin(now / 300) * 2, -62);
+        // 사람은 머리 바로 위, 몬스터는 예전 자리
+        const zy = e.look && e.type === 'player' ? -(classicHeadTop(e.look) + 2) : -62;
+        ctx.fillText('z', 10 + Math.sin(now / 300) * 2, zy);
       }
     }
     ctx.restore();
