@@ -189,18 +189,18 @@ export class AutoHuntUi {
     this.win.show(
       '자동사냥 설정',
       h('div', { class: 'section-title' }, '회복'),
-      slider('체력', 'hpPct', 0, 95, 5, (v) => (v > 0 ? `${v}% 아래에서 회복` : '쓰지 않음')),
-      slider('마나', 'mpPct', 0, 95, 5, (v) => (v > 0 ? `${v}% 아래에서 회복` : '쓰지 않음')),
+      slider('체력', 'hpPct', 0, 95, 5, (v) => (v > 0 ? `${v}% 아래면 회복` : '쓰지 않음')),
+      slider('마나', 'mpPct', 0, 95, 5, (v) => (v > 0 ? `${v}% 아래면 회복` : '쓰지 않음')),
       h('div', { class: 'section-title' }, '사냥'),
       slider('범위', 'radius', AUTO_RADIUS_MIN, AUTO_RADIUS_MAX, 1, (v) => `시작한 곳에서 ${v}칸`),
-      h('label', { class: 'auto-row' }, h('span', { class: 'auto-label' }, '레벨'), gap, h('span', { class: 'auto-val' }, '내 레벨 + 이만큼까지 (0: 제한 없음)')),
+      h('label', { class: 'auto-row' }, h('span', { class: 'auto-label' }, '레벨'), gap, h('span', { class: 'auto-val wide' }, '내 레벨 + 이만큼까지 (0 = 제한 없음)')),
       h(
         'div',
         { class: 'auto-checks' },
         check('pickup', '전리품 줍기', '내 전리품과 주인 없는 물건을 줍습니다'),
         check('buffs', '강화 유지', '꺼진 강화 기술을 다시 걸고, 소환수를 부릅니다'),
         check('recall', '위험하면 귀환', '물약이 떨어져 위험하면 귀환 주문서로 마을에 돌아갑니다'),
-        check('autoAbilities', '공격 기술 자동', '아래에서 고른 기술이 없으면 배운 공격 기술을 알아서 씁니다'),
+        check('autoAbilities', '공격 기술 자동', '아래에서 공격 기술을 고르지 않았으면 배운 공격 기술을 알아서 씁니다'),
       ),
       h('div', { class: 'section-title' }, '쓸 기술 (위에 있을수록 먼저)'),
       this.abilityList(),
@@ -212,7 +212,12 @@ export class AutoHuntUi {
   private abilityList(): HTMLElement {
     const st = this.game.state;
     const learned = [...st.skills, ...st.spells].map((id) => st.abilities.get(id)).filter((d): d is AbilityDef => d !== undefined);
-    const chosen = this.cur.abilities.filter((id) => learned.some((d) => d.id === id));
+    // 고를 수 있는 것은 목록이 실제로 정하는 기술뿐입니다: 공격·약화(고른 순서대로 씀), 강화·소환(꺼져 있어도 씀).
+    // 회복·마나 기술은 기준 아래로 떨어지면 언제나 쓰고, 그 밖의 기술(돌진, 부활 등)은 자동사냥에서 쓰지 않습니다.
+    const role = new Map(learned.map((d) => [d.id, abilityRole(d)]));
+    const selectable = (id: string) => ['공격', '약화', '강화', '소환'].includes(role.get(id) ?? '');
+    const ordered = (id: string) => ['공격', '약화'].includes(role.get(id) ?? '');
+    const chosen = this.cur.abilities.filter(selectable);
     const rest = learned.filter((d) => !chosen.includes(d.id));
     const order = [...chosen.map((id) => learned.find((d) => d.id === id)!), ...rest];
     const list = h('div', { class: 'auto-abilities' });
@@ -221,7 +226,7 @@ export class AutoHuntUi {
       return list;
     }
     const move = (id: string, d: -1 | 1) => {
-      const arr = this.cur.abilities.filter((x) => learned.some((l) => l.id === x));
+      const arr = this.cur.abilities.filter(selectable);
       const i = arr.indexOf(id);
       const j = i + d;
       if (i < 0 || j < 0 || j >= arr.length) return;
@@ -233,35 +238,38 @@ export class AutoHuntUi {
     order.forEach((def) => {
       const on = chosen.includes(def.id);
       const idx = chosen.indexOf(def.id);
-      const role = abilityRole(def);
-      const box = h('input', {
-        type: 'checkbox',
-        checked: on,
-        onchange: () => {
-          const arr = this.cur.abilities.filter((x) => learned.some((l) => l.id === x));
-          this.cur.abilities = box.checked ? [...arr, def.id] : arr.filter((x) => x !== def.id);
-          this.save();
-          list.replaceWith(this.abilityList());
-        },
-      });
+      const r = role.get(def.id) ?? '';
+      const box = selectable(def.id)
+        ? h('input', {
+            type: 'checkbox',
+            checked: on,
+            onchange: (e: Event) => {
+              const arr = this.cur.abilities.filter(selectable);
+              this.cur.abilities = (e.target as HTMLInputElement).checked ? [...arr, def.id] : arr.filter((x) => x !== def.id);
+              this.save();
+              list.replaceWith(this.abilityList());
+            },
+          })
+        : h('span', { class: 'auto-ab-box', title: r ? '기준 아래로 떨어지면 언제나 씁니다' : '자동사냥에서는 쓰지 않습니다' });
       const row = h(
         'div',
-        { class: `auto-ab ${on ? 'on' : ''}` },
+        { class: `auto-ab ${on ? 'on' : ''} ${selectable(def.id) ? '' : 'fixed'}` },
         box,
         h('img', { src: abilityIconUrl(def.icon, 24), alt: '', draggable: false }),
         h('span', { class: 'auto-ab-name' }, def.name, h('small', null, ` ${def.kind === 'skill' ? '기술' : '마법'}${def.mp ? ` · 마나 ${def.mp}` : ''}`)),
-        role ? h('span', { class: 'auto-ab-role' }, role) : null,
-        h('button', { class: 'btn tiny', title: '먼저 쓰기', disabled: !on || idx <= 0, onclick: () => move(def.id, -1) }, '▲'),
-        h('button', { class: 'btn tiny', title: '나중에 쓰기', disabled: !on || idx < 0 || idx >= chosen.length - 1, onclick: () => move(def.id, 1) }, '▼'),
+        r ? h('span', { class: 'auto-ab-role' }, r) : null,
+        ordered(def.id) ? h('button', { class: 'btn tiny', title: '먼저 쓰기', disabled: !on || idx <= 0, onclick: () => move(def.id, -1) }, '▲') : null,
+        ordered(def.id) ? h('button', { class: 'btn tiny', title: '나중에 쓰기', disabled: !on || idx < 0 || idx >= chosen.length - 1, onclick: () => move(def.id, 1) }, '▼') : null,
       );
       this.game.tooltip.attach(row, () => abilityTooltip(def));
       list.appendChild(row);
     });
+    const attackChosen = chosen.some(ordered);
     list.appendChild(
       h(
         'div',
         { class: 'hint' },
-        chosen.length > 0 ? '고른 기술만 고른 순서대로 씁니다. 회복 기술은 체력이 낮으면 언제나 씁니다.' : '고른 기술이 없으면 배운 공격 기술 중 좋은 것을 알아서 씁니다.',
+        `${attackChosen ? '고른 공격 기술만 고른 순서대로 씁니다.' : '공격 기술을 고르지 않으면 배운 공격 기술 중 좋은 것을 알아서 씁니다 (공격 기술 자동).'} 회복·마나 기술은 기준 아래로 떨어지면 언제나 씁니다.`,
       ),
     );
     return list;

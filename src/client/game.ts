@@ -27,6 +27,10 @@ import { Windows } from './ui/windows';
 
 const ARROWS: Record<string, Dir> = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
 const DEATH_FADE_MS = 500;
+/** 자동사냥 끄기의 답을 이보다 오래 기다리지는 않습니다 */
+const AUTO_STOP_WAIT_MS = 3000;
+/** 한 번의 클릭 이동에서 서버가 위치를 이보다 많이 바로잡으면 그 이동은 포기합니다 */
+const MAX_CORRECTIONS = 3;
 
 type Pending = { kind: 'talk' | 'pickup' | 'approach'; id: number } | null;
 
@@ -247,7 +251,7 @@ export class Game {
         if (!me) break;
         snapTo(me, m.x, m.y);
         me.dir = m.dir;
-        this.path = [];
+        this.onPosCorrected(now);
         break;
       }
       case 'act': {
@@ -382,6 +386,8 @@ export class Game {
     if (!me || !self) return;
     // 자동사냥 중에는 서버가 걷게 합니다 (클라이언트는 걷기를 보내지 않음)
     if (this.autoOn) return;
+    // 자동사냥을 끄는 중이거나 서버가 위치를 바로잡은 직후에는 잠깐 기다립니다
+    if (!this.walkReady(now)) return;
     const pos = entityPos(me, now);
     if (pos.moving && pos.t < 0.82) return;
     const held = this.heldDirs.length ? this.heldDirs[this.heldDirs.length - 1]! : null;
@@ -399,16 +405,8 @@ export class Game {
         me.dir = dir;
         this.net.send({ t: 'turn', dir });
       }
-      if (held === null) {
-        // 경로가 막혔으면 다시 계산
-        const goal = this.renderer.walkTarget;
-        this.path = [];
-        if (goal && (goal.x !== me.x || goal.y !== me.y)) {
-          const p = this.findPath(me.x, me.y, goal.x, goal.y, this.pending !== null);
-          if (p) this.path = p;
-          else this.pending = null;
-        }
-      }
+      // 경로가 막혔으면 다시 계산
+      if (held === null) this.repathToGoal();
       return;
     }
     if (held === null) this.path.shift();
@@ -455,6 +453,19 @@ export class Game {
   private autoUiInst: AutoHuntUi | null = null;
   /** 사용자가 끄기를 눌렀는지 (꺼진 이유 알림의 색) */
   private autoUserOff = false;
+  /**
+   * 끄기를 보내고 서버의 답(on:false)을 기다리는 중인지. 그 사이에 오는 on:true 는 서버가 끄기를 받기 전에 보낸
+   * 상태 알림이므로 무시합니다. 직접 걷기도 답이 올 때까지 미룹니다: 답보다 먼저 보낸 서버의 걸음이 아직 오는 중이라,
+   * 바로 걸으면 서버가 이미 떠난 자리에서 출발하게 되어 거절당하고(pos) 클릭 이동이 끊깁니다.
+   */
+  private autoStopping = false;
+  /** 이 시각까지는 직접 걷기를 보내지 않습니다 (자동사냥을 끄는 중이거나, 서버가 위치를 바로잡은 직후) */
+  private walkHoldUntil = 0;
+  /** 기다림이 끝나면 지금 자리에서 클릭 목표까지 길을 다시 찾습니다 */
+  private repathAfterHold = false;
+  /** 한 번의 클릭 이동(목표) 동안 서버가 위치를 바로잡은 횟수 (너무 많으면 포기) */
+  private corrections = 0;
+  private correctionsFor: object | null = null;
   /** Shift+Z: 자동사냥 설정 창, Esc: 닫기 (해제 함수) */
   private readonly autoKeysOff = installAutoKeys(
     () => this.ingame,
@@ -470,12 +481,7 @@ export class Game {
   /** 자동사냥 켜기/끄기 (Z 키, 패널의 '자동' 단추) */
   toggleAuto(): void {
     if (!this.ingame) return;
-    if (this.autoOn) {
-      this.autoUserOff = true;
-      this.net.send({ t: 'auto', on: false });
-      this.setAutoLocal(false);
-      return;
-    }
+    if (this.autoOn) return this.cancelAuto();
     this.autoUserOff = false;
     this.path = [];
     this.pending = null;
@@ -499,12 +505,19 @@ export class Game {
   }
 
   private onAuto(m: Extract<S2C, { t: 'auto' }>): void {
+    // 끄기의 답보다 먼저 온 on:true 는 서버가 끄기를 받기 전에 보낸 것입니다 (다시 켜지 않고, 입력도 지우지 않음)
+    if (m.on && this.autoStopping) return;
     const was = this.autoOn;
     if (m.on) {
       // 서버가 움직이므로 클릭 이동 예약은 버립니다
       this.path = [];
       this.pending = null;
       this.heldDirs = [];
+    } else if (this.autoStopping) {
+      // 끄기의 답: 그 앞에 서버가 보낸 걸음까지 모두 받았으므로 지금 자리에서 직접 걷기를 시작합니다
+      this.autoStopping = false;
+      this.walkHoldUntil = 0;
+      this.repathAfterHold = true;
     }
     this.setAutoLocal(m.on, m.state);
     if (m.on && !was) this.hud.notice('자동사냥을 시작합니다. (Z: 끄기 · Shift+Z: 설정)', 'good');
@@ -512,13 +525,61 @@ export class Game {
     if (!m.on) this.autoUserOff = false;
   }
 
-  /** 사용자가 직접 움직이면 자동사냥을 끕니다 */
+  /** 사용자가 끄기를 누르거나 직접 움직이면 자동사냥을 끕니다 */
   private cancelAuto(): void {
     if (!this.autoOn) return;
     this.autoUserOff = true;
     this.net.send({ t: 'auto', on: false });
-    // 서버의 답을 기다리지 않고 바로 직접 조작으로 넘어갑니다
+    // 화면은 바로 직접 조작으로 바꾸고, 누른 방향키와 클릭 목표는 그대로 둔 채 걷기만 서버의 답이 올 때까지 미룹니다
     this.setAutoLocal(false);
+    this.autoStopping = true;
+    this.walkHoldUntil = performance.now() + AUTO_STOP_WAIT_MS;
+    this.repathAfterHold = true;
+  }
+
+  /** 직접 걷기를 보내도 되는지. 기다림이 끝났으면 클릭 목표까지 길을 다시 찾습니다 (updateMovement) */
+  private walkReady(now: number): boolean {
+    if (now < this.walkHoldUntil) return false;
+    // 끄기의 답이 끝내 오지 않아도 (연결 문제 등) 더 기다리지 않습니다
+    this.autoStopping = false;
+    if (this.repathAfterHold) {
+      this.repathAfterHold = false;
+      this.repathToGoal();
+    }
+    return true;
+  }
+
+  /**
+   * 서버가 내 위치를 바로잡았을 때 ('pos'): 그 앞에 보낸 걸음들의 답이 아직 오는 중일 수 있으므로 왕복 시간만큼
+   * 기다렸다가 다시 걷습니다. 클릭 이동 중이었으면 목표는 그대로 두고 바로잡힌 자리에서 길을 다시 찾습니다
+   * (같은 목표에서 너무 자주 바로잡히면 포기).
+   */
+  private onPosCorrected(now: number): void {
+    this.walkHoldUntil = Math.max(this.walkHoldUntil, now + Math.min(1000, Math.max(120, this.net.latency + 60)));
+    const goal = this.renderer.walkTarget;
+    if (goal !== this.correctionsFor) {
+      this.correctionsFor = goal;
+      this.corrections = 0;
+    }
+    const walking = this.path.length > 0 || this.pending !== null;
+    if (walking && ++this.corrections <= MAX_CORRECTIONS) {
+      this.repathAfterHold = true;
+      return;
+    }
+    this.path = [];
+    this.pending = null;
+  }
+
+  /** 클릭 이동 중이면 지금 자리에서 목표(renderer.walkTarget)까지 길을 다시 찾습니다 */
+  private repathToGoal(): void {
+    const me = this.state.me;
+    const goal = this.renderer.walkTarget;
+    const walking = this.path.length > 0 || this.pending !== null;
+    this.path = [];
+    if (!me || !goal || !walking) return;
+    const path = this.findPath(me.x, me.y, goal.x, goal.y, this.pending !== null && this.pending.kind !== 'pickup');
+    if (path) this.path = path;
+    else this.pending = null;
   }
 
   // ───────────────────────── 행동 ─────────────────────────

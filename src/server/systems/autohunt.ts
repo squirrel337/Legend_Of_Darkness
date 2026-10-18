@@ -2,7 +2,7 @@
 // 브라우저 탭이 백그라운드에 있어도 멈추지 않도록 모든 판단을 서버에서 합니다.
 // 행동은 직접 조작과 같은 규칙(걷기 속도, 평타 대기, 기술 재사용 대기·마나, 아이템 대기)을 따릅니다.
 import { sanitizeAutoSettings, type AutoSettings, type AutoState } from '../../shared/autohunt';
-import { DIR_DX, DIR_DY, STATUS_INFO, WALK_MS, dirTowards, type StatusId } from '../../shared/constants';
+import { DIR_DX, DIR_DY, SPELL_GCD_MS, STATUS_INFO, WALK_MS, dirTowards, type StatusId } from '../../shared/constants';
 import { magicBase, physicalBase } from '../../shared/formulas';
 import type { AbilityDef, ItemDef } from '../../shared/types';
 import { log } from '../log';
@@ -16,8 +16,12 @@ import { canFit } from './character';
 import { playerAssail, playerUseAbility } from './combat';
 import { pickup, useItem } from './inventory';
 
-/** 한 칸 걷는 간격 (직접 걷기보다 조금 느리게) */
+/** 한 칸 걷는 평균 간격 (직접 걷기보다 조금 느리게) */
 export const AUTO_STEP_MS = Math.round(WALK_MS * 1.1);
+/** 걸음 사이의 가장 짧은 간격 (직접 걸을 때 클라이언트가 다음 걸음을 보내는 간격과 같게) */
+const AUTO_STEP_MIN_MS = Math.round(WALK_MS * 0.82);
+/** 월드 틱 간격 (World.ts 의 TICK_MS. World.ts 가 이 파일을 불러오므로 거꾸로 불러오지 않고 같은 값을 둡니다) */
+const TICK_MS = 100;
 /** 판단 간격 */
 const THINK_MS = 150;
 /** 길찾기로 살펴보는 걸음 수 */
@@ -56,8 +60,10 @@ export interface AutoRun {
   startedAt: number;
   /** 다음에 판단할 시각 */
   nextThinkAt: number;
-  /** 다음 걸음을 걸을 수 있는 시각 */
+  /** 다음 걸음을 걸을 예정 시각 (실제로는 반 틱 일찍부터 걸을 수 있음, stepReadyAt) */
   nextStepAt: number;
+  /** 마지막으로 걸은 시각 */
+  lastStepAt: number;
   /** 지금 노리는 몬스터 */
   target: Monster | null;
   targetId: number | null;
@@ -118,6 +124,7 @@ function newRun(p: Player, settings: AutoSettings, now: number): AutoRun {
     startedAt: now,
     nextThinkAt: now,
     nextStepAt: now,
+    lastStepAt: 0,
     target: null,
     targetId: null,
     targetBest: Infinity,
@@ -338,15 +345,18 @@ class Ctx {
     this.fieldCache = null;
   }
 
-  /** 공격 기술 (사용 순서) */
+  /** 직접 고른 공격/약화 기술 (고른 순서) */
+  get chosenOffense(): AbilityDef[] {
+    return this.s.abilities
+      .map((id) => this.learned.find((d) => d.id === id))
+      .filter((d): d is AbilityDef => d !== undefined && (roleOf(d) === 'attack' || roleOf(d) === 'debuff'));
+  }
+
+  /** 공격 기술 (사용 순서). 고른 공격 기술이 없으면 (회복·강화 기술만 골랐어도) 배운 공격 기술을 알아서 고릅니다 */
   get offense(): AbilityDef[] {
-    const s = this.s;
-    if (s.abilities.length > 0) {
-      return s.abilities
-        .map((id) => this.learned.find((d) => d.id === id))
-        .filter((d): d is AbilityDef => d !== undefined && (roleOf(d) === 'attack' || roleOf(d) === 'debuff'));
-    }
-    if (!s.autoAbilities) return [];
+    const chosen = this.chosenOffense;
+    if (chosen.length > 0) return chosen;
+    if (!this.s.autoAbilities) return [];
     return this.learned.filter((d) => roleOf(d) === 'attack' || roleOf(d) === 'debuff');
   }
 
@@ -475,9 +485,18 @@ function firstStep(map: MapInstance, f: Field, goal: number): Pt | null {
   return { x, y: (k - x) / map.width };
 }
 
+/**
+ * 다음 걸음을 걸을 수 있는지. 판단은 월드 틱(100ms)마다만 하므로 정확히 그 시각에 맞추면 한 칸이 300ms 가 됩니다.
+ * 그래서 반 틱 일찍부터 걷게 하고, 이어서 걸을 때는 지난 걸음의 예정 시각에서 다음 걸음을 잽니다 (stepTo).
+ */
+function stepReadyAt(a: AutoRun): number {
+  return Math.max(a.nextStepAt - TICK_MS / 2, a.lastStepAt + AUTO_STEP_MIN_MS);
+}
+
 function canStep(c: Ctx): boolean {
-  if (c.now >= c.a.nextStepAt) return true;
-  wake(c, c.a.nextStepAt);
+  const at = stepReadyAt(c.a);
+  if (c.now >= at) return true;
+  wake(c, at);
   return false;
 }
 
@@ -495,8 +514,11 @@ function stepTo(c: Ctx, x: number, y: number): boolean {
   p.dir = d;
   map.move(p, x, y);
   map.broadcast({ t: 'walk', id: p.id, x, y, dir: d });
-  a.nextStepAt = now + AUTO_STEP_MS;
-  a.nextThinkAt = a.nextStepAt;
+  // 이어서 걷는 중이면 틱에 맞추느라 늦어진 만큼 다음 걸음을 당겨서 평균 AUTO_STEP_MS 로 걷습니다 (최소 간격은 stepReadyAt)
+  const due = now - a.nextStepAt <= TICK_MS ? a.nextStepAt : now;
+  a.nextStepAt = due + AUTO_STEP_MS;
+  a.lastStepAt = now;
+  a.nextThinkAt = stepReadyAt(a);
   a.lastActiveAt = now;
   a.lastPos = { x, y };
   c.moved();
@@ -620,11 +642,21 @@ function ready(c: Ctx, def: AbilityDef, reserve: number): boolean {
   return p.god || p.mp >= def.mp + reserve;
 }
 
+/**
+ * 내 행동으로 바뀐 체력(필살의 체력 소모, 회복 기술, 흡혈, 물약)은 맞은 피해로 치지 않도록 위급 판정의 기준을 함께 옮깁니다.
+ * 이렇게 하지 않으면 필살로 체력을 절반 쓴 것을 '한 번 더 맞으면 쓰러지는 큰 피해'로 보고 엘릭서나 귀환 주문서를 씁니다.
+ */
+function ownHpChange(c: Ctx, hpBefore: number): void {
+  c.a.lastHp += c.p.hp - hpBefore;
+}
+
 /** 기술을 씁니다. 실제로 쓰였으면 true */
 function cast(c: Ctx, def: AbilityDef, targetId?: number): boolean {
   const { p, a, now } = c;
   const before = p.gcdUntil;
+  const hp = p.hp;
   quietly(p, () => playerUseAbility(c.world, p, def.id, targetId, now));
+  ownHpChange(c, hp);
   if (p.gcdUntil !== before) {
     a.lastActiveAt = now;
     return true;
@@ -655,51 +687,97 @@ function lineClear(c: Ctx, t: Pt, range: number): boolean {
   return true;
 }
 
-function lineCount(c: Ctx, t: Pt, range: number): number {
-  const { p } = c;
-  const sx = Math.sign(t.x - p.x);
-  const sy = Math.sign(t.y - p.y);
-  let n = 0;
-  for (const m of c.enemies) {
-    for (let i = 1; i <= range; i++) {
-      if (m.x === p.x + sx * i && m.y === p.y + sy * i) {
-        n++;
-        break;
-      }
-    }
-  }
-  return n;
+const AROUND4: readonly Pt[] = [
+  { x: 0, y: -1 },
+  { x: 1, y: 0 },
+  { x: 0, y: 1 },
+  { x: -1, y: 0 },
+];
+const AROUND8: readonly Pt[] = [...AROUND4, { x: 1, y: 1 }, { x: -1, y: -1 }, { x: 1, y: -1 }, { x: -1, y: 1 }];
+
+/** 그 칸에서 플레이어의 기술에 맞는 몬스터 (소환수는 플레이어 편이라 맞지 않습니다) */
+function monsterAt(c: Ctx, x: number, y: number): Monster | null {
+  const e = c.map.creatureAt(x, y);
+  if (!e || e.kind !== 'monster') return null;
+  const m = e as Monster;
+  return !m.dead && m.owner === null ? m : null;
 }
 
-/** 지금 이 기술로 대상을 칠 수 있으면 쓰는 방법, 아니면 null */
-function reachPlan(c: Ctx, def: AbilityDef, t: Monster): { face?: Pt; targetId?: number; hits: number } | null {
-  const { p } = c;
+function monstersAround(c: Ctx, at: Pt, offs: readonly Pt[]): Monster[] {
+  const out: Monster[] = [];
+  for (const o of offs) {
+    const m = monsterAt(c, at.x + o.x, at.y + o.y);
+    if (m) out.push(m);
+  }
+  return out;
+}
+
+interface ReachPlan {
+  face?: Pt;
+  targetId?: number;
+  /** 실제로 맞을 몬스터 (서버의 범위 판정과 같은 모양) */
+  hit: Monster[];
+}
+
+/** 이 기술을 지금 쓰면 맞을 몬스터들. 대상을 칠 수 없으면 null */
+function victims(c: Ctx, def: AbilityDef, t: Monster): ReachPlan | null {
+  const { p, map } = c;
   switch (def.targeting) {
     case 'front':
-      return manh(p, t) === 1 ? { face: t, hits: 1 } : null;
-    case 'around': {
-      const n = adjacentEnemies(c, p, false);
-      return n > 0 ? { hits: n } : null;
-    }
-    case 'around8': {
-      const n = adjacentEnemies(c, p, true);
-      return n > 0 ? { hits: n } : null;
-    }
+      return manh(p, t) === 1 ? { face: t, hit: [t] } : null;
+    case 'around':
+      return { hit: monstersAround(c, p, AROUND4) };
+    case 'around8':
+      return { hit: monstersAround(c, p, AROUND8) };
     case 'line': {
+      // 바라보는 쪽으로 사거리까지, 막힌 칸 앞까지의 모든 몬스터
       const range = def.range ?? 3;
-      return lineClear(c, t, range) ? { face: t, hits: lineCount(c, t, range) } : null;
+      if (!lineClear(c, t, range)) return null;
+      const sx = Math.sign(t.x - p.x);
+      const sy = Math.sign(t.y - p.y);
+      const hit: Monster[] = [];
+      for (let i = 1; i <= range; i++) {
+        const x = p.x + sx * i;
+        const y = p.y + sy * i;
+        if (!map.isWalkable(x, y)) break;
+        const m = monsterAt(c, x, y);
+        if (m) hit.push(m);
+      }
+      return { face: t, hit };
     }
     case 'enemy':
-      return cheb(p, t) <= (def.range ?? 7) ? { targetId: t.id, hits: 1 } : null;
+      return cheb(p, t) <= (def.range ?? 7) ? { targetId: t.id, hit: [t] } : null;
     case 'enemyArea':
-      return cheb(p, t) <= (def.range ?? 7) ? { targetId: t.id, hits: 1 + adjacentEnemies(c, t, false) } : null;
+      // 대상과 그 주변 4칸
+      return cheb(p, t) <= (def.range ?? 7) ? { targetId: t.id, hit: [t, ...monstersAround(c, t, AROUND4)] } : null;
     default:
       return null;
   }
 }
 
-/** 기술의 대략적인 기대 피해 (고르는 순서용). 대상의 남은 체력보다 큰 피해는 쳐 주지 않습니다 */
-function valueOf(c: Ctx, def: AbilityDef, t: Monster, hits: number): number {
+/**
+ * 범위 기술로도 건드리면 안 되는 몬스터: 그룹이 아닌 다른 사람이 싸우는 몬스터(가로채기),
+ * 레벨이 너무 높아 노리지 않는 몬스터. 나(나의 소환수)를 노리는 몬스터는 괜찮습니다.
+ */
+function offLimits(c: Ctx, m: Monster): boolean {
+  if (targetsMine(c.p, m)) return false;
+  if (c.s.maxLevelGap > 0 && m.level > c.p.level + c.s.maxLevelGap) return true;
+  return engagedByOther(c, m);
+}
+
+/** 지금 이 기술로 대상을 칠 수 있으면 쓰는 방법과 쳐 줄 몬스터들, 아니면 null */
+function reachPlan(c: Ctx, def: AbilityDef, t: Monster): ReachPlan | null {
+  const v = victims(c, def, t);
+  if (!v) return null;
+  // 건드리면 안 되는 몬스터가 함께 맞으면 쓰지 않습니다 (남의 사냥감 가로채기 방지)
+  if (v.hit.some((m) => offLimits(c, m))) return null;
+  // 허수아비 같은 싸우지 않는 몬스터는 쳐 주지 않습니다
+  const hit = v.hit.filter(isEnemy);
+  return hit.length > 0 ? { ...v, hit } : null;
+}
+
+/** 기술의 대략적인 기대 피해 (고르는 순서용). 맞는 몬스터마다 남은 체력보다 큰 피해는 쳐 주지 않습니다 */
+function valueOf(c: Ctx, def: AbilityDef, hit: readonly Monster[]): number {
   const { p } = c;
   const d = p.derived;
   const phys = physicalBase(d, p.level, (d.dmgMin + d.dmgMax) / 2);
@@ -710,8 +788,9 @@ function valueOf(c: Ctx, def: AbilityDef, t: Monster, hits: number): number {
     else if (e.type === 'sacrifice') v += p.hp * e.hpPct * e.mult;
     else if (e.type === 'status' && STATUS_INFO[e.status].kind === 'debuff') v += phys * 0.8;
   }
-  v = Math.min(v, t.hp);
-  return hits >= 2 ? v * hits : v;
+  let sum = 0;
+  for (const m of hit) sum += Math.min(v, m.hp);
+  return sum;
 }
 
 function debuffStatuses(def: AbilityDef): StatusId[] {
@@ -725,20 +804,21 @@ function useOffense(c: Ctx, t: Monster): boolean {
   const { p, s } = c;
   if (c.now < p.gcdUntil) return false;
   const reserve = c.healReserve;
-  const options: { def: AbilityDef; plan: { face?: Pt; targetId?: number; hits: number }; v: number }[] = [];
+  const chosen = c.chosenOffense.length > 0;
+  const options: { def: AbilityDef; plan: ReachPlan; v: number }[] = [];
   for (const def of c.offense) {
     if (!ready(c, def, def.mp > 0 ? reserve : 0)) continue;
     const plan = reachPlan(c, def, t);
-    if (!plan || plan.hits <= 0) continue;
+    if (!plan) continue;
     const isAttack = roleOf(def) === 'attack';
     // 약화 기술은 아직 걸려 있지 않을 때만
     if (!isAttack && debuffStatuses(def).every((st) => t.hasStatus(st))) continue;
     // 체력을 깎는 기술은 체력이 넉넉하고, 대상이 그 피해를 다 받아낼 만큼 단단할 때만
     if (def.effects.some((e) => e.type === 'sacrifice' && (pct(p.hp, p.maxHp) < Math.max(70, s.hpPct + 20) || t.hp < p.hp * e.hpPct * 2))) continue;
-    options.push({ def, plan, v: valueOf(c, def, t, plan.hits) });
+    options.push({ def, plan, v: valueOf(c, def, plan.hit) });
   }
-  // 직접 고른 순서가 있으면 그 순서대로, 없으면 기대 피해가 큰 것부터 (같으면 마나와 재사용 대기가 적은 것)
-  if (s.abilities.length === 0) options.sort((x, y) => y.v - x.v || x.def.mp - y.def.mp || x.def.cooldownMs - y.def.cooldownMs);
+  // 직접 고른 공격 기술이 있으면 그 순서대로, 없으면 기대 피해가 큰 것부터 (같으면 마나와 재사용 대기가 적은 것)
+  if (!chosen) options.sort((x, y) => y.v - x.v || x.def.mp - y.def.mp || x.def.cooldownMs - y.def.cooldownMs);
   for (const o of options) {
     if (o.plan.face) face(c, o.plan.face);
     if (cast(c, o.def, o.plan.targetId)) return true;
@@ -837,7 +917,9 @@ function useSlot(c: Ctx, slot: number): boolean {
   const { p, now } = c;
   if (now < p.nextItemAt) return false;
   const before = p.nextItemAt;
+  const hp = p.hp;
   quietly(p, () => useItem(p, slot, now));
+  ownHpChange(c, hp);
   return p.nextItemAt !== before;
 }
 
@@ -849,6 +931,19 @@ function healSkills(c: Ctx): AbilityDef[] {
 function healSoon(c: Ctx): boolean {
   const { p, now } = c;
   return healSkills(c).some((d) => (p.god || p.mp >= d.mp) && (p.cooldowns.get(d.id) ?? 0) - now <= 1500);
+}
+
+/** 마나가 넉넉한 회복 기술을 가장 먼저 쓸 수 있게 되는 시각 (공용 대기와 그 기술의 재사용 대기 중 늦은 쪽). 없으면 null */
+function healReadyAt(c: Ctx): number | null {
+  const { p, a, now } = c;
+  let best: number | null = null;
+  for (const d of healSkills(c)) {
+    if (!p.god && p.mp < d.mp) continue;
+    if (now < (a.backoff.get(d.id) ?? 0)) continue;
+    const at = Math.max(now, p.gcdUntil, p.cooldowns.get(d.id) ?? 0);
+    if (best === null || at < best) best = at;
+  }
+  return best;
 }
 
 /** 이 캐릭터가 마나를 쓰는지 (마나를 쓰지 않으면 마나 물약을 아낍니다) */
@@ -882,6 +977,12 @@ function recover(c: Ctx): boolean {
     const skill = pickBest(skills, p.maxHp - p.hp);
     if (skill && cast(c, skill, skill.targeting === 'ally' ? p.id : undefined)) {
       setState(c, 'healing');
+      return true;
+    }
+    // 회복 기술을 공용 대기(GCD) 한 번 길이 안에 쓸 수 있으면 (방금 쓴 기술의 공용 대기 등), 위급하지 않을 때는 물약을 아끼고 기다립니다
+    const healAt = critical ? null : healReadyAt(c);
+    if (healAt !== null && healAt - now <= SPELL_GCD_MS) {
+      wake(c, healAt);
       return true;
     }
     // 2) 체력 물약
@@ -1060,7 +1161,7 @@ function fight(c: Ctx, t: Monster): void {
     setState(c, 'fighting');
     a.targetProgressAt = now;
     // 원거리 캐릭터는 붙은 적에게서 한 걸음 물러섭니다
-    if (reach > 1 && adjacentEnemies(c, p, false) > 0 && now - a.lastRetreatAt >= RETREAT_GAP_MS && now >= a.nextStepAt) {
+    if (reach > 1 && adjacentEnemies(c, p, false) > 0 && now - a.lastRetreatAt >= RETREAT_GAP_MS && now >= stepReadyAt(a)) {
       const r = retreatTile(c, t);
       if (r && stepTo(c, r.x, r.y)) {
         a.lastRetreatAt = now;
