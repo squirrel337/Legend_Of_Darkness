@@ -32,7 +32,7 @@ export const smooth = (a: number, b: number, v: number) => {
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 /** CSS 픽셀 (ix, iy)의 디더링 문턱 (-0.5 ~ 0.5) */
-export function bayer(ix: number, iy: number): number {
+function bayer(ix: number, iy: number): number {
   return (BAYER[((iy & 3) << 2) | (ix & 3)]! + 0.5) / 16 - 0.5;
 }
 
@@ -57,13 +57,13 @@ const LY = -0.49;
 const LZ = 0.7;
 
 /** 화면 좌표 법선 → 밝기 0~1 (주광 + 보는 쪽에서 오는 약한 보조광) */
-export function lightN(nx: number, ny: number, nz: number): number {
+function lightN(nx: number, ny: number, nz: number): number {
   const d = nx * LX + ny * LY + nz * LZ;
   return 0.18 + 0.62 * (d > 0 ? d : 0) + 0.2 * (nz > 0 ? nz : 0);
 }
 
 /** 세계 법선(x 오른쪽, f 앞쪽, u 위쪽) → 밝기. 2:1 아이소 시점(약 30도 내려다봄) */
-export function lightW(x: number, f: number, u: number): number {
+function lightW(x: number, f: number, u: number): number {
   return lightN(x, 0.5 * f - 0.866 * u, 0.866 * f + 0.5 * u);
 }
 

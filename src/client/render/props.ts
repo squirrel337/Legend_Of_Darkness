@@ -621,7 +621,7 @@ function lantern(l: Pix, cx: number, cy: number, seed: number): void {
 }
 
 /** 서 있는 횃불의 불꽃 위치 (발 기준 높이) */
-export const TORCH_TOP = 40;
+const TORCH_TOP = 40;
 
 /** 횃불 j: 0 세 다리 장대, 1 쇠띠 두른 장대, 2 돌 받침에 박은 장대, 3 쇠띠 + 가로대 (불꽃은 매 프레임 따로 그림) */
 function torchPost(p: Pix, _rnd: Rnd, seed: number, variant: number): void {

@@ -12,7 +12,7 @@ export const LEAF = ramp('#0d2408', '#14320f', '#1a3e14', '#24521a', '#2f6a22', 
 const ELM = ramp('#0c2207', '#132f0d', '#1b4113', '#26561a', '#336c22', '#46852b', '#63a038', '#86bc4a', '#b2da6e');
 const BUSH = ramp('#0c2408', '#15340f', '#1c4514', '#275b1b', '#337223', '#478a2c', '#62a438', '#88c04c', '#b0da6c');
 // R3 줄기: #5a3a1e
-export const TRUNK = ramp('#1e1208', '#2e1c0e', '#3e2815', '#4e331b', '#5a3a1e', '#6e4a28', '#86603a', '#a07a4c');
+const TRUNK = ramp('#1e1208', '#2e1c0e', '#3e2815', '#4e331b', '#5a3a1e', '#6e4a28', '#86603a', '#a07a4c');
 const PINE = ramp('#06160c', '#0d2616', '#133320', '#1b4429', '#255634', '#326a3f', '#4a844f', '#6aa064');
 const PINE_BARK = ramp('#160e08', '#2a1b10', '#3a2616', '#4a321e', '#5e4228', '#765636');
 const DEAD = ramp('#15110d', '#231d18', '#2e2721', '#3a332c', '#4d453c', '#655b50', '#7f7366', '#9a8f80');
@@ -46,7 +46,7 @@ export interface Tuft {
  * 잎 송이 하나: 폭 약 2.5px 의 잎이 나란히 매달린 둥근 지붕 꼴.
  * 윗선은 잎마다 조금씩 들쭉날쭉하고, 아랫선은 잎끝이 뾰족하게 처집니다.
  */
-export function paintTuft(l: Pix, t: Tuft, pal: Ramp, seed: number, id: number, leafW = 2.5): void {
+function paintTuft(l: Pix, t: Tuft, pal: Ramp, seed: number, id: number, leafW = 2.5): void {
   const phase = hash2(id, 1, seed);
   const tilt = (hash2(id, 2, seed) - 0.5) * 0.5;
   const lw = leafW * (0.85 + 0.3 * hash2(id, 3, seed));

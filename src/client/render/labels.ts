@@ -15,7 +15,7 @@ export const LABEL_FONT = `"${PIXEL_FONT}", "Gulim", "굴림", "Dotum", "돋움"
 /** 이름표·말풍선 글자 크기 (도트 글꼴이 또렷하게 나오는 크기) */
 export const LABEL_PX = 12;
 /** 글꼴을 이만큼 기다려도 안 오면 대체 글꼴로 그립니다 */
-export const FONT_WAIT_MS = 3000;
+const FONT_WAIT_MS = 3000;
 
 /** 말풍선 한 줄의 글 폭 상한. 원작은 한글 9자(반각 18칸) = 108px 에서 글자 단위로 줄을 바꿉니다 */
 export const BUBBLE_TEXT_W = 108;
@@ -43,8 +43,8 @@ const TAIL_HALF = 3;
  * 말풍선 바탕과 테두리·글자 색. 원작 R2 화면을 재면 말풍선 안의 풀빛이 바깥의 49% 라 50% 검정 바탕이고,
  * 테두리와 글자는 흰색입니다 (docs/art-direction.md 의 '흰 바탕·검은 글씨' 는 R2 화면과 다름).
  */
-export const BUBBLE_FILL = 'rgba(0,0,0,0.5)';
-export const BUBBLE_INK = '#ffffff';
+const BUBBLE_FILL = 'rgba(0,0,0,0.5)';
+const BUBBLE_INK = '#ffffff';
 export const LABEL_OUTLINE = 'rgba(0,0,0,0.85)';
 const OUTLINE_OFFSETS: readonly (readonly [number, number])[] = [
   [-1, -1],

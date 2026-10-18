@@ -883,7 +883,7 @@ export class Game {
     const e = this.renderer.pickEntity(mx, my, now);
     if (e && e.id !== st.selfId) {
       if (e.type === 'monster') {
-        // 아군 소환수는 공격 대상으로 고르지 않음 (이름은 늘 머리 위에 보임)
+        // 아군 소환수는 공격 대상으로 고르지 않음 (이름은 마우스를 올리면 머리 위에 보임)
         if (isAlly(e)) return;
         if (st.targetId === e.id || right) {
           st.targetId = e.id;

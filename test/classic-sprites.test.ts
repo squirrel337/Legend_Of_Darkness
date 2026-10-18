@@ -110,8 +110,9 @@ test('겉모습 서명: 같은 값이면 같고, 그림을 바꾸는 값이 하�
   assert.equal(lookSignature(obj), first);
 });
 
-test('LRU 캐시: 개수 제한, 오래 안 쓴 것부터 버림, 꺼내면 최근으로', () => {
-  const c = new LruCache<number>(3);
+test('LRU 캐시: 개수 제한, 오래 안 쓴 것부터 버림, 꺼내면 최근으로, 버린 값은 뒷정리', () => {
+  const evicted: number[] = [];
+  const c = new LruCache<number>(3, (v) => evicted.push(v));
   c.set('a', 1);
   c.set('b', 2);
   c.set('c', 3);
@@ -119,15 +120,19 @@ test('LRU 캐시: 개수 제한, 오래 안 쓴 것부터 버림, 꺼내면 최�
   c.set('d', 4);
   assert.equal(c.size, 3);
   assert.equal(c.has('b'), false, 'b 가 가장 오래 안 씀');
+  assert.deepEqual(evicted, [2]);
   assert.deepEqual(c.keys(), ['c', 'a', 'd']);
   c.set('c', 30);
   assert.deepEqual(c.keys(), ['a', 'd', 'c']);
+  assert.deepEqual(evicted, [2, 3], '같은 열쇠에 새 값을 넣으면 예전 값을 뒷정리');
   for (let i = 0; i < 1000; i++) c.set(`k${i}`, i);
   assert.equal(c.size, 3);
   assert.deepEqual(c.keys(), ['k997', 'k998', 'k999']);
+  assert.equal(evicted.length, 2 + 1000, '밀려난 값마다 한 번씩');
   c.clear();
   assert.equal(c.size, 0);
   assert.equal(c.get('k999'), undefined);
+  assert.deepEqual(evicted.slice(-3), [997, 998, 999]);
 });
 
 test('머리 모양: 플레이어 번호(0~5)와 남녀로 8가지 이름 모양이 모두 나오고, 남녀가 다름', () => {

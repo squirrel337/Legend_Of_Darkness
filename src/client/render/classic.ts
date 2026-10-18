@@ -13,8 +13,11 @@ export type { ClassicPose } from './classic-core';
 export const CLASSIC_HEAD_TOP = 60;
 /** 캐릭터 대략의 폭 (발 가운데에서 좌우로 CSS px). 마우스 선택 범위용 */
 export const CLASSIC_HALF_WIDTH = 11;
-/** 캐시할 그림 수 */
-export const CLASSIC_CACHE_FRAMES = 1000;
+/**
+ * 캐시할 그림 수. 사람 하나가 가만히·걷기·행동 그림을 앞뒤로 다 써도 40장 남짓이라 화면에 열 명이 있어도
+ * 넉넉하고, 배율 2 에서도 메모리가 20MB 를 넘지 않습니다.
+ */
+const CLASSIC_CACHE_FRAMES = 400;
 
 interface FrameImage {
   canvas: HTMLCanvasElement;
@@ -23,14 +26,14 @@ interface FrameImage {
   y: number;
 }
 
-const cache = new LruCache<FrameImage>(CLASSIC_CACHE_FRAMES);
+// 밀려난 그림의 캔버스 메모리는 바로 돌려줌
+const cache = new LruCache<FrameImage>(CLASSIC_CACHE_FRAMES, (fr) => {
+  fr.canvas.width = 0;
+  fr.canvas.height = 0;
+});
 const headTops = new LruCache<number>(512);
 
-/** 캐시 상태 (성능 확인용) */
-export const classicStats = { hits: 0, misses: 0, renderMs: 0 };
-
 function makeFrame(look: HumanLook, q: ReturnType<typeof quantizePose>, scale: number): FrameImage {
-  const t0 = performance.now();
   const b = renderClassicFrame(look, q.frame);
   const bb = b.bounds() ?? { x: 0, y: -1, w: 1, h: 1 };
   const canvas = document.createElement('canvas');
@@ -43,7 +46,6 @@ function makeFrame(look: HumanLook, q: ReturnType<typeof quantizePose>, scale: n
     const top = b.topY([P.hair, P.hat, P.head, P.hairBack]);
     if (top !== null) headTops.set(lookSignature(look), -top);
   }
-  classicStats.renderMs += performance.now() - t0;
   return { canvas, x: bb.x, y: bb.y };
 }
 
@@ -84,9 +86,7 @@ export function drawClassicFast(ctx: CanvasRenderingContext2D, look: HumanLook, 
   const scale = Math.max(1, Math.min(4, Math.ceil(dpr - 1e-6)));
   const key = `${lookSignature(look)}|${q.key}|${scale}`;
   let fr = cache.get(key);
-  if (fr) classicStats.hits++;
-  else {
-    classicStats.misses++;
+  if (!fr) {
     fr = makeFrame(look, q, scale);
     cache.set(key, fr);
   }
@@ -121,9 +121,4 @@ export function classicHeadTop(look: HumanLook): number {
   return v;
 }
 
-/** 캐시 비우기 (설정 변경 등) */
-export function clearClassicCache(): void {
-  cache.clear();
-  headTops.clear();
-}
 

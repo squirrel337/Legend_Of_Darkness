@@ -4,7 +4,7 @@ import type { Dir } from '../../shared/constants';
 import type { HumanLook } from '../../shared/types';
 import { CLASSIC_FRAMES_PER_ANIM, type ClassicAnim, type ClassicFrame } from './classic-kit';
 
-/** chibi.ts 의 ChibiPose 와 같은 모양 (그쪽 형식을 그대로 받음) */
+/** 게임 화면의 사람 자세 (렌더러가 엔티티 상태에서 만듦) */
 export interface ClassicPose {
   dir: Dir;
   /** 걷기 진행 (0~1, 걷지 않으면 null) */
@@ -97,10 +97,13 @@ export function lookSignature(look: HumanLook): string {
   return s;
 }
 
-/** 개수로 제한하는 LRU 캐시 (Map 의 넣은 순서를 씀) */
+/** 개수로 제한하는 LRU 캐시 (Map 의 넣은 순서를 씀). onEvict 는 밀려난 값의 뒷정리 (캔버스 메모리 돌려주기 등) */
 export class LruCache<V> {
   private readonly map = new Map<string, V>();
-  constructor(readonly max: number) {}
+  constructor(
+    readonly max: number,
+    private readonly onEvict?: (v: V) => void,
+  ) {}
 
   get size(): number {
     return this.map.size;
@@ -121,15 +124,22 @@ export class LruCache<V> {
   }
 
   set(key: string, v: V): void {
-    if (this.map.has(key)) this.map.delete(key);
+    const prev = this.map.get(key);
+    if (prev !== undefined) {
+      this.map.delete(key);
+      if (prev !== v) this.onEvict?.(prev);
+    }
     this.map.set(key, v);
     while (this.map.size > this.max) {
       const oldest = this.map.keys().next().value as string;
+      const old = this.map.get(oldest)!;
       this.map.delete(oldest);
+      this.onEvict?.(old);
     }
   }
 
   clear(): void {
+    if (this.onEvict) for (const v of this.map.values()) this.onEvict(v);
     this.map.clear();
   }
 

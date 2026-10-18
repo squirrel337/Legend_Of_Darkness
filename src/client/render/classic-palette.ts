@@ -66,7 +66,7 @@ function shiftHue(h: number, target: number, amt: number): number {
   return (h + d * amt + 1) % 1;
 }
 
-export function packRgb([r, g, b]: RGB): number {
+function packRgb([r, g, b]: RGB): number {
   return pack(r, g, b);
 }
 
@@ -74,7 +74,7 @@ export function packColor(c: string): number {
   return packRgb(parseColor(c));
 }
 
-export function mixRgb(a: RGB, b: RGB, t: number): RGB {
+function mixRgb(a: RGB, b: RGB, t: number): RGB {
   return [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t)];
 }
 
@@ -115,12 +115,12 @@ export function ramp(c: string | RGB, k = 1, vivid = 0): Mat {
 }
 
 /** 손으로 고른 4단계 색 */
-export function handRamp(dk: string, sh: string, mid: string, hi: string, line: string): Mat {
+function handRamp(dk: string, sh: string, mid: string, hi: string, line: string): Mat {
   return { t: [packColor(dk), packColor(sh), packColor(mid), packColor(hi)], line: packColor(line) };
 }
 
 /** 직업별 기본 장식 색 (body2 가 없을 때) */
-export const CLASSIC_TRIM: Record<ClassId, string> = {
+const CLASSIC_TRIM: Record<ClassId, string> = {
   peasant: '#7a5a3a',
   warrior: '#c9a74a',
   rogue: '#b83a32',

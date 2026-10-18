@@ -5,12 +5,12 @@ import { pack, type Mat, type Shade } from './classic-raster';
 import { P, armAt, armPts, armSeg, legAt, legPts, legSeg, lerp, part, torsoEdge, torsoPoly, torsoY, type Ctx } from './classic-kit';
 
 /** 몸통 명암 (세로 원기둥, 왼쪽이 밝음) */
-export function torsoShade(x: Ctx, hw = 7.8): Shade {
+function torsoShade(x: Ctx, hw = 7.8): Shade {
   return { k: 'cyl', cx: x.r.cx + 0.6, hw };
 }
 
 /** 앞모습의 몸 가운데 선 (단추·여밈 자리) */
-export function frontX(x: Ctx): number {
+function frontX(x: Ctx): number {
   return x.r.cx + (x.r.view === 'F' ? 1.2 : -0.6);
 }
 

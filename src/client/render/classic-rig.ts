@@ -4,7 +4,7 @@ import type { HumanLook } from '../../shared/types';
 import { add, gripOf, isDual, lerp, pt, type ClassicAnim, type ClassicFrame, type Dims, type Grip, type Pt, type Rig } from './classic-kit';
 
 /** 남자: 키 약 60px (머리카락 위 -60), 머리 약 13px */
-export const DIM_M: Dims = {
+const DIM_M: Dims = {
   shY: -44,
   torso: [
     [0, 4.6, 4.1],
@@ -34,7 +34,7 @@ export const DIM_M: Dims = {
 };
 
 /** 여자: 키 약 58px, 어깨가 좁고 허리가 잘록 */
-export const DIM_F: Dims = {
+const DIM_F: Dims = {
   shY: -43,
   torso: [
     [0, 3.6, 3.2],

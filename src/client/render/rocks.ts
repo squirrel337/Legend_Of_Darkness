@@ -7,7 +7,7 @@ import { grassTufts } from './flora';
 import { Pix, groundShadow, isoAt, ramp, rgb, smooth, solid, speckle, stamp, tone, type RGB, type Ramp } from './pixel';
 
 // R3 바위: 윗면 #9a9a9e, 몸통 #55555a, 그림자 #26262a
-export const ROCK = ramp('#17171b', '#202024', '#2c2c31', '#3a3a3f', '#48484d', '#55555a', '#69696e', '#808085', '#9a9a9e', '#b6b6ba');
+const ROCK = ramp('#17171b', '#202024', '#2c2c31', '#3a3a3f', '#48484d', '#55555a', '#69696e', '#808085', '#9a9a9e', '#b6b6ba');
 export const CAVE_ROCK = ramp('#15100d', '#211a15', '#2e251e', '#3b3027', '#4a3d32', '#594a3d', '#6c5b4c', '#81705f', '#988573', '#b09d8a');
 const LICHEN: RGB = rgb('#56663c');
 
@@ -30,7 +30,7 @@ export interface Boulder {
 }
 
 /** 무작위 바위 (크기 size 근처) */
-export function makeBoulder(rnd: Rnd, X: number, Y: number, size: number, seed: number, flat = 1): Boulder {
+function makeBoulder(rnd: Rnd, X: number, Y: number, size: number, seed: number, flat = 1): Boulder {
   const bx = size * (0.75 + rnd() * 0.4);
   const by = size * (0.7 + rnd() * 0.4);
   return {
@@ -80,7 +80,7 @@ function boulderSdf(c: Boulder): (X: number, Y: number, Z: number) => number {
 }
 
 /** 바위 하나를 층 l 에 칠합니다 */
-export function paintBoulder(l: Pix, c: Boulder, pal: Ramp, lichen: boolean): void {
+function paintBoulder(l: Pix, c: Boulder, pal: Ramp, lichen: boolean): void {
   const R = Math.hypot(c.bx, c.by) + c.amp + 1;
   const top = c.bz * 0.78 + c.bz + c.amp + 2 + (Math.abs(c.tx) + Math.abs(c.ty)) * R;
   const seed = c.seed;

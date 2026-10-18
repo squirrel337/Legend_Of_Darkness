@@ -39,7 +39,7 @@ const T_DARK = -0.32;
 const T_SH = 0.2;
 const T_HI = 0.8;
 
-export function toneOf(m: Mat, light: number): number {
+function toneOf(m: Mat, light: number): number {
   return light < T_DARK ? m.t[0] : light < T_SH ? m.t[1] : light < T_HI ? m.t[2] : m.t[3];
 }
 
@@ -51,15 +51,10 @@ const BAYER = [-0.5, 0.0, 0.25, -0.25];
  * 밝은 면 경계는 체크무늬 없이 또렷하게: 원기둥(몸통·옷)의 빛은 가장 밝은 곳(약 0.86)이 문턱(0.8)에 가까워
  * 체크무늬가 여러 칸 넓이로 번져 옷감이 지저분해 보이므로 (원작 옷은 밝은 면이 깨끗한 띠)
  */
-export function toneAt(m: Mat, light: number, x: number, y: number, dither: number): number {
+function toneAt(m: Mat, light: number, x: number, y: number, dither: number): number {
   if (light >= T_HI) return m.t[3];
   const l = light + BAYER[((y & 1) << 1) | (x & 1)]! * dither;
   return l < T_DARK ? m.t[0] : l < T_SH ? m.t[1] : m.t[2];
-}
-
-/** 한 가지 색만 쓰는 재질 */
-export function flatMat(c: number, line = c): Mat {
-  return { t: [c, c, c, c], line };
 }
 
 /** 구(머리, 둥근 덩어리)의 빛: 정규화 좌표 (-1~1) */
@@ -70,7 +65,7 @@ export function sphereLight(nx: number, ny: number): number {
 }
 
 /** 세로 원기둥(몸통)의 빛: 가로 위치 nx (-1~1), 세로 기울기 ny 조금 */
-export function cylLight(nx: number, ny = 0): number {
+function cylLight(nx: number, ny = 0): number {
   const c = Math.max(-1, Math.min(1, nx));
   const nz = Math.sqrt(1 - c * c);
   return c * LX + ny * LY + nz * LZ;
@@ -86,7 +81,7 @@ export type Shade =
   /** 점마다 빛 함수 */
   | { k: 'fn'; f: (x: number, y: number) => number };
 
-export const FLAT_MID: Shade = { k: 'flat', l: 0.5 };
+const FLAT_MID: Shade = { k: 'flat', l: 0.5 };
 
 export class PixelBuf {
   readonly px: Uint32Array;
@@ -500,7 +495,7 @@ export class PixelBuf {
 }
 
 /** 부위 사이 경계선으로 칠한 칸 */
-export const LINE_PART = 254;
+const LINE_PART = 254;
 /** 실루엣 외곽선 칸 */
 export const OUTLINE_PART = 255;
 /** 반투명 장식(기운, 빛) 칸: 외곽선을 만들지 않음 */
