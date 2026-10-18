@@ -38,6 +38,8 @@ const CORNER = 5;
 /** 꼬리: 아래 테두리에서 3px 내려온 V 모양, 몸통과 만나는 폭 7px */
 const TAIL_H = 3;
 const TAIL_HALF = 3;
+/** 겹쳐서 위로 올린 말풍선과 그 아래 말풍선 사이의 틈 (px) */
+export const BUBBLE_GAP = 2;
 
 /**
  * 말풍선 바탕과 테두리·글자 색. 원작 R2 화면을 재면 말풍선 안의 풀빛이 바깥의 49% 라 50% 검정 바탕이고,
@@ -218,6 +220,8 @@ export interface BubbleShape {
   /** 꼬리 끝 (말하는 사람 쪽) */
   tipX: number;
   tipY: number;
+  /** 다른 말풍선을 피해 위로 올린 px (꼬리가 그만큼 1px 줄로 길어짐) */
+  lift: number;
   /** 반투명 바탕 칸들 (서로, 그리고 테두리와 겹치지 않음) */
   fill: Rect[];
   /** 흰 테두리 칸들 */
@@ -230,17 +234,19 @@ export interface BubbleShape {
 /**
  * 말풍선 모양을 정수 픽셀 칸으로 계산합니다.
  * textW: 가장 긴 줄의 폭, lines: 줄 수, anchorX: 말하는 사람의 x, tipY: 꼬리 끝의 y (머리 위),
- * minX~maxX: 몸통이 들어가야 할 화면 가로 범위 (넘치면 안쪽으로 밀고 꼬리는 그대로 사람을 가리킴).
+ * minX~maxX: 몸통이 들어가야 할 화면 가로 범위 (넘치면 안쪽으로 밀고 꼬리는 그대로 사람을 가리킴),
+ * lift: 다른 말풍선을 피해 몸통을 위로 올릴 px (꼬리 끝은 그대로 tipY, 그 사이는 1px 흰 줄).
  */
-export function bubbleShape(textW: number, lines: number, anchorX: number, tipY: number, minX = -Infinity, maxX = Infinity): BubbleShape {
+export function bubbleShape(textW: number, lines: number, anchorX: number, tipY: number, minX = -Infinity, maxX = Infinity, lift = 0): BubbleShape {
   const n = Math.max(1, Math.floor(lines));
   const w = Math.max(2 * (CORNER + TAIL_HALF + 1) + 1, Math.ceil(textW) + 1 + PAD_LEFT + PAD_RIGHT + 1);
   const h = 1 + PAD_TOP + GLYPH_H + (n - 1) * BUBBLE_LINE_H + PAD_BOTTOM + 1;
   const ax = Math.round(anchorX);
   let x = Math.round(ax - w / 2);
   if (maxX - minX >= w) x = Math.min(Math.max(x, Math.ceil(minX)), Math.floor(maxX) - w);
+  const up = Math.max(0, Math.round(lift));
   const ty = Math.round(tipY);
-  const y = ty - TAIL_H + 1 - h;
+  const y = ty - up - TAIL_H + 1 - h;
   // 꼬리는 둥근 모서리를 피한 아래 테두리의 곧은 부분에서 나옵니다
   const tx = Math.min(Math.max(ax, x + CORNER + TAIL_HALF + 1), x + w - 1 - CORNER - TAIL_HALF - 1);
   const r = (rx: number, ry: number, rw: number, rh: number): Rect => ({ x: rx, y: ry, w: rw, h: rh });
@@ -284,7 +290,7 @@ export function bubbleShape(textW: number, lines: number, anchorX: number, tipY:
     r(tx + 2, b + 1, 2, 1),
     r(tx - 1, b + 2, 1, 1),
     r(tx + 1, b + 2, 1, 1),
-    r(tx, b + 3, 1, 1),
+    r(tx, b + 3, 1, up + 1),
   ];
   return {
     x,
@@ -292,12 +298,41 @@ export function bubbleShape(textW: number, lines: number, anchorX: number, tipY:
     w,
     h,
     tipX: tx,
-    tipY: b + TAIL_H,
+    tipY: b + TAIL_H + up,
+    lift: up,
     fill,
     border,
     textX: x + 1 + PAD_LEFT,
     baseline: y + 1 + PAD_TOP + GLYPH_H,
   };
+}
+
+/**
+ * 말풍선 자리 잡기: 가까운(꼬리 끝이 화면 아래인) 사람 것부터 제자리에 두고, 앞서 자리 잡은 말풍선과 겹치면
+ * 겹치지 않을 때까지 위로 올립니다 (꼬리는 그만큼 길어져 여전히 말하는 사람을 가리킴).
+ * 반투명 바탕이 겹치면 아래 글자가 비쳐 둘 다 읽을 수 없게 되기 때문입니다.
+ * boxes: 제자리(lift 0) 말풍선 몸통, tips: 꼬리 끝 y. 말풍선마다 위로 올릴 px 를 같은 순서로 돌려줍니다.
+ */
+export function bubbleLifts(boxes: readonly Rect[], tips: readonly number[], gap = BUBBLE_GAP): number[] {
+  const order = boxes.map((_, i) => i).sort((a, b) => tips[b]! - tips[a]! || a - b);
+  const placed: Rect[] = [];
+  const lifts = new Array<number>(boxes.length).fill(0);
+  for (const i of order) {
+    const b = boxes[i]!;
+    let y = b.y;
+    for (let moved = true; moved; ) {
+      moved = false;
+      for (const p of placed) {
+        if (b.x < p.x + p.w && p.x < b.x + b.w && y < p.y + p.h + gap && p.y < y + b.h + gap) {
+          y = p.y - gap - b.h;
+          moved = true;
+        }
+      }
+    }
+    lifts[i] = b.y - y;
+    placed.push({ x: b.x, y, w: b.w, h: b.h });
+  }
+  return lifts;
 }
 
 /** 말풍선을 그립니다. ctx.font 는 이미 이름표 글꼴로 맞춰져 있어야 합니다 */

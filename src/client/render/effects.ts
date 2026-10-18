@@ -162,10 +162,12 @@ export class Effects {
     return this.list.length;
   }
 
-  draw(ctx: CanvasRenderingContext2D, now: number, locate: Locate, toScreen: (p: Point) => Point): void {
+  /** part: 'fx' 는 기술 효과만, 'text' 는 떠오르는 글자(피해 숫자 등)만, 'all' 은 둘 다 */
+  draw(ctx: CanvasRenderingContext2D, now: number, locate: Locate, toScreen: (p: Point) => Point, part: 'all' | 'fx' | 'text' = 'all'): void {
     this.list = this.list.filter((e) => now < e.start + e.dur);
     for (const e of this.list) {
       if (now < e.start) continue;
+      if (part !== 'all' && (e.kind === 'text') !== (part === 'text')) continue;
       const t = (now - e.start) / e.dur;
       if (e.kind === 'text') {
         const base = (e.id !== null ? locate(e.id) : null) ?? e.at;

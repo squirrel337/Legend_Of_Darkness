@@ -2,7 +2,7 @@
 import { STATUS_INFO, TILE_H, TILE_W } from '../../shared/constants';
 import { tileInfo } from '../../shared/tiles';
 import { entityPos, isAlly, type CEntity, type ClientState } from '../state';
-import { LABEL_FONT, LABEL_PX, bubbleAlpha, bubbleLines, bubbleShape, bubbleText, drawBubble, drawOutlinedText, entityLabel, labelFontReady } from './labels';
+import { LABEL_FONT, LABEL_PX, bubbleAlpha, bubbleLifts, bubbleLines, bubbleShape, bubbleText, drawBubble, drawOutlinedText, entityLabel, labelFontReady } from './labels';
 import { Effects, type Point } from './effects';
 import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
 import { ambienceFor, type Ambience } from './ambience';
@@ -386,43 +386,46 @@ export class Renderer {
     list.sort((a, b) => a.depth - b.depth || a.order - b.order);
     for (const d of list) d.draw();
 
-    // 7) 효과
-    this.effects.draw(
-      ctx,
-      now,
-      (id) => {
-        const e = state.entities.get(id);
-        return e ? this.entityPoint(e, now) : null;
-      },
-      (p) => p,
-    );
+    // 7) 효과. 어둡지 않은 맵에서는 떠오르는 피해 숫자를 9) 의 비네트 위에 따로 그림 (화면 가장자리에서도 읽히게)
+    const locate = (id: number) => {
+      const e = state.entities.get(id);
+      return e ? this.entityPoint(e, now) : null;
+    };
+    const dark = map.dark;
+    this.effects.draw(ctx, now, locate, (p) => p, dark ? 'all' : 'fx');
 
-    // 8) 이름표, 체력바 (말풍선을 띄울 높이는 기억해 두었다가 10) 에서 그림)
-    const talkers: { e: CEntity; clear: number }[] = [];
-    for (const e of state.entities.values()) {
-      if (e.dying) continue;
-      const pos = entityPos(e, now);
-      if (!visible(Math.round(pos.x), Math.round(pos.y))) continue;
-      const clear = this.drawLabels(e, now);
-      if (clear !== null) talkers.push({ e, clear });
-    }
+    // 8) 이름표, 체력바 (말풍선을 띄울 높이는 기억해 두었다가 10) 에서 그림).
+    //    던전에서는 어둠 아래에 (빛 밖의 몬스터를 드러내지 않게), 어둡지 않은 맵에서는 비네트 위에 (가장자리에서 흐려지지 않게)
+    const labels = (): { e: CEntity; clear: number }[] => {
+      const talkers: { e: CEntity; clear: number }[] = [];
+      for (const e of state.entities.values()) {
+        if (e.dying) continue;
+        const pos = entityPos(e, now);
+        if (!visible(Math.round(pos.x), Math.round(pos.y))) continue;
+        const clear = this.drawLabels(e, now);
+        if (clear !== null) talkers.push({ e, clear });
+      }
+      return talkers;
+    };
+    let talkers = dark ? labels() : [];
     ctx.restore();
 
     // 9) 어둠과 분위기: 모든 맵에 맵별 색조와 가장자리 비네트 (던전은 비네트를 품은 어둠에 빛 구멍)
-    const amb = ambienceFor(map.id, map.dark);
-    if (map.dark) this.drawDarkness(now, amb);
+    const amb = ambienceFor(map.id, dark);
+    if (dark) this.drawDarkness(now, amb);
     else this.atmosphere.draw(ctx, amb, this.cssW, this.cssH, this.dpr);
 
-    // 10) 말풍선: 모든 이름표·체력바와 어둠·비네트 위에 (남의 이름표에 가리지 않고 어두운 던전에서도 읽힘).
-    //     화면 위쪽(먼 쪽) 사람 것부터 그려 가까운 사람의 말풍선이 위에 옴
-    if (talkers.length) {
-      talkers.sort((a, b) => a.clear - b.clear);
-      ctx.save();
-      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      ctx.translate(this.offX, this.offY);
-      for (const t of talkers) this.drawBubbleOf(t.e, t.clear, now);
-      ctx.restore();
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.translate(this.offX, this.offY);
+    if (!dark) {
+      this.effects.draw(ctx, now, locate, (p) => p, 'text');
+      talkers = labels();
     }
+    // 10) 말풍선: 모든 이름표·체력바와 어둠·비네트 위에 (남의 이름표에 가리지 않고 어두운 던전에서도 읽힘).
+    //     겹치는 말풍선은 가까운 사람 것을 제자리에 두고 먼 사람 것을 위로 올림
+    if (talkers.length) this.drawBubbles(talkers, now);
+    ctx.restore();
     if (state.self?.ghost) {
       ctx.fillStyle = 'rgba(60,80,140,0.18)';
       ctx.fillRect(0, 0, this.cssW, this.cssH);
@@ -646,14 +649,28 @@ export class Renderer {
    * 말풍선: `이름: 대사`, 원작처럼 글자 단위 줄바꿈, 끝나기 전에 흐려짐. 화면 밖으로 나가지 않게 가로로 밀어 넣음.
    * clear 는 drawLabels 가 돌려준 높이 (머리·이름표·체력바·왕관의 윗선)
    */
-  private drawBubbleOf(e: CEntity, clear: number, now: number): void {
-    if (!e.bubble) return;
+  private drawBubbles(talkers: readonly { e: CEntity; clear: number }[], now: number): void {
     const ctx = this.ctx;
     ctx.font = `${LABEL_PX}px ${FONT}`;
-    const { lines, width } = bubbleLines(ctx, bubbleText(e.name, e.bubble.text));
-    const ax = Math.round(this.entityPoint(e, now).sx);
-    const shape = bubbleShape(width, lines.length, ax, clear - 2, 2 - this.offX, this.cssW - 2 - this.offX);
-    drawBubble(ctx, lines, shape, bubbleAlpha(now, e.bubble.until));
+    const minX = 2 - this.offX;
+    const maxX = this.cssW - 2 - this.offX;
+    const items = talkers.flatMap(({ e, clear }) => {
+      if (!e.bubble) return [];
+      const { lines, width } = bubbleLines(ctx, bubbleText(e.name, e.bubble.text));
+      const ax = Math.round(this.entityPoint(e, now).sx);
+      return [{ lines, width, ax, tip: clear - 2, shape: bubbleShape(width, lines.length, ax, clear - 2, minX, maxX), alpha: bubbleAlpha(now, e.bubble.until) }];
+    });
+    const lifts = bubbleLifts(
+      items.map((b) => b.shape),
+      items.map((b) => b.tip),
+    );
+    // 화면 위쪽(먼 쪽) 사람 것부터 그려 길어진 꼬리가 가까운 사람의 말풍선 밑으로 지나가게
+    const order = items.map((_, i) => i).sort((a, b) => items[a]!.tip - items[b]!.tip);
+    for (const i of order) {
+      const b = items[i]!;
+      const shape = lifts[i] ? bubbleShape(b.width, b.lines.length, b.ax, b.tip, minX, maxX, lifts[i]) : b.shape;
+      drawBubble(ctx, b.lines, shape, b.alpha);
+    }
   }
 
   private drawDarkness(now: number, amb: Ambience): void {

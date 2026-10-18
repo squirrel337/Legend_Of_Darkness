@@ -6,6 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   BUBBLE_FADE_MS,
+  BUBBLE_GAP,
   BUBBLE_HANG_MAX,
   BUBBLE_LINE_H,
   BUBBLE_MAX_LINES,
@@ -15,6 +16,7 @@ import {
   LABEL_OUTLINE,
   PIXEL_FONT,
   bubbleAlpha,
+  bubbleLifts,
   bubbleShape,
   bubbleText,
   drawBubble,
@@ -216,6 +218,49 @@ test('화면 가장자리에서는 몸통만 안쪽으로 밀고 꼬리는 말�
   assert.equal(edge.tipX, edge.x + 9);
   // 범위가 몸통보다 좁으면 밀지 않음
   assert.equal(bubbleShape(108, 1, 50, 100, 0, 40).tipX, 50);
+});
+
+test('겹치는 말풍선: 가까운 사람 것은 제자리, 먼 사람 것은 겹치지 않을 때까지 위로, 꼬리는 길어져 그대로 사람을 가리킨다', () => {
+  const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  // 같은 자리 두 사람 (먼 사람의 머리가 화면 위쪽): 먼 사람 말풍선이 가까운 사람 말풍선 위로 틈을 두고 올라감
+  const near = bubbleShape(108, 2, 300, 200);
+  const far = bubbleShape(108, 1, 310, 190);
+  assert.ok(overlaps(near, far), '시험 전제: 제자리면 겹침');
+  const lifts = bubbleLifts([far, near], [far.tipY, near.tipY]);
+  assert.equal(lifts[1], 0, '가까운 사람은 제자리');
+  assert.equal(lifts[0], far.y - (near.y - BUBBLE_GAP - far.h));
+  const up = bubbleShape(108, 1, 310, 190, -Infinity, Infinity, lifts[0]);
+  assert.equal(up.y + up.h + BUBBLE_GAP, near.y, '틈을 두고 바로 위');
+  assert.equal(up.lift, lifts[0]);
+  assert.deepEqual([up.tipX, up.tipY], [far.tipX, far.tipY], '꼬리 끝은 그대로 머리 위');
+  // 올린 말풍선도 바탕과 테두리가 겹치지 않고, 줄마다 한 덩어리 (꼬리는 1px 줄로 이어짐)
+  const fill = pixels(up.fill, '바탕');
+  const border = pixels(up.border, '테두리');
+  for (const k of fill) assert.ok(!border.has(k));
+  const rows = new Map<number, number[]>();
+  for (const k of [...fill, ...border]) {
+    const [x, y] = k.split(',').map(Number) as [number, number];
+    rows.set(y, [...(rows.get(y) ?? []), x]);
+  }
+  for (const [y, xs] of rows) {
+    xs.sort((a, b) => a - b);
+    assert.equal(xs[xs.length - 1]! - xs[0]! + 1, xs.length, `${y} 줄에 빈틈`);
+  }
+  for (let y = up.y + up.h + 3; y <= up.tipY; y++) assert.deepEqual(rows.get(y), [up.tipX], `꼬리 줄 ${y}`);
+  // 셋이 한 자리에 모이면 차례로 쌓이고, 넣는 순서와 상관없음
+  const a = bubbleShape(60, 1, 400, 300);
+  const b = bubbleShape(60, 1, 405, 296);
+  const c = bubbleShape(60, 2, 395, 292);
+  const l1 = bubbleLifts([a, b, c], [300, 296, 292]);
+  const l2 = bubbleLifts([c, a, b], [292, 300, 296]);
+  assert.deepEqual([l2[1], l2[2], l2[0]], l1);
+  const placed = [a, b, c].map((s, i) => ({ ...s, y: s.y - l1[i]! }));
+  for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) assert.ok(!overlaps(placed[i]!, placed[j]!), `${i}·${j} 겹침`);
+  assert.equal(l1[0], 0);
+  assert.ok(placed[2]!.y < placed[1]!.y && placed[1]!.y < placed[0]!.y, '먼 사람일수록 위');
+  // 가로로 떨어져 있거나 세로로 이미 떨어져 있으면 그대로
+  assert.deepEqual(bubbleLifts([bubbleShape(108, 2, 100, 200), bubbleShape(108, 2, 300, 195)], [200, 195]), [0, 0]);
+  assert.deepEqual(bubbleLifts([bubbleShape(108, 1, 100, 200), bubbleShape(108, 1, 100, 160)], [200, 160]), [0, 0]);
 });
 
 // ───────────────────────── 그리기 ─────────────────────────
