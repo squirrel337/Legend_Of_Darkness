@@ -78,9 +78,9 @@ function shadowCanvas(scale: number): HTMLCanvasElement {
 
 /**
  * 게임 화면용으로 사람 캐릭터를 그립니다 (발밑 그림자 포함, 왼쪽을 보면 좌우를 뒤집음).
- * ctx 의 원점이 발 위치이고 1 단위 = 1 CSS px. dpr 은 화면 배율.
+ * ctx 의 원점이 발 위치이고 1 단위 = 1 CSS px. dpr 은 화면 배율. withShadow 가 false 면 그림자를 빼고 몸만.
  */
-export function drawClassicFast(ctx: CanvasRenderingContext2D, look: HumanLook, pose: ClassicPose, dpr: number): void {
+export function drawClassicFast(ctx: CanvasRenderingContext2D, look: HumanLook, pose: ClassicPose, dpr: number, withShadow = true): void {
   const q = quantizePose(pose);
   // 정수배로 그려 두고, 배율이 정수가 아니면 CSS 크기로 부드럽게 줄여 그림
   const scale = Math.max(1, Math.min(4, Math.ceil(dpr - 1e-6)));
@@ -92,10 +92,12 @@ export function drawClassicFast(ctx: CanvasRenderingContext2D, look: HumanLook, 
   }
   const ghost = q.frame.ghost;
   // 발밑 그림자
-  ctx.save();
-  if (ghost) ctx.globalAlpha *= 0.35;
-  ctx.drawImage(shadowCanvas(scale), -14, -6, 28, 12);
-  ctx.restore();
+  if (withShadow) {
+    ctx.save();
+    if (ghost) ctx.globalAlpha *= 0.35;
+    ctx.drawImage(shadowCanvas(scale), -14, -6, 28, 12);
+    ctx.restore();
+  }
   // 기기 픽셀에 맞춰 그림 (점이 흐려지지 않게)
   const m = ctx.getTransform();
   const k = m.a / scale;

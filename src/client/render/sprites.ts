@@ -24,13 +24,15 @@ export interface MonsterPose {
   time: number;
   /** 사라지는 중 (0~1) */
   fade?: number;
+  /** false 면 발밑 그림자를 빼고 몸만 (가려진 몬스터를 덧그릴 때) */
+  shadow?: boolean;
 }
 
 export function drawMonster(ctx: CanvasRenderingContext2D, look: MonsterLook, o: MonsterPose): void {
   const s = look.size ?? 1;
   ctx.save();
   if (o.fade !== undefined) ctx.globalAlpha = Math.max(0, 1 - o.fade);
-  shadow(ctx, 13 * s, 5 * s);
+  if (o.shadow !== false) shadow(ctx, 13 * s, 5 * s);
   if (facesLeft(o.dir)) ctx.scale(-1, 1);
   ctx.scale(s, s);
   const c = look.color;

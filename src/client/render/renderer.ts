@@ -27,6 +27,8 @@ const ENTER_HOLD_MS = 600;
 const ENTER_FADE_MS = 200;
 /** 맵에 들어올 때 미리 굽는 벽·물체 그림의 우선순위 (보이는 것·둘레 바닥 조각보다 나중) */
 const PREBUILD_PRIO = 2000;
+/** 앞의 나무·벽에 가린 내 캐릭터와 대상을 덧그리는 투명도 */
+const SEE_THROUGH_ALPHA = 0.5;
 
 /** 운영자 왕관의 아래 끝: 도트 캐릭터의 머리(모자) 꼭대기 3px 위, 유령은 떠 있는 만큼 3px 더 (발에서 위로 CSS px) */
 function crownBase(e: CEntity): number {
@@ -42,6 +44,10 @@ interface Drawable {
   depth: number;
   order: number;
   draw: () => void;
+  /** 벽·물체 그림이 차지하는 사각형 (월드 화면 좌표): 이것에 가린 내 캐릭터를 알아보는 데 씀 */
+  rect?: { x: number; y: number; w: number; h: number };
+  /** 엔티티 */
+  entity?: CEntity;
 }
 
 export class Renderer {
@@ -352,6 +358,7 @@ export class Renderer {
           list.push({
             depth: x + y,
             order: 0,
+            rect: { x: t.sx - HALF_W, y: t.sy - WALL_H, w: TILE_W, h: TILE_H + WALL_H },
             draw: () => {
               if (asWall && !front && bx !== null) drawFlame(ctx, t.sx + bx, t.sy - WALL_H + 10, now, 0.8);
               ctx.drawImage(wc, t.sx - HALF_W, t.sy - WALL_H, TILE_W, TILE_H + WALL_H);
@@ -364,11 +371,12 @@ export class Renderer {
             unbaked++;
             continue;
           }
+          const c = tileCenter(x, y);
           list.push({
             depth: x + y,
             order: 0,
+            rect: { x: c.sx - spr.ox, y: c.sy - spr.oy, w: spr.w, h: spr.h },
             draw: () => {
-              const c = tileCenter(x, y);
               ctx.drawImage(spr.canvas, c.sx - spr.ox, c.sy - spr.oy, spr.w, spr.h);
               if (spr.flame) drawFlame(ctx, c.sx + spr.flame.x, c.sy + spr.flame.y, now, spr.flame.scale);
             },
@@ -381,10 +389,18 @@ export class Renderer {
       const pos = entityPos(e, now);
       if (!visible(Math.round(pos.x), Math.round(pos.y))) continue;
       const depth = pos.moving ? Math.max(e.fromX + e.fromY, e.x + e.y) : pos.x + pos.y;
-      list.push({ depth, order: 1, draw: () => this.drawEntity(e, now) });
+      list.push({ depth, order: 1, entity: e, draw: () => this.drawEntity(e, now) });
     }
     list.sort((a, b) => a.depth - b.depth || a.order - b.order);
     for (const d of list) d.draw();
+    // 내 캐릭터와 대상이 그 뒤에 그린 나무·벽에 가렸으면 반투명하게 한 번 더 (어디 있는지 알 수 있게)
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i]!.entity;
+      if (!e || e.dying || (e.id !== state.selfId && e.id !== state.targetId)) continue;
+      const box = this.bodyBox(e, now);
+      const hidden = list.some((d, j) => j > i && d.rect && d.rect.x < box.x + box.w && box.x < d.rect.x + d.rect.w && d.rect.y < box.y + box.h && box.y < d.rect.y + d.rect.h);
+      if (hidden) this.drawEntity(e, now, true);
+    }
 
     // 7) 효과. 어둡지 않은 맵에서는 떠오르는 피해 숫자를 9) 의 비네트 위에 따로 그림 (화면 가장자리에서도 읽히게)
     const locate = (id: number) => {
@@ -458,19 +474,34 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawEntity(e: CEntity, now: number): void {
+  /** 엔티티 몸이 차지하는 대략의 사각형 (월드 화면 좌표, 발 아래 그림자 조금 포함) */
+  private bodyBox(e: CEntity, now: number): { x: number; y: number; w: number; h: number } {
+    const c = this.entityPoint(e, now);
+    if (e.type === 'monster') {
+      const s = (e.def ? this.state.monsters.get(e.def)?.look.size : undefined) ?? 1;
+      return { x: c.sx - 16 * s, y: c.sy - 48 * s, w: 32 * s, h: 48 * s + 4 };
+    }
+    const head = e.look ? classicHeadTop(e.look) : CLASSIC_HEAD_TOP;
+    return { x: c.sx - CLASSIC_HALF_WIDTH - 1, y: c.sy - head - 2, w: 2 * CLASSIC_HALF_WIDTH + 2, h: head + 6 };
+  }
+
+  /**
+   * 엔티티 하나를 그립니다. seeThrough 면 앞의 나무·벽에 가린 것을 덧그리는 것이라 몸만 반투명하게
+   * (그림자·왕관·상태 점 없이: 가리지 않은 곳에서는 제 그림 위에 겹쳐 그려도 달라지지 않게).
+   */
+  private drawEntity(e: CEntity, now: number, seeThrough = false): void {
     const ctx = this.ctx;
     const c = this.entityPoint(e, now);
     const pos = entityPos(e, now);
     const walk = pos.moving ? pos.t : null;
     const act = e.actStart && now - e.actStart < ACT_MS ? (now - e.actStart) / ACT_MS : null;
-    const flash = now - e.hitFlash < 120;
+    const flash = now - e.hitFlash < 120 && !seeThrough;
     ctx.save();
     ctx.translate(c.sx, c.sy);
     if (e.type === 'player' || e.type === 'npc') {
       const look = e.look;
       const hidden = e.statuses.includes('hide');
-      const alpha = hidden ? (e.id === this.state.selfId ? 0.45 : 0.18) : e.ghost ? 0.62 : 1;
+      const alpha = (hidden ? (e.id === this.state.selfId ? 0.45 : 0.18) : e.ghost ? 0.62 : 1) * (seeThrough ? SEE_THROUGH_ALPHA : 1);
       if (look) {
         const pose: ClassicPose = {
           dir: e.dir,
@@ -482,8 +513,12 @@ export class Renderer {
           ghost: e.ghost,
           beast: e.statuses.includes('beast'),
         };
-        if (alpha < 1 || flash) this.drawBuffered((b) => drawClassicFast(b, look, pose, this.dpr), alpha, flash);
+        if (alpha < 1 || flash) this.drawBuffered((b) => drawClassicFast(b, look, pose, this.dpr, !seeThrough), alpha, flash);
         else drawClassicFast(ctx, look, pose, this.dpr);
+      }
+      if (seeThrough) {
+        ctx.restore();
+        return;
       }
       if (e.role === 'admin' || e.role === 'gm') {
         // 운영자 왕관: 머리(모자) 바로 위. 숨기·유령이면 몸과 같은 투명도 (숨은 운영자의 자리가 왕관으로 드러나지 않게)
@@ -505,7 +540,7 @@ export class Renderer {
       }
     } else if (e.type === 'monster') {
       const def = e.def ? this.state.monsters.get(e.def) : undefined;
-      if (isAlly(e) && !e.dying) {
+      if (isAlly(e) && !e.dying && !seeThrough) {
         // 아군 소환수: 발밑의 옅은 초록 고리
         const pulse = 0.5 + 0.5 * Math.sin(now / 420 + e.id);
         ctx.strokeStyle = `rgba(110,240,130,${0.35 + pulse * 0.2})`;
@@ -516,9 +551,13 @@ export class Renderer {
       }
       if (def) {
         const fade = e.dying ? Math.min(1, (now - e.dying) / 500) : undefined;
-        const pose = { dir: e.dir, walk, act, time: now + e.id * 131, ...(fade !== undefined ? { fade } : {}) };
-        if (flash) this.drawBuffered((b) => drawMonster(b, def.look, pose), 1, true);
+        const pose = { dir: e.dir, walk, act, time: now + e.id * 131, ...(fade !== undefined ? { fade } : {}), ...(seeThrough ? { shadow: false } : {}) };
+        if (flash || seeThrough) this.drawBuffered((b) => drawMonster(b, def.look, pose), seeThrough ? SEE_THROUGH_ALPHA : 1, flash);
         else drawMonster(ctx, def.look, pose);
+      }
+      if (seeThrough) {
+        ctx.restore();
+        return;
       }
     }
     // 상태 효과 표시 (발밑 작은 점들)
