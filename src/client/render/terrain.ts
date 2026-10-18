@@ -188,9 +188,13 @@ function majority(counts: Map<number, [number, number]>): number | null {
 /**
  * 물체·벽·나무 칸 아래의 바닥: 둘레 8칸 가운데 걸을 수 있는 바닥으로 가장 흔한 것.
  * 그런 이웃이 없으면 둘레의 물·용암 (바다 가운데 바위는 물에 잠김), 그것도 없으면 TileInfo 색이 같은 바닥.
- * 셋 다 없으면 null.
+ * 셋 다 없으면 null. 단, 곧은 이웃 둘 이상이 돌 단상이면 단상 (단상 모서리에 선 기둥 밑이 풀이 되어
+ * 단상 모서리가 파이지 않게: 모서리 칸은 둘레 8칸 중 단상이 3칸뿐임).
  */
 export function inferFloor(tiles: readonly string[], x: number, y: number): number | null {
+  let dais = 0;
+  for (const [dx, dy] of N4) if (tileInfo(tiles[y + dy]?.[x + dx]).pattern === 'dais') dais++;
+  if (dais >= 2) return GROUND.DAIS;
   const counts = new Map<number, [number, number]>();
   const wet = new Map<number, [number, number]>();
   for (const [dx, dy] of N8) {
@@ -533,8 +537,8 @@ export function findPools(g: GroundGrid): Pool[] {
 // ───────────────────────── 돌 단상 계단 ─────────────────────────
 
 /** 단상 계단: 옆면 높이(px), 디딤판 깊이(타일), 옆면 수 */
-export const STEP_H = 5;
-export const STEP_D = 0.12;
+export const STEP_H = 8;
+export const STEP_D = 0.2;
 export const STEPS = 3;
 /** 계단이 단상 아래로 내려오는 높이 (px). 옆면 + 디딤판 + 바닥 그늘 */
 export const STEP_DROP = STEPS * STEP_H + Math.ceil((STEPS - 1) * STEP_D * TILE_H) + 3;

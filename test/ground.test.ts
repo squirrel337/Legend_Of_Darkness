@@ -121,6 +121,10 @@ test('물체·벽 아래 바닥: 둘레 8칸에서 가장 흔한 걸을 수 있�
   assert.equal(inferFloor(['...', '.T,', '...'], 1, 1), GROUND.GRASS);
   // 단상 위 기둥 (단상 5칸, 풀 3칸)
   assert.equal(inferFloor(['ddd', 'dId', '...'], 1, 1), GROUND.DAIS);
+  // 단상 모서리의 기둥 (단상 3칸, 풀 5칸): 곧은 이웃 둘이 단상이면 단상 (모서리가 파이지 않게)
+  assert.equal(inferFloor(['...', '.Id', '.dd'], 1, 1), GROUND.DAIS);
+  // 단상 옆에 붙은 바위 (곧은 이웃 하나만 단상) 는 둘레 풀
+  assert.equal(inferFloor(['...', '.Qd', '..d'], 1, 1), GROUND.GRASS);
   // 수가 같으면 곧은 이웃이 많은 쪽
   assert.equal(inferFloor([',.,', '.R.', ',.,'], 1, 1), GROUND.GRASS);
   // 바다 한가운데 바위는 물에 잠김
