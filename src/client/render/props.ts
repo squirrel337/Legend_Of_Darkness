@@ -1,8 +1,8 @@
 // 물체·나무 그림 (고전 어둠의 전설 풍, docs/art-direction.md 의 R1~R3 양식)
 //
 // 모든 그림은 코드로 한 점씩 칠합니다 (pixel.ts). 빛은 왼쪽 위에서 오고, 외곽선은 같은 계열의 어두운 색이며,
-// 바닥에는 부드러운 타원 그림자를 깝니다. 다 그린 뒤 한 번만 캔버스로 옮겨 (모양, 변형, 배율, 이웃)별로 캐시합니다.
-// 배율은 Math.ceil(dpr) 정수라서 dpr 2 에서도 점이 또렷하고, 화면에는 CSS 크기로 그립니다 (캐시와 굽기는 sprite-cache.ts).
+// 바닥에는 부드러운 타원 그림자를 깝니다. 그림은 굽기 작업자가 이 파일로 구워 (모양, 변형, 배율, 이웃)별로 캐시합니다
+// (sprite-cache.ts). 배율은 Math.ceil(dpr) 정수라서 dpr 2 에서도 점이 또렷하고, 화면에는 CSS 크기로 그립니다.
 // 나무·덤불은 flora.ts, 바위는 rocks.ts, 벽은 walls.ts 에 있습니다.
 import { tileInfo, type TileInfo } from '../../shared/tiles';
 import { HALF_H, HALF_W, hash2, makeCanvas, seeded } from './iso';
@@ -1164,7 +1164,7 @@ const OBJECTS: Partial<Record<Shape, ObjDef>> = {
 
 export const VARIANTS = 4;
 
-/** 물체·나무 그림을 픽셀 버퍼로 만듭니다 (캐시하지 않음, 점검·미리보기용) */
+/** 물체·나무 그림을 픽셀 버퍼로 만듭니다 (캐시하지 않음: 굽기 작업자와 점검·미리보기가 씀) */
 export function buildObject(ch: string, variant: number, scale = 1, links = 0): Pix | null {
   const info = tileInfo(ch);
   const def = info.shape ? OBJECTS[info.shape] : undefined;
