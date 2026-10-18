@@ -4,11 +4,16 @@ import { tileInfo } from '../../shared/tiles';
 import { entityPos, isAlly, type CEntity, type ClientState } from '../state';
 import { Effects, type Point } from './effects';
 import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
+import { ambienceFor, type Ambience } from './ambience';
+import { Atmosphere } from './atmosphere';
 import { drawChibiFast, type ChibiPose } from './chibi';
+import { Ground } from './ground';
 import { drawGroundItem, drawMonster } from './sprites';
-import { drawFlame, drawLiquid, floorCanvas, objectSprite, wallCanvas } from './tiles';
+import { drawFlame, objectSprite, wallCanvas } from './tiles';
 
 const ACT_MS = 320;
+/** 어둠 캔버스는 CSS 픽셀의 이 배수만큼 작게 그립니다 (부드러운 빛 구멍뿐이라 늘려도 티가 나지 않음) */
+const DARK_SCALE = 2;
 const FONT = '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
 
 interface Drawable {
@@ -22,6 +27,9 @@ export class Renderer {
   private readonly ctx: CanvasRenderingContext2D;
   private dark: HTMLCanvasElement;
   private darkCtx: CanvasRenderingContext2D;
+  /** 바닥 조각 캐시 (물·성수·용암 포함) 와 화면 가장자리 분위기 */
+  private readonly ground = new Ground();
+  private readonly atmosphere = new Atmosphere();
   readonly effects = new Effects();
   /** 화면 좌표 = 월드 좌표 + offset */
   private offX = 0;
@@ -52,14 +60,19 @@ export class Renderer {
     this.cssH = this.canvas.clientHeight;
     this.canvas.width = Math.round(this.cssW * this.dpr);
     this.canvas.height = Math.round(this.cssH * this.dpr);
-    this.dark.width = this.canvas.width;
-    this.dark.height = this.canvas.height;
+    // 어둠은 부드러운 그라데이션뿐이라 CSS 해상도의 절반으로 그리고 늘려 붙입니다
+    this.dark.width = Math.max(1, Math.ceil(this.cssW / DARK_SCALE));
+    this.dark.height = Math.max(1, Math.ceil(this.cssH / DARK_SCALE));
+    // 배율이 바뀌면 바닥 조각을 새 해상도로 다시 굽습니다
+    this.ground.setDpr(this.dpr);
   }
 
   /** 맵이 바뀌면 벽처럼 그릴 횃불 칸과 광원 목록을 다시 계산 */
   private prepareMap(): void {
     const map = this.state.map;
     if (!map) return;
+    // 바닥 캐시는 타일 내용이 바뀐 맵에서만 새로 만듭니다 (같은 맵이면 그대로)
+    this.ground.setMap(map);
     const key = map.id + ':' + map.tiles.length;
     if (key === this.mapKey) return;
     this.mapKey = key;
@@ -163,19 +176,8 @@ export class Renderer {
     ctx.save();
     ctx.translate(this.offX, this.offY);
 
-    // 1) 바닥
-    for (let y = 0; y < H; y++) {
-      const row = map.tiles[y]!;
-      for (let x = 0; x < W; x++) {
-        if (!visible(x, y)) continue;
-        const ch = row[x]!;
-        const info = tileInfo(ch);
-        const t = tileTop(x, y);
-        if (info.kind === 'liquid') drawLiquid(ctx, info, t.sx, t.sy, x, y, now);
-        else if (info.kind === 'void' || info.kind === 'wall' || this.wallLike.has(y * W + x)) continue;
-        else ctx.drawImage(floorCanvas(ch, Math.floor(hash2(x, y) * 4)), t.sx - HALF_W, t.sy);
-      }
-    }
+    // 1) 바닥: 미리 구운 바닥 조각 (타일 경계 없이 이어짐) + 보이는 물·성수·용암만 매 프레임
+    this.ground.draw(ctx, this.offX, this.offY, this.cssW, this.cssH, now);
 
     // 2) 워프 지점
     for (const w of map.warps) {
@@ -300,8 +302,10 @@ export class Renderer {
     }
     ctx.restore();
 
-    // 9) 어둠
-    if (map.dark) this.drawDarkness(now);
+    // 9) 어둠과 분위기: 모든 맵에 맵별 색조와 가장자리 비네트 (던전은 비네트를 품은 어둠에 빛 구멍)
+    const amb = ambienceFor(map.id, map.dark);
+    if (map.dark) this.drawDarkness(now, amb);
+    else this.atmosphere.draw(ctx, amb, this.cssW, this.cssH, this.dpr);
     if (state.self?.ghost) {
       ctx.fillStyle = 'rgba(60,80,140,0.18)';
       ctx.fillRect(0, 0, this.cssW, this.cssH);
@@ -497,15 +501,15 @@ export class Renderer {
     }
   }
 
-  private drawDarkness(now: number): void {
+  private drawDarkness(now: number, amb: Ambience): void {
     const d = this.darkCtx;
     const me = this.state.me;
+    // 바탕 어둠 + 가장자리 비네트를 한 장으로 (지우기·채우기·비네트를 따로 하지 않고 한 번에 덮어씀)
     d.setTransform(1, 0, 0, 1, 0, 0);
-    d.globalCompositeOperation = 'source-over';
-    d.clearRect(0, 0, this.dark.width, this.dark.height);
-    d.fillStyle = 'rgba(4,4,12,0.86)';
-    d.fillRect(0, 0, this.dark.width, this.dark.height);
-    d.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    d.globalCompositeOperation = 'copy';
+    d.imageSmoothingEnabled = true;
+    d.drawImage(this.atmosphere.darkness(amb), 0, 0, this.dark.width, this.dark.height);
+    d.setTransform(1 / DARK_SCALE, 0, 0, 1 / DARK_SCALE, 0, 0);
     d.globalCompositeOperation = 'destination-out';
     const hole = (x: number, y: number, r: number) => {
       const g = d.createRadialGradient(x, y, 0, x, y, r);
@@ -527,8 +531,11 @@ export class Renderer {
       const r = l.r * (l.flicker ? 0.93 + 0.07 * Math.sin(now / 120 + l.x * 3) : 1);
       hole(c.sx, c.sy - 20, r);
     }
+    this.ctx.save();
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.ctx.drawImage(this.dark, 0, 0);
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.drawImage(this.dark, 0, 0, this.dark.width * DARK_SCALE * this.dpr, this.dark.height * DARK_SCALE * this.dpr);
+    this.ctx.restore();
     // 따뜻한 횃불빛
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.ctx.save();
