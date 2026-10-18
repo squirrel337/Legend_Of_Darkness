@@ -23,7 +23,12 @@
     {"npc":"warrior_master","x":5,"y":16,"dir":1},
     {"npc":"rogue_master","x":5,"y":27,"dir":1},
     {"npc":"wizard_master","x":36,"y":5,"dir":2},
-    {"npc":"monk_master","x":38,"y":27,"dir":3}
+    {"npc":"monk_master","x":38,"y":27,"dir":3},
+    {"npc":"summoner_master","x":34,"y":11,"dir":2},
+    {"npc":"bard_master","x":19,"y":14,"dir":2},
+    {"npc":"beastkin_master","x":21,"y":30,"dir":0},
+    {"npc":"archer_master","x":40,"y":19,"dir":0},
+    {"npc":"gladiator_master","x":12,"y":13,"dir":1}
   ],
   "spawns": [],
   "tiles": [
