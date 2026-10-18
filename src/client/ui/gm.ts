@@ -8,6 +8,11 @@ const CLASS_OPTIONS: [string, string][] = [
   ['마법사', '마법사'],
   ['성직자', '성직자'],
   ['무도가', '무도가'],
+  ['소환사', '소환사'],
+  ['바드', '바드'],
+  ['수인', '수인'],
+  ['궁수', '궁수'],
+  ['검투사', '검투사'],
   ['평민', '평민'],
 ];
 
@@ -72,7 +77,8 @@ export class GmTool {
     const itemQty = h('input', { type: 'number', min: 1, value: '1', class: 'num' });
 
     const mapSel = sel(st.data.maps.map((m) => [m.id, `${m.name}${m.levelRange ? ` (${m.levelRange[0]}~${m.levelRange[1]})` : ''}`]));
-    const monSel = sel(st.data.monsters.map((m) => [m.name, `${m.name} Lv.${m.level}${m.boss ? ' ★' : ''}`]));
+    // 소환수 전용 몬스터는 맵에 불러낼 수 없으므로 목록에서 뺌
+    const monSel = sel(st.data.monsters.filter((m) => !m.summon).map((m) => [m.name, `${m.name} Lv.${m.level}${m.boss ? ' ★' : ''}`]));
     const monCount = h('input', { type: 'number', min: 1, max: 50, value: '3', class: 'num' });
     const announce = h('input', { type: 'text', placeholder: '공지 내용', class: 'wide' });
     const who = h('input', { type: 'text', placeholder: '이름', class: 'num' });

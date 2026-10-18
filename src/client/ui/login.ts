@@ -4,13 +4,18 @@ import type { HumanLook, PublicServerInfo } from '../../shared/types';
 import { drawChibi, portraitUrl } from '../render/chibi';
 import { h } from './dom';
 
-/** 접속 화면 아래에 늘어선 직업별 캐릭터 일러스트 */
+/** 접속 화면 아래에 늘어선 직업별 캐릭터 일러스트 (왼쪽 절반은 오른쪽을, 오른쪽 절반은 왼쪽을 봄) */
 const LINEUP: { name: string; look: HumanLook; flip?: boolean }[] = [
   { name: '전사', look: { gender: 'm', hairStyle: 0, hairColor: '#5a3a22', body: '#b0b8c0', body2: '#ff5c5c', outfit: 'warrior', weapon: 'sword', weaponColor: '#ff7b6b', helmet: '#c9cfd6', shield: '#b0b8c0' } },
   { name: '도적', look: { gender: 'f', hairStyle: 5, hairColor: '#e8d08a', body: '#3c3f5a', body2: '#ff5c5c', outfit: 'rogue', weapon: 'dagger', weaponColor: '#c9c9c9' } },
   { name: '마법사', look: { gender: 'm', hairStyle: 2, hairColor: '#d0d0d0', body: '#7a2a5a', body2: '#ffe680', outfit: 'wizard', weapon: 'staff', weaponColor: '#ff8a5a' } },
-  { name: '성직자', look: { gender: 'f', hairStyle: 2, hairColor: '#2a4d8f', body: '#ffffff', body2: '#7fb7ff', outfit: 'priest', weapon: 'mace', weaponColor: '#ffe680' }, flip: true },
-  { name: '무도가', look: { gender: 'f', hairStyle: 3, hairColor: '#8b5a2b', body: '#b03030', body2: '#ffe680', outfit: 'monk', weapon: 'claw', weaponColor: '#c9c9c9' }, flip: true },
+  { name: '성직자', look: { gender: 'f', hairStyle: 2, hairColor: '#2a4d8f', body: '#ffffff', body2: '#7fb7ff', outfit: 'priest', weapon: 'mace', weaponColor: '#ffe680' } },
+  { name: '무도가', look: { gender: 'f', hairStyle: 3, hairColor: '#8b5a2b', body: '#b03030', body2: '#ffe680', outfit: 'monk', weapon: 'claw', weaponColor: '#c9c9c9' } },
+  { name: '소환사', look: { gender: 'f', hairStyle: 2, hairColor: '#d0d0d0', body: '#3a2a6a', body2: '#ffd070', outfit: 'summoner', weapon: 'book', weaponColor: '#c07aff' }, flip: true },
+  { name: '바드', look: { gender: 'm', hairStyle: 4, hairColor: '#c99a4b', body: '#2f6a5a', body2: '#e8c35a', outfit: 'bard', weapon: 'lute', weaponColor: '#ffd070' }, flip: true },
+  { name: '수인', look: { gender: 'f', hairStyle: 5, hairColor: '#d0532a', body: '#6a4a32', body2: '#e8b04a', outfit: 'beastkin', weapon: 'gauntlet', weaponColor: '#ff9a5a' }, flip: true },
+  { name: '궁수', look: { gender: 'm', hairStyle: 0, hairColor: '#3e7d3a', body: '#4a6a3a', body2: '#9fe07a', outfit: 'archer', weapon: 'bow', weaponColor: '#7fe0a0' }, flip: true },
+  { name: '검투사', look: { gender: 'm', hairStyle: 1, hairColor: '#1a1a1a', body: '#8a3a2a', body2: '#e0b84a', outfit: 'gladiator', weapon: 'dualsword', weaponColor: '#ff7b6b' }, flip: true },
 ];
 
 export interface LoginHandlers {
