@@ -210,3 +210,41 @@ test('굽기 작업자: 바닥 조각·물체·벽을 그 자리에서 굽는 �
   assert.equal(last().t, 'fail');
   assert.equal(last().id, 4);
 });
+
+test('굽기 시간: 숲 첫 화면의 바닥 조각과 숲의 벽·물체 그림이 넉넉한 한도 안에 (느려지면 맵에 들어갈 때 오래 가려짐)', async () => {
+  const ground = await load('src/client/render/ground.ts');
+  const { chunksByDistance, mapWorldBounds } = await load('src/client/render/terrain.ts');
+  const { buildObject } = await load('src/client/render/props.ts');
+  const { buildWall } = await load('src/client/render/walls.ts');
+  const { tileInfo } = await load('src/shared/tiles.ts');
+  const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'gamedata/maps/forest.json'), 'utf8')) as { id: string; tiles: string[] };
+  const map = { id: m.id, dark: false, tiles: m.tiles };
+  // 1400×682 화면, 시작 자리 근처 (12, 19)
+  const fx = (12 - 19) * 32;
+  const fy = (12 + 19) * 16 + 16;
+  const vis: [number, number][] = chunksByDistance({ x0: fx - 700, y0: fy - 371, x1: fx + 700, y1: fy + 311 }, mapWorldBounds(m.tiles[0]!.length, m.tiles.length));
+  assert.ok(vis.length >= 15, `보이는 조각 ${vis.length}`);
+  ground.bakeGroundChunk(map, vis[0]![0], vis[0]![1]); // 무늬·격자 준비는 따로 (작업자는 쉬는 동안 미리 만듦)
+  let t0 = performance.now();
+  for (const [cx, cy] of vis) ground.bakeGroundChunk(map, cx, cy);
+  const chunkMs = performance.now() - t0;
+  // 지금 약 8ms × 24조각 ≈ 0.2초. 다섯 배쯤 넉넉하게
+  assert.ok(chunkMs < 1000, `숲 첫 화면 바닥 ${chunkMs.toFixed(0)}ms`);
+  // 숲이 쓰는 벽·나무·물체 그림 전부 (배율 1, 변형마다 한 번)
+  const seen = new Set<string>();
+  t0 = performance.now();
+  for (const row of m.tiles)
+    for (const ch of row) {
+      const k = tileInfo(ch).kind;
+      if (k !== 'tree' && k !== 'object' && k !== 'wall') continue;
+      for (let v = 0; v < 4; v++) {
+        if (seen.has(ch + v)) continue;
+        seen.add(ch + v);
+        if (k === 'wall') buildWall(ch, 1, v, 0, false);
+        else buildObject(ch, v, 1, 0);
+      }
+    }
+  const spriteMs = performance.now() - t0;
+  assert.ok(seen.size >= 20, `그림 ${seen.size}`);
+  assert.ok(spriteMs < 1500, `숲 그림 ${seen.size}개 ${spriteMs.toFixed(0)}ms`);
+});
