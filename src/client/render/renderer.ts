@@ -332,12 +332,14 @@ export class Renderer {
       (p) => p,
     );
 
-    // 8) 이름표, 체력바, 말풍선
+    // 8) 이름표, 체력바 (말풍선을 띄울 높이는 기억해 두었다가 10) 에서 그림)
+    const talkers: { e: CEntity; clear: number }[] = [];
     for (const e of state.entities.values()) {
       if (e.dying) continue;
       const pos = entityPos(e, now);
       if (!visible(Math.round(pos.x), Math.round(pos.y))) continue;
-      this.drawLabels(e, now);
+      const clear = this.drawLabels(e, now);
+      if (clear !== null) talkers.push({ e, clear });
     }
     ctx.restore();
 
@@ -345,6 +347,17 @@ export class Renderer {
     const amb = ambienceFor(map.id, map.dark);
     if (map.dark) this.drawDarkness(now, amb);
     else this.atmosphere.draw(ctx, amb, this.cssW, this.cssH, this.dpr);
+
+    // 10) 말풍선: 모든 이름표·체력바와 어둠·비네트 위에 (남의 이름표에 가리지 않고 어두운 던전에서도 읽힘).
+    //     화면 위쪽(먼 쪽) 사람 것부터 그려 가까운 사람의 말풍선이 위에 옴
+    if (talkers.length) {
+      talkers.sort((a, b) => a.clear - b.clear);
+      ctx.save();
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      ctx.translate(this.offX, this.offY);
+      for (const t of talkers) this.drawBubbleOf(t.e, t.clear, now);
+      ctx.restore();
+    }
     if (state.self?.ghost) {
       ctx.fillStyle = 'rgba(60,80,140,0.18)';
       ctx.fillRect(0, 0, this.cssW, this.cssH);
@@ -473,7 +486,8 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawLabels(e: CEntity, now: number): void {
+  /** 이름표와 체력바를 그리고, 말풍선이 떠 있으면 그 꼬리 끝이 피해야 할 높이(화면 y)를 돌려줌 (없으면 null) */
+  private drawLabels(e: CEntity, now: number): number | null {
     const ctx = this.ctx;
     const c = this.entityPoint(e, now);
     // 도트 글자와 말풍선 테두리가 번지지 않도록 정수 픽셀에 맞춥니다
@@ -534,16 +548,21 @@ export class Renderer {
       ctx.fillRect(ax - w / 2, y, Math.round((w * Math.max(0, e.hpPct)) / 100), 3);
       clear = Math.min(clear, y - 1);
     }
-    // 말풍선: `이름: 대사`, 원작처럼 글자 단위 줄바꿈, 끝나기 전에 흐려짐. 화면 밖으로 나가지 않게 가로로 밀어 넣음
-    if (e.bubble && fontOk) {
-      const alpha = bubbleAlpha(now, e.bubble.until);
-      if (alpha > 0) {
-        ctx.font = font;
-        const { lines, width } = bubbleLines(ctx, bubbleText(e.name, e.bubble.text));
-        const shape = bubbleShape(width, lines.length, ax, clear - 2, 2 - this.offX, this.cssW - 2 - this.offX);
-        drawBubble(ctx, lines, shape, alpha);
-      }
-    }
+    return e.bubble && fontOk && bubbleAlpha(now, e.bubble.until) > 0 ? clear : null;
+  }
+
+  /**
+   * 말풍선: `이름: 대사`, 원작처럼 글자 단위 줄바꿈, 끝나기 전에 흐려짐. 화면 밖으로 나가지 않게 가로로 밀어 넣음.
+   * clear 는 drawLabels 가 돌려준 높이 (머리·이름표·체력바·왕관의 윗선)
+   */
+  private drawBubbleOf(e: CEntity, clear: number, now: number): void {
+    if (!e.bubble) return;
+    const ctx = this.ctx;
+    ctx.font = `${LABEL_PX}px ${FONT}`;
+    const { lines, width } = bubbleLines(ctx, bubbleText(e.name, e.bubble.text));
+    const ax = Math.round(this.entityPoint(e, now).sx);
+    const shape = bubbleShape(width, lines.length, ax, clear - 2, 2 - this.offX, this.cssW - 2 - this.offX);
+    drawBubble(ctx, lines, shape, bubbleAlpha(now, e.bubble.until));
   }
 
   private drawDarkness(now: number, amb: Ambience): void {
