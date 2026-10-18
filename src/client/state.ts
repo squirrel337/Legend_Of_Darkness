@@ -36,6 +36,9 @@ export interface CEntity {
   statuses: StatusId[];
   item?: string | null;
   qty?: number;
+  /** 소환수면 주인(플레이어) 엔티티 id와 이름 */
+  ownerId?: number;
+  ownerName?: string;
   // 애니메이션
   actKind?: 'attack' | 'cast' | 'skill';
   actStart: number;
@@ -80,6 +83,8 @@ export function entityFromSnapshot(s: EntitySnapshot): CEntity {
       e.level = s.level;
       e.hpPct = s.hpPct;
       e.statuses = s.statuses;
+      if (s.ownerId !== undefined) e.ownerId = s.ownerId;
+      if (s.ownerName !== undefined) e.ownerName = s.ownerName;
       break;
     case 'npc':
       e.def = s.def;
@@ -92,6 +97,21 @@ export function entityFromSnapshot(s: EntitySnapshot): CEntity {
       break;
   }
   return e;
+}
+
+/** 플레이어 편 소환수인지 */
+export function isAlly(e: CEntity): boolean {
+  return e.type === 'monster' && e.ownerId !== undefined;
+}
+
+/** 공격할 수 있는 몬스터인지 (소환수와 사라지는 중인 몬스터 제외) */
+export function isHostile(e: CEntity): boolean {
+  return e.type === 'monster' && e.ownerId === undefined && !e.dying;
+}
+
+/** 두 칸 사이 거리 (가로·세로·대각선 모두 1칸) */
+export function chebyshev(ax: number, ay: number, bx: number, by: number): number {
+  return Math.max(Math.abs(ax - bx), Math.abs(ay - by));
 }
 
 /** 보간된 현재 위치 (타일 단위 실수) */

@@ -10,6 +10,8 @@ import {
 import type { S2C } from '../shared/protocol';
 import type { PublicServerInfo } from '../shared/types';
 import { Net } from './net';
+import { STATUS_INFO } from '../shared/constants';
+import { chebyshev, isAlly, isHostile } from './state';
 import { Renderer } from './render/renderer';
 import { ClientState, entityFromSnapshot, entityPos, snapTo, startMove, type CEntity } from './state';
 import { AutoHuntUi, installAutoKeys } from './ui/autohunt';
@@ -531,12 +533,12 @@ export class Game {
     this.net.send({ t: 'recall' });
   }
 
-  /** 인접한 공격 대상: 지정한 대상 우선, 없으면 바라보는 쪽, 그다음 아무 인접 몬스터 */
+  /** 인접한 공격 대상: 지정한 대상 우선, 없으면 바라보는 쪽, 그다음 아무 인접 몬스터 (소환수 제외) */
   private adjacentEnemy(): CEntity | null {
     const st = this.state;
     const me = st.me;
     if (!me) return null;
-    const adj = (e: CEntity) => e.type === 'monster' && !e.dying && Math.abs(e.x - me.x) + Math.abs(e.y - me.y) === 1;
+    const adj = (e: CEntity) => isHostile(e) && Math.abs(e.x - me.x) + Math.abs(e.y - me.y) === 1;
     const t = st.targetId !== null ? st.entities.get(st.targetId) : undefined;
     if (t && adj(t)) return t;
     const fx = me.x + DIR_DX[me.dir]!;
@@ -550,18 +552,87 @@ export class Game {
     return any;
   }
 
+  /** 장착한 무기의 사거리 (1 = 근접, 활은 더 김) */
+  private weaponRange(): number {
+    return Math.max(1, this.state.self?.stats.range ?? 1);
+  }
+
+  /** 원거리 평타 대상: 지정한 적이 사거리 안이면 그 적, 아니면 사거리 안의 가장 가까운 적 (바라보는 쪽 우선) */
+  private rangedTarget(range: number): CEntity | null {
+    const st = this.state;
+    const me = st.me;
+    if (!me) return null;
+    const inRange = (e: CEntity) => isHostile(e) && !(e.x === me.x && e.y === me.y) && chebyshev(e.x, e.y, me.x, me.y) <= range;
+    const t = st.targetId !== null ? st.entities.get(st.targetId) : undefined;
+    if (t && inRange(t)) return t;
+    let best: CEntity | null = null;
+    let bestScore = Infinity;
+    for (const e of st.entities.values()) {
+      if (!inRange(e)) continue;
+      const facing = dirTowards(me.x, me.y, e.x, e.y) === me.dir;
+      // 가까운 순 (같으면 바라보는 쪽, 그다음 가로·세로 거리가 짧은 쪽)
+      const score = chebyshev(e.x, e.y, me.x, me.y) - (facing ? 0.5 : 0) + (Math.abs(e.x - me.x) + Math.abs(e.y - me.y)) * 0.01;
+      if (score < bestScore) {
+        best = e;
+        bestScore = score;
+      }
+    }
+    // 지정한 대상이 없거나 사라졌으면 자동으로 고른 적을 대상으로
+    if (best && (!t || !isHostile(t))) st.targetId = best.id;
+    return best;
+  }
+
   private tryAttack(now: number): void {
     if (now < this.nextAttackAt) return;
     const me = this.state.me;
-    if (!me || this.state.self?.ghost) return;
+    const self = this.state.self;
+    if (!me || self?.ghost) return;
     const pos = entityPos(me, now);
     if (pos.moving && pos.t < 0.6) return;
-    const t = this.adjacentEnemy();
-    if (t) this.faceTowards(t);
-    this.net.send({ t: 'attack' });
-    this.nextAttackAt = now + ASSAIL_COOLDOWN_MS;
+    const range = this.weaponRange();
+    if (range > 1) {
+      // 활: 붙지 않아도 사거리 안의 적을 겨눔
+      const t = this.rangedTarget(range);
+      if (t) {
+        this.faceTowards(t);
+        this.net.send({ t: 'attack', target: t.id });
+      } else this.net.send({ t: 'attack' });
+    } else {
+      const t = this.adjacentEnemy();
+      if (t) this.faceTowards(t);
+      this.net.send({ t: 'attack' });
+    }
+    // 신속 상태면 평타가 빨라짐 (실제 판정은 서버)
+    const haste = self?.statuses.some((s) => s.id === 'haste') ? STATUS_INFO.haste.potency : 0;
+    this.nextAttackAt = now + ASSAIL_COOLDOWN_MS * (1 - Math.min(60, haste) / 100);
     me.actKind = 'attack';
     me.actStart = now;
+  }
+
+  /** 활을 든 채 적을 누르면: 사거리 안이면 바로 쏘고, 아니면 사거리에 들어올 때까지만 걸어감 */
+  private approachRanged(e: CEntity, range: number): void {
+    const me = this.state.me;
+    if (!me) return;
+    if (chebyshev(e.x, e.y, me.x, me.y) <= range) {
+      this.cancelAuto();
+      this.path = [];
+      this.pending = null;
+      this.faceTowards(e);
+      this.tryAttack(performance.now());
+      return;
+    }
+    this.walkTo(e.x, e.y, { kind: 'approach', id: e.id });
+    let x = me.x;
+    let y = me.y;
+    for (let i = 0; i < this.path.length; i++) {
+      const d = this.path[i]!;
+      x += DIR_DX[d]!;
+      y += DIR_DY[d]!;
+      if (chebyshev(x, y, e.x, e.y) <= range) {
+        this.path = this.path.slice(0, i + 1);
+        break;
+      }
+    }
   }
 
   useAbility(id: string): void {
@@ -570,12 +641,15 @@ export class Game {
     if (!def) return;
     const t = st.targetId !== null ? st.entities.get(st.targetId) : undefined;
     let target: number | undefined;
-    if ((def.targeting === 'enemy' || def.targeting === 'enemyArea') && t?.type === 'monster') target = t.id;
+    if ((def.targeting === 'enemy' || def.targeting === 'enemyArea') && t && isHostile(t)) {
+      target = t.id;
+      this.faceTowards(t);
+    }
     if (def.targeting === 'ally' && t?.type === 'player') target = t.id;
     if (def.targeting === 'front' || def.targeting === 'line') {
       const adj = this.adjacentEnemy();
       if (adj) this.faceTowards(adj);
-      else if (t && t.type === 'monster') this.faceTowards(t);
+      else if (t && isHostile(t)) this.faceTowards(t);
     }
     this.net.send(target !== undefined ? { t: 'ability', id, target } : { t: 'ability', id });
   }
@@ -703,7 +777,7 @@ export class Game {
     const me = st.me;
     if (!me) return;
     const list = [...st.entities.values()]
-      .filter((e) => e.type === 'monster' && !e.dying)
+      .filter((e) => isHostile(e))
       .map((e) => ({ e, d: Math.abs(e.x - me.x) + Math.abs(e.y - me.y) }))
       .filter((x) => x.d <= 12)
       .sort((a, b) => a.d - b.d);
@@ -727,9 +801,13 @@ export class Game {
     const e = this.renderer.pickEntity(mx, my, now);
     if (e && e.id !== st.selfId) {
       if (e.type === 'monster') {
+        // 아군 소환수는 공격 대상으로 고르지 않음 (이름은 늘 머리 위에 보임)
+        if (isAlly(e)) return;
         if (st.targetId === e.id || right) {
           st.targetId = e.id;
-          this.walkTo(e.x, e.y, { kind: 'approach', id: e.id });
+          const range = this.weaponRange();
+          if (range > 1) this.approachRanged(e, range);
+          else this.walkTo(e.x, e.y, { kind: 'approach', id: e.id });
         } else st.targetId = e.id;
         return;
       }

@@ -12,6 +12,7 @@ const TARGETING_NAMES: Record<string, string> = {
   ally: '아군 하나',
   enemyArea: '적과 그 주변',
   line: '앞쪽 일직선',
+  party: '자신과 그룹원',
 };
 
 export class Tooltip {
@@ -58,6 +59,7 @@ export function itemTooltip(def: ItemDef, opts: { qty?: number; myLevel?: number
   if (def.type === 'consumable') lines.push(h('div', { class: 'tt-sub' }, '소모품'));
   if (def.type === 'material') lines.push(h('div', { class: 'tt-sub' }, '전리품'));
   if (def.dmg) lines.push(h('div', null, `피해 ${def.dmg[0]} ~ ${def.dmg[1]}`));
+  if (def.slot === 'weapon' && (def.range ?? 1) > 1) lines.push(h('div', { class: 'tt-range' }, `사거리 ${def.range}칸 (원거리)`));
   if (def.ac) lines.push(h('div', null, `AC ${def.ac > 0 ? '+' : ''}${def.ac}`));
   if (def.bonus) {
     for (const [k, v] of Object.entries(def.bonus)) {
@@ -96,7 +98,7 @@ export function abilityTooltip(def: AbilityDef, extra?: string): HTMLElement {
     'div',
     null,
     h('div', { class: 'tt-title' }, def.name),
-    h('div', { class: 'tt-sub' }, `${def.kind === 'skill' ? '기술' : '마법'} · ${TARGETING_NAMES[def.targeting] ?? def.targeting}${def.range ? ` · 사거리 ${def.range}` : ''}`),
+    h('div', { class: 'tt-sub' }, `${def.kind === 'skill' ? '기술' : '마법'} · ${TARGETING_NAMES[def.targeting] ?? def.targeting}${def.range ? ` · 사거리 ${def.range}칸` : ''}`),
     def.element && def.element !== 'weapon' && def.element !== 'none' ? h('div', { class: 'tt-elem' }, `${ELEMENT_NAMES[def.element]} 속성`) : null,
     def.mp ? h('div', null, `마나 ${def.mp}`) : null,
     def.cooldownMs ? h('div', null, `재사용 ${(def.cooldownMs / 1000).toFixed(1)}초`) : null,

@@ -1,7 +1,7 @@
 // 화면 그리기: 카메라, 타일/엔티티 깊이 정렬, 이름표, 효과, 어둠, 미니맵
 import { STATUS_INFO, TILE_H, TILE_W } from '../../shared/constants';
 import { tileInfo } from '../../shared/tiles';
-import { entityPos, type CEntity, type ClientState } from '../state';
+import { entityPos, isAlly, type CEntity, type ClientState } from '../state';
 import { Effects, type Point } from './effects';
 import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
 import { drawChibiFast, type ChibiPose } from './chibi';
@@ -106,7 +106,7 @@ export class Renderer {
     return screenToTile(mx - this.offX, my - this.offY);
   }
 
-  /** 마우스 아래의 엔티티 (스프라이트 영역 기준) */
+  /** 마우스 아래의 엔티티 (스프라이트 영역 기준). 겹치면 소환수보다 다른 것을 먼저 고름 */
   pickEntity(mx: number, my: number, now: number): CEntity | null {
     let best: CEntity | null = null;
     let bestDepth = -Infinity;
@@ -117,7 +117,7 @@ export class Renderer {
       const w = e.type === 'item' ? 14 : e.type === 'monster' ? 15 : 14;
       if (mx >= p.sx - w && mx <= p.sx + w && my >= p.sy - h && my <= p.sy + 4) {
         const pos = entityPos(e, now);
-        const depth = pos.x + pos.y + (e.type === 'item' ? -0.5 : 0);
+        const depth = pos.x + pos.y + (e.type === 'item' ? -0.5 : 0) - (isAlly(e) ? 1000 : 0);
         if (depth > bestDepth) {
           best = e;
           bestDepth = depth;
@@ -229,7 +229,7 @@ export class Renderer {
     const target = state.targetId !== null ? state.entities.get(state.targetId) : undefined;
     if (target && !target.dying) {
       const c = this.entityPoint(target, now);
-      ctx.strokeStyle = target.type === 'monster' ? 'rgba(255,90,90,0.9)' : 'rgba(120,220,255,0.9)';
+      ctx.strokeStyle = isAlly(target) ? 'rgba(110,240,130,0.9)' : target.type === 'monster' ? 'rgba(255,90,90,0.9)' : 'rgba(120,220,255,0.9)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.ellipse(c.sx, c.sy, 17, 8, 0, 0, Math.PI * 2);
@@ -320,7 +320,16 @@ export class Renderer {
     if (e.type === 'player' || e.type === 'npc') {
       const look = e.look;
       if (look) {
-        const pose: ChibiPose = { dir: e.dir, walk, step: (e.x + e.y) & 1, act, actKind: e.actKind, time: now + e.id * 97, ghost: e.ghost };
+        const pose: ChibiPose = {
+          dir: e.dir,
+          walk,
+          step: (e.x + e.y) & 1,
+          act,
+          actKind: e.actKind,
+          time: now + e.id * 97,
+          ghost: e.ghost,
+          beast: e.statuses.includes('beast'),
+        };
         const hidden = e.statuses.includes('hide');
         const alpha = hidden ? (e.id === this.state.selfId ? 0.45 : 0.18) : e.ghost ? 0.62 : 1;
         if (alpha < 1 || flash) this.drawBuffered((b) => drawChibiFast(b, look, pose, this.dpr), alpha, flash);
@@ -341,6 +350,15 @@ export class Renderer {
       }
     } else if (e.type === 'monster') {
       const def = e.def ? this.state.monsters.get(e.def) : undefined;
+      if (isAlly(e) && !e.dying) {
+        // 아군 소환수: 발밑의 옅은 초록 고리
+        const pulse = 0.5 + 0.5 * Math.sin(now / 420 + e.id);
+        ctx.strokeStyle = `rgba(110,240,130,${0.35 + pulse * 0.2})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 15, 7, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       if (def) {
         const fade = e.dying ? Math.min(1, (now - e.dying) / 500) : undefined;
         const pose = { dir: e.dir, walk, act, time: now + e.id * 131, ...(fade !== undefined ? { fade } : {}) };
@@ -412,7 +430,10 @@ export class Renderer {
     const targeted = this.state.targetId === e.id;
     const monsterDef = e.type === 'monster' && e.def ? this.state.monsters.get(e.def) : undefined;
     const scale = monsterDef?.look.size ?? 1;
-    const top = c.sy - (e.type === 'item' ? 26 : e.type === 'monster' ? 56 * Math.max(1, scale * 0.95) : 66);
+    // 소환수 이름은 늘 보이므로 몸 크기에 맞춰 낮게 (주인 이름표와 겹치지 않게)
+    const top =
+      c.sy -
+      (e.type === 'item' ? 26 : isAlly(e) ? 30 + 18 * scale : e.type === 'monster' ? 56 * Math.max(1, scale * 0.95) : 66);
     ctx.textAlign = 'center';
     let label: string | null = null;
     let color = '#ffffff';
@@ -422,6 +443,9 @@ export class Renderer {
     } else if (e.type === 'npc') {
       label = e.name;
       color = '#ffe9a8';
+    } else if (e.type === 'monster' && isAlly(e)) {
+      label = e.ownerName ? `${e.name} (${e.ownerName})` : e.name;
+      color = '#8dff9a';
     } else if (e.type === 'monster' && (hovered || targeted || monsterDef?.boss)) {
       label = `${e.name} Lv.${e.level}`;
       color = monsterDef?.boss ? '#ff9f6b' : '#ffb0b0';
@@ -430,7 +454,7 @@ export class Renderer {
       color = '#fff3a0';
     }
     if (label) {
-      ctx.font = `${e.type === 'npc' || hovered ? 'bold ' : ''}12px ${FONT}`;
+      ctx.font = `${e.type === 'npc' || hovered ? 'bold ' : ''}${isAlly(e) ? 11 : 12}px ${FONT}`;
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(0,0,0,0.8)';
       ctx.strokeText(label, c.sx, top);
@@ -452,7 +476,7 @@ export class Renderer {
       const y = top + 4;
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
       ctx.fillRect(c.sx - w / 2 - 1, y - 1, w + 2, 5);
-      ctx.fillStyle = e.type === 'monster' ? '#e04040' : '#40c060';
+      ctx.fillStyle = e.type === 'monster' && !isAlly(e) ? '#e04040' : '#40c060';
       ctx.fillRect(c.sx - w / 2, y, (w * Math.max(0, e.hpPct)) / 100, 3);
     }
     // 말풍선
@@ -578,7 +602,7 @@ export class Renderer {
       const sx = ox + (pos.x - pos.y) * cw;
       const sy = oy + (pos.x + pos.y) * ch + ch;
       if (e.id === this.state.selfId) continue;
-      c.fillStyle = e.type === 'monster' ? '#ff4d4d' : e.type === 'npc' ? '#ffe066' : '#6bd0ff';
+      c.fillStyle = isAlly(e) ? '#5dff7a' : e.type === 'monster' ? '#ff4d4d' : e.type === 'npc' ? '#ffe066' : '#6bd0ff';
       c.fillRect(sx - 1.5, sy - 1.5, 3, 3);
     }
     const me = this.state.me;
