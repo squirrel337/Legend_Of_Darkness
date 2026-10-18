@@ -485,8 +485,9 @@ function computeRig(look: HumanLook, p: ChibiPose): Rig {
         r.weapon2 = 0.35;
       }
     } else if (wpn === 'dualsword' && dual) {
-      r.armOther = 1.5;
-      r.weapon2 = 0.95;
+      // 다른 손의 검은 어깨높이에서 조금만 기울임 (칼끝이 가장 작은 초상화 액자 ±25 안에 들어오게)
+      r.armOther = 1.2;
+      r.weapon2 = 0.45;
     } else if (wpn === 'book') {
       r.armWeapon = 1.2;
       r.weapon = 0.1;
@@ -1304,16 +1305,16 @@ function feather(d: D, x1: number, y1: number, x2: number, y2: number, w: number
   ctx.stroke();
 }
 
-/** 모자에 꽂은 큰 깃털 하나 (뒤로 휘어 넘어감). dir: -1 이면 화면 왼쪽으로 */
+/** 모자에 꽂은 큰 깃털 하나 (뒤로 휘어 넘어감, 초상화 액자 위쪽에 닿지 않게 낮게). dir: -1 이면 화면 왼쪽으로 */
 function bigPlume(d: D, x: number, y: number, sw: number, dir: -1 | 1): void {
   const { ctx, pal } = d;
   const s = dir;
   const tipX = x + s * 19 + sw * 1.2;
-  const tipY = y - 9.6;
+  const tipY = y - 7.6;
   ctx.beginPath();
   ctx.moveTo(x + s * 1.4, y + 0.6);
-  ctx.bezierCurveTo(x - s * 0.6, y - 9.6, x + s * 9.6 + sw * 0.6, y - 17.4, tipX, tipY);
-  ctx.bezierCurveTo(x + s * 12.4 + sw, y - 9.0, x + s * 6.0, y - 5.4, x - s * 1.4, y + 0.6);
+  ctx.bezierCurveTo(x - s * 0.6, y - 7.8, x + s * 9.6 + sw * 0.6, y - 14.0, tipX, tipY);
+  ctx.bezierCurveTo(x + s * 12.4 + sw, y - 7.2, x + s * 6.0, y - 4.4, x - s * 1.4, y + 0.6);
   ctx.closePath();
   paint(d, gc(d, '#f8f3e6'));
   ctx.save();
@@ -1329,9 +1330,9 @@ function bigPlume(d: D, x: number, y: number, sw: number, dir: -1 | 1): void {
   for (let i = 1; i <= 5; i++) {
     const k = i / 6;
     const px = x + s * 9.6 * k + sw * 0.6 * k;
-    const py = y - 12.8 * Math.sin(k * Math.PI * 0.6);
+    const py = y - 10.2 * Math.sin(k * Math.PI * 0.6);
     ctx.moveTo(px, py);
-    ctx.lineTo(px + s * 3.2, py - 3.4);
+    ctx.lineTo(px + s * 3.2, py - 2.7);
   }
   ctx.stroke();
   ctx.restore();
@@ -1340,7 +1341,7 @@ function bigPlume(d: D, x: number, y: number, sw: number, dir: -1 | 1): void {
   ctx.lineWidth = d.lw * 0.7;
   ctx.beginPath();
   ctx.moveTo(x, y);
-  ctx.bezierCurveTo(x + s * 2.4, y - 8.0, x + s * 9.6 + sw * 0.6, y - 12.4, tipX - s * 1.0, tipY + 0.4);
+  ctx.bezierCurveTo(x + s * 2.4, y - 6.4, x + s * 9.6 + sw * 0.6, y - 9.9, tipX - s * 1.0, tipY + 0.4);
   ctx.stroke();
 }
 
@@ -1405,8 +1406,9 @@ function drawPlume(d: D, b: Body, front: boolean): void {
     let i = 0;
     for (const [x, y] of tips) {
       const s = sw * (1.3 - i / tips.length);
-      ctx.lineTo(hx + x + s + 0.8, hy + y * 0.92 - 0.6);
-      ctx.lineTo(hx + x * 0.94 + s, hy + y * 0.86 + 0.6);
+      // 솔 끝은 조금 낮게 (가장 작은 초상화 액자 위쪽에 닿지 않게)
+      ctx.lineTo(hx + x + s + 0.8, hy + y * 0.86 - 0.6);
+      ctx.lineTo(hx + x * 0.94 + s, hy + y * 0.8 + 0.6);
       i++;
     }
   } else {
@@ -1745,8 +1747,9 @@ function drawGearFront(d: D, b: Body, g: HeadGear): void {
       break;
     }
     case 'tallcap': {
-      // 둥근 관 + 앞에 높이 솟은 장식판 (보석) + 양옆 구슬 술
-      const top = hy - 22.4;
+      // 둥근 관 + 앞에 높이 솟은 장식판 (보석) + 양옆 구슬 술.
+      // 장식판 끝이 가장 작은 초상화 액자(NPC 대화창) 위쪽에 닿지 않을 높이까지만
+      const top = hy - 19.6;
       ctx.beginPath();
       ctx.moveTo(hx - 9.4, hy - 9.6);
       ctx.bezierCurveTo(hx - 10.0, hy - 14, hx - 10.4, top + 4, hx - 7.6, top + 0.8);
@@ -1780,26 +1783,27 @@ function drawGearFront(d: D, b: Body, g: HeadGear): void {
       ctx.stroke();
       // 앞 장식판: 뾰족한 아치 + 금테 + 보석
       const px = hx + 2.4;
+      const tip = hy - 22.8;
       ctx.beginPath();
       ctx.moveTo(px - 5.0, hy - 12.6);
-      ctx.bezierCurveTo(px - 5.6, hy - 19, px - 2.6, hy - 23.2, px, hy - 27.0);
-      ctx.bezierCurveTo(px + 2.6, hy - 23.2, px + 5.6, hy - 19, px + 5.0, hy - 12.6);
+      ctx.bezierCurveTo(px - 5.6, hy - 17.2, px - 2.6, hy - 20.2, px, tip);
+      ctx.bezierCurveTo(px + 2.6, hy - 20.2, px + 5.6, hy - 17.2, px + 5.0, hy - 12.6);
       ctx.quadraticCurveTo(px, hy - 14.0, px - 5.0, hy - 12.6);
       ctx.closePath();
       paint(d, pal.gold);
       ctx.beginPath();
       ctx.moveTo(px - 3.4, hy - 13.8);
-      ctx.bezierCurveTo(px - 3.8, hy - 18.8, px - 1.8, hy - 21.6, px, hy - 24.4);
-      ctx.bezierCurveTo(px + 1.8, hy - 21.6, px + 3.8, hy - 18.8, px + 3.4, hy - 13.8);
+      ctx.bezierCurveTo(px - 3.8, hy - 17.0, px - 1.8, hy - 19.0, px, hy - 20.8);
+      ctx.bezierCurveTo(px + 1.8, hy - 19.0, px + 3.8, hy - 17.0, px + 3.4, hy - 13.8);
       ctx.quadraticCurveTo(px, hy - 15.0, px - 3.4, hy - 13.8);
       ctx.closePath();
       paint(d, pal.trim, lw * 0.6);
-      ellipse(ctx, px, hy - 18.6, 1.7, 2.2);
+      ellipse(ctx, px, hy - 17.0, 1.6, 1.9);
       paint(d, gc(d, '#fff3c0'), lw * 0.6);
       ctx.fillStyle = rgba('#ffffff', 0.85);
-      ellipse(ctx, px - 0.5, hy - 19.3, 0.5, 0.7);
+      ellipse(ctx, px - 0.5, hy - 17.6, 0.5, 0.6);
       ctx.fill();
-      ellipse(ctx, px, hy - 27.0, 1.2, 1.2);
+      ellipse(ctx, px, tip, 1.0, 1.0);
       paint(d, pal.gold, lw * 0.6);
       break;
     }
