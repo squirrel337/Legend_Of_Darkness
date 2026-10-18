@@ -162,3 +162,39 @@ test('낮은 돌담 매듭 띠: 무늬가 타일 경계(u=0, 32)에서 끊김 �
   }
   assert.deepEqual([...kinds].sort(), [0, 1, 2], '바탕·가닥·홈이 모두 있어야 함');
 });
+
+test('석상 받침과 바위 무더기는 막힌 한 칸 안에 선다: 옆 칸에 선 사람의 발 자리를 덮지 않음', async () => {
+  const { buildObject } = await load('src/client/render/props.ts');
+  for (const ch of ['S', 'Q']) {
+    for (let v = 0; v < 4; v++) {
+      const p: PixLike = buildObject(ch, v, 1);
+      // 그림자(반투명)는 빼고 불투명한 점만
+      const solid = (x: number, y: number) => p.alpha(Math.floor((x - p.box.left) * p.s), Math.floor((y - p.box.top) * p.s)) >= 200;
+      let front = -Infinity;
+      let side = 0;
+      for (let y = -40; y <= 40; y++)
+        for (let x = -60; x <= 60; x++) {
+          if (!solid(x + 0.5, y + 0.5)) continue;
+          front = Math.max(front, y);
+          if (Math.abs(y) <= 4) side = Math.max(side, Math.abs(x + 0.5));
+        }
+      // 한 칸의 앞 꼭짓점은 발에서 16px 아래, 옆 꼭짓점은 32px 옆
+      assert.ok(front <= 18, `${ch}${v}: 바닥이 앞 칸까지 나옴 (${front})`);
+      assert.ok(side <= 36, `${ch}${v}: 바닥이 옆 칸까지 퍼짐 (${side})`);
+      // 앞 이웃 두 칸의 발 자리: 그 사람은 물체 뒤에 그려지므로 덮이면 받침 위에 올라선 것처럼 보임.
+      // 석상은 낮은 바닥돌이 뒤 이웃의 발을 덮어도 같은 꼴이라 뒤 두 칸도 봄 (바위는 높아서 뒤 사람의 발을 가리는 게 맞음)
+      const feet: [number, number][] = [
+        [-32, 16],
+        [32, 16],
+        ...(ch === 'S'
+          ? ([
+              [-32, -16],
+              [32, -16],
+            ] as [number, number][])
+          : []),
+      ];
+      for (const [fx, fy] of feet)
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) assert.ok(!solid(fx + dx + 0.5, fy + dy + 0.5), `${ch}${v}: 이웃 발 자리 (${fx},${fy}) 를 덮음`);
+    }
+  }
+});

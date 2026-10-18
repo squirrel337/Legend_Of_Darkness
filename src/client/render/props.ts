@@ -179,15 +179,19 @@ function stonePost(p: Pix, rnd: Rnd, seed: number, variant: number): void {
 
 // ───────────────────────── 석상 (R2) ─────────────────────────
 
+/** 석상 바닥돌 반지름 (CSS px): 막힌 한 칸(반너비 32) 안에 들어 옆 칸 사람의 발이 받침 위에 오지 않음 */
+const STATUE_BASE_R = 34;
+
 /**
- * 석상 S: 넓은 2단 둥근 바닥돌 + 위아래 둥근 띠(몰딩)와 덩굴 무늬를 새긴 원기둥 받침 + 회색 석상
+ * 석상 S: 2단 둥근 바닥돌 + 위아래 둥근 띠(몰딩)와 덩굴 무늬를 새긴 원기둥 받침 + 회색 석상
  * (변형 0 지팡이 든 여인상, 1 구슬을 든 여인상, 2 칼을 짚은 전사상, 3 칼과 방패를 든 전사상). 받침 앞에 돌 명판.
+ * 바닥돌은 막힌 한 칸 안에 들도록 반지름 34px (옆 칸에 선 사람이 받침 위에 올라선 것처럼 보이지 않게).
  */
 function statue(p: Pix, rnd: Rnd, seed: number, variant: number): void {
-  groundShadow(p, 12, 4, 49, 21, 0.32);
+  groundShadow(p, 9, 3, 40, 17, 0.32);
   const base = p.layer();
-  // 넓은 둥근 바닥돌 2단
-  lathe(base, 0, 0, 7, (h) => (h < 3.6 ? 43 - (h > 2.6 ? (h - 2.6) * 1.5 : 0) : 37.5 - (h > 6 ? (h - 6) * 1.5 : 0)), (q) => {
+  // 둥근 바닥돌 2단
+  lathe(base, 0, 0, 7, (h) => (h < 3.6 ? STATUE_BASE_R - (h > 2.6 ? (h - 2.6) * 1.5 : 0) : STATUE_BASE_R - 4 - (h > 6 ? (h - 6) * 1.5 : 0)), (q) => {
     let v = q.v + speckle(q.ix, q.iy, seed) * 0.2;
     // 바닥돌 이음매 (방사형)
     if (q.top && q.d > 0.75 && Math.abs(Math.sin(q.a * 6)) < 0.07) v -= 0.22;
@@ -200,11 +204,11 @@ function statue(p: Pix, rnd: Rnd, seed: number, variant: number): void {
   // 받침: 아래 둥근 띠 · 덩굴 무늬 몸통 · 위 둥근 띠 · 윗판 (가운데가 둥글게 솟음)
   const ped = p.layer();
   const R = (h: number) => {
-    if (h < 3.4) return 28 + 1.6 * Math.sin((Math.PI * h) / 3.4);
-    if (h < 26) return 25.5 - 0.5 * Math.sin((Math.PI * (h - 3.4)) / 22.6);
-    if (h < 30) return 27 + 1.6 * Math.sin((Math.PI * (h - 26)) / 4);
-    if (h < 32.5) return 28.5;
-    return 28.5 * Math.sqrt(Math.max(0, 1 - ((h - 32.5) / 9) ** 2));
+    if (h < 3.4) return 23 + 1.4 * Math.sin((Math.PI * h) / 3.4);
+    if (h < 26) return 21 - 0.5 * Math.sin((Math.PI * (h - 3.4)) / 22.6);
+    if (h < 30) return 22.5 + 1.4 * Math.sin((Math.PI * (h - 26)) / 4);
+    if (h < 32.5) return 24;
+    return 24 * Math.sqrt(Math.max(0, 1 - ((h - 32.5) / 8) ** 2));
   };
   const vineA = rnd() * 6;
   lathe(ped, 0, -7, 35, R, (q) => {
@@ -212,7 +216,7 @@ function statue(p: Pix, rnd: Rnd, seed: number, variant: number): void {
     if (q.top) return tone(PEDESTAL, 0.72 + speckle(q.ix, q.iy, seed + 2) * 0.2 - q.d * 0.12, q.ix, q.iy);
     if (q.h >= 3.4 && q.h < 26) {
       // 덩굴 무늬 부조: 볼록한 줄은 위·왼쪽이 밝고, 오목한 곳은 어둡게
-      const u = q.a * 25.5;
+      const u = q.a * 21;
       const h = q.h - 3.4;
       const s1 = Math.sin(u * 0.42 + Math.sin(h * 0.55 + vineA) * 1.8);
       const s2 = Math.sin(h * 0.62 - u * 0.21 + vineA);
@@ -227,8 +231,8 @@ function statue(p: Pix, rnd: Rnd, seed: number, variant: number): void {
   // 앞쪽 돌 명판 (기대어 세움)
   if (variant === 0 || variant === 2) {
     const tab = p.layer();
-    const tx = -22;
-    const ty = 18;
+    const tx = -18;
+    const ty = 14;
     quad(tab, tx - 9, ty - 15, 14, 7, 3, 11, (s, t, ix, iy) => {
       let v = 0.66 + speckle(ix, iy, seed + 9) * 0.2;
       if (t > 0.25 && t < 0.85 && s > 0.15 && s < 0.85 && Math.floor(t * 12) % 2 === 0 && hash2(ix, iy, seed) < 0.7) v -= 0.3;

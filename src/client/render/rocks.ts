@@ -150,15 +150,16 @@ export function boulderPile(p: Pix, rnd: Rnd, seed: number, variant: number): vo
   const list: Boulder[] = [];
   const big = 14 + rnd() * 3;
   list.push(makeBoulder(rnd, -3 + rnd() * 4, -5 + rnd() * 3, big, seed));
+  // 작은 바위 자리 (맵 좌표): 덩어리가 막힌 한 칸 안에 머물도록 앞쪽(+X, +Y)으로는 조금만
   const spots: [number, number][] = [
-    [11, 3],
-    [-6, 11],
-    [12, 13],
-    [-13, 0],
+    [10, 2],
+    [-6, 9],
+    [9, 9],
+    [-12, 0],
   ];
   for (let i = 1; i < n + (variant === 3 ? 1 : 0); i++) {
     const [sx, sy] = spots[(i - 1 + variant) % spots.length]!;
-    list.push(makeBoulder(rnd, sx + (rnd() - 0.5) * 4, sy + (rnd() - 0.5) * 4, 6.5 + rnd() * 5, seed + i * 31));
+    list.push(makeBoulder(rnd, sx + (rnd() - 0.5) * 4, sy + (rnd() - 0.5) * 4, 6.5 + rnd() * 4, seed + i * 31));
   }
   paintPile(p, rnd, list, ROCK, true);
 }
