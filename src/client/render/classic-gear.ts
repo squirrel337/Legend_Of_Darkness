@@ -1,7 +1,7 @@
 // 고전 도트 캐릭터의 머리(얼굴·머리카락·모자)와 무기·방패·빛 효과 (DOM 없음).
 import type { IconShape } from '../../shared/types';
 import { mixColor, packColor, parseColor, ramp, toHsl } from './classic-palette';
-import { SOFT_PART, mixPacked, pack, type Mat, type PixelBuf, type Shade } from './classic-raster';
+import { SOFT_PART, mixPacked, pack, sphereLight, type Mat, type PixelBuf, type Shade } from './classic-raster';
 import { P, coversHair, dirv, hp, part, pt, wpnAt, wpnPoly, type Ctx, type HairStyleId, type Pt } from './classic-kit';
 
 // ───────────────────────── 얼굴 ─────────────────────────
@@ -12,7 +12,13 @@ export function drawHead(x: Ctx): void {
   const [rx, ry] = r.d.headR;
   part(x, P.head, pal.skin.line, () => {
     if (r.view === 'F') {
-      // 얼굴은 오른쪽(바라보는 쪽)으로 조금 갸름하고, 턱이 앞쪽에
+      // 얼굴은 오른쪽(바라보는 쪽)으로 조금 갸름하고, 턱이 앞쪽에.
+      // 빛은 왼쪽 위인데 그 쪽은 머리카락이 덮고 보이는 얼굴은 오른쪽 아래라, 구 명암 그대로면 얼굴 대부분이 그림자 단계로
+      // 어둡게 보임: 원작처럼 밝은 기본 살색 위주로 올리고 그림자는 먼 쪽 가장자리와 턱 밑에만
+      const lx = hx - 1.2;
+      const ly = hy - 1.6;
+      const lrx = rx * 1.45;
+      const lry = ry * 1.35;
       b.poly(
         [
           hx - rx, hy - 1,
@@ -30,7 +36,7 @@ export function drawHead(x: Ctx): void {
         ],
         pal.skin,
         P.head,
-        { k: 'ball', cx: hx - 1.2, cy: hy - 1.6, rx: rx * 1.45, ry: ry * 1.35 },
+        { k: 'fn', f: (px, py) => sphereLight((px - lx) / lrx, (py - ly) / lry) + 0.4 },
       );
     } else {
       b.ellipse(hx, hy, rx, ry, pal.skin, P.head);
