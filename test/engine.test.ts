@@ -268,25 +268,38 @@ test('신속은 평타와 기술의 재사용 대기를 줄인다 (최소 절반
   const tr = training();
   place(p, tr, 2, 14);
   let now = Date.now();
+  // 평타 간격은 'assail' 재사용 대기 메시지로도 알려 줌 (클라이언트가 연타 간격을 맞춤)
+  const assailMs = async (ms: number, since: number) => (await c.waitFor('cooldown', (m) => m.id === 'assail', since)).ms === ms;
   p.nextAssailAt = 0;
+  let mark = c.mark;
   playerAssail(world(), p, undefined, now);
   assert.equal(p.nextAssailAt - now, ASSAIL_COOLDOWN_MS);
+  assert.ok(await assailMs(ASSAIL_COOLDOWN_MS, mark));
   applyStatus(p, 'haste', 10_000, 40, p);
   now += 5000;
+  mark = c.mark;
   playerAssail(world(), p, undefined, now);
   assert.equal(p.nextAssailAt - now, Math.round(ASSAIL_COOLDOWN_MS * 0.6));
+  assert.ok(await assailMs(Math.round(ASSAIL_COOLDOWN_MS * 0.6), mark), '신속이면 줄어든 간격을 보냄');
   removeStatus(p, 'haste');
   applyStatus(p, 'haste', 10_000, 90, p);
   now += 5000;
+  mark = c.mark;
   playerAssail(world(), p, undefined, now);
   assert.equal(p.nextAssailAt - now, Math.round(ASSAIL_COOLDOWN_MS * 0.5), '최소 0.5배');
+  assert.ok(await assailMs(Math.round(ASSAIL_COOLDOWN_MS * 0.5), mark));
+  // 재사용 대기 중이라 무시된 평타는 메시지를 보내지 않음
+  mark = c.mark;
+  playerAssail(world(), p, undefined, now + 10);
+  await sleep(50);
+  assert.ok(!c.msgs.slice(mark).some((m) => m.t === 'cooldown' && m.id === 'assail'));
 
   // 기술: 재사용 대기 메시지도 줄어든 값
   become(p, 'archer', 20, ['a_aimed']);
   const def = data().abilities.get('a_aimed')!;
   const rat = spawn(tr, 'rat', 5, 14);
   p.gcdUntil = 0;
-  const mark = c.mark;
+  mark = c.mark;
   playerUseAbility(world(), p, 'a_aimed', rat.id);
   const cd = await c.waitFor('cooldown', (m) => m.id === 'a_aimed', mark);
   assert.equal(cd.ms, Math.round(def.cooldownMs * 0.5));
@@ -386,6 +399,55 @@ test('소환수는 근처 몬스터를 잡고, 경험치는 주인이 받는다'
   const gain = await c.waitFor('gain', (m) => m.exp > 0, mark);
   assert.ok(gain.exp > 0);
   assert.ok(c.msgs.slice(mark).some((m) => m.t === 'act' && m.id === fox.id && m.a === 'attack'), '소환수가 공격함');
+});
+
+test('주인을 노리던 몬스터도 소환수에게 맞으면 소환수를 노리고, 소환수가 싸우는 동안 주인도 전투 중이다', () => {
+  const { p } = summoner;
+  const tr = training();
+  const fox = foxesOf(p)[0]!;
+  const spot = tr.findFreeNear(fox.x + 2, fox.y)!;
+  const rat = spawn(tr, 'rat', spot.x, spot.y);
+  const tiny = { mult: 0.001, element: 'none' as const }; // 1씩만 깎아 쓰러지지 않게
+  const inCombat = () => Date.now() - p.lastCombatAt < 1000;
+  // 소환수가 때리면: 주인을 노리던 몬스터가 소환수로 돌아섬 (피해는 주인 몫)
+  rat.target = p;
+  p.lastCombatAt = 0;
+  assert.ok(withRandom(HIT, () => physicalAttack(world(), fox, rat, tiny)) > 0);
+  assert.equal(rat.target?.id, fox.id, '소환수로 대상을 바꿈');
+  assert.ok((rat.damageBy.get(p.name) ?? 0) > 0, '피해는 주인 몫');
+  assert.ok(inCombat(), '소환수가 때리면 주인도 전투 중');
+  // 빗나가도 마찬가지
+  rat.target = p;
+  p.lastCombatAt = 0;
+  assert.equal(withRandom(0.999, () => physicalAttack(world(), fox, rat, tiny)), 0);
+  assert.equal(rat.target?.id, fox.id, '빗나가도 소환수를 노림');
+  assert.ok(inCombat(), '빗나가도 전투 중');
+  // 소환수와 싸우는 몬스터는 주인이 때려도 소환수를 계속 노림
+  withRandom(HIT, () => physicalAttack(world(), p, rat, tiny));
+  assert.equal(rat.target?.id, fox.id, '주인이 때려도 그대로');
+  // 소환수가 맞아도 주인은 전투 중
+  p.lastCombatAt = 0;
+  const foxHp = fox.hp;
+  applyDamage(world(), rat, fox, 1, 'phys');
+  assert.ok(inCombat(), '소환수가 맞아도 주인은 전투 중');
+  fox.hp = foxHp;
+  despawn(rat);
+});
+
+test('소환수는 주인을 노리는 몬스터에게 덤벼 자기 쪽으로 끌어온다', async () => {
+  const { p } = summoner;
+  const tr = training();
+  const fox = foxesOf(p)[0]!;
+  // 튼튼하고 묶여 있는 몬스터가 주인을 노리는 중
+  const spot = tr.findFreeNear(p.x + 2, p.y)!;
+  const knight = spawn(tr, 'crypt_knight', spot.x, spot.y);
+  knight.target = p;
+  knight.chaseSince = Date.now();
+  await until(() => knight.target === fox, 8000);
+  await sleep(300);
+  assert.equal(knight.target?.id, fox.id, '주인에게 되돌아가지 않음');
+  assert.ok(!knight.dead);
+  despawn(knight);
 });
 
 test('야생 몬스터는 소환수를 노리고, 쓰러진 소환수는 보상 없이 사라진다', async () => {
