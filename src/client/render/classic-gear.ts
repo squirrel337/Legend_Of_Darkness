@@ -1,7 +1,7 @@
 // 고전 도트 캐릭터의 머리(얼굴·머리카락·모자)와 무기·방패·빛 효과 (DOM 없음).
 import type { IconShape } from '../../shared/types';
 import { mixColor, packColor, parseColor, ramp, toHsl } from './classic-palette';
-import { SOFT_PART, mixPacked, pack, type Mat, type Shade } from './classic-raster';
+import { SOFT_PART, mixPacked, pack, type Mat, type PixelBuf, type Shade } from './classic-raster';
 import { P, coversHair, dirv, hp, part, pt, wpnAt, wpnPoly, type Ctx, type HairStyleId, type Pt } from './classic-kit';
 
 // ───────────────────────── 얼굴 ─────────────────────────
@@ -915,6 +915,12 @@ export function drawGlow(x: Ctx, at: Pt, k: number): void {
   }
 }
 
+/** 몸 밖(빈 칸·반투명 칸)에만 빛 점을 찍음: 궤적이 얼굴·몸 위를 덮지 않고 몸 뒤로 지나가 보이게 */
+function glowOutside(b: PixelBuf, x: number, y: number, c: number, a: number): void {
+  const p = b.partAt(x, y);
+  if (p === 0 || p === SOFT_PART) b.glow(x, y, c, a);
+}
+
 /** 휘두르는 궤적 (공격 두 번째 그림): 어깨를 중심으로 위 → 앞 호 */
 export function drawTrail(x: Ctx): void {
   const { r, b } = x;
@@ -924,8 +930,8 @@ export function drawTrail(x: Ctx): void {
     // 찌르기: 앞으로 뻗은 선
     for (let k = 0; k < 9; k++) {
       const xx = r.haN.x + 3 + k;
-      b.glow(xx, r.haN.y - 1, c, 0.75 - k * 0.06);
-      b.glow(xx, r.haN.y + 1, c, 0.5 - k * 0.05);
+      glowOutside(b, xx, r.haN.y - 1, c, 0.75 - k * 0.06);
+      glowOutside(b, xx, r.haN.y + 1, c, 0.5 - k * 0.05);
     }
     return;
   }
@@ -938,7 +944,7 @@ export function drawTrail(x: Ctx): void {
     const ang = Math.PI - 0.15 - a;
     for (let w = 0; w < 3; w++) {
       const rr = R0 - w * 1.4;
-      b.glow(cx + Math.sin(ang) * rr, cy + Math.cos(ang) * rr, c, (0.75 - w * 0.2) * (0.35 + t * 0.65));
+      glowOutside(b, cx + Math.sin(ang) * rr, cy + Math.cos(ang) * rr, c, (0.75 - w * 0.2) * (0.35 + t * 0.65));
     }
   }
 }

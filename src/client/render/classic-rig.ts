@@ -99,6 +99,15 @@ function restPose(grip: Grip, back: boolean): { n: ArmPose; f: ArmPose; w: numbe
   }
 }
 
+/**
+ * 앞모습에서 가까운 팔을 머리 위로 든 자세.
+ * 앞모습의 가까운 어깨는 화면 왼쪽(바라보는 쪽의 반대)이라, 뒷모습처럼 "위-앞"으로 뻗으면 손이 얼굴을 가립니다.
+ * 그래서 앞모습은 거의 곧게 위로 들어 손이 머리 왼쪽 위에 오게 합니다.
+ */
+const RAISED_NEAR_F: ArmPose = [3.0, 3.2];
+/** 뒷모습에서 무기를 뒤로 넘겨 든 자세: 가까운 어깨(화면 오른쪽) 위로 곧게 들어 손이 뒤통수를 덮지 않게 */
+const RAISED_NEAR_B: ArmPose = [-3.05, -3.2];
+
 /** 무릎 위치 (앞(+x)으로 굽힘) */
 function legIK(hip: Pt, an: Pt, thigh: number, shin: number): Pt {
   const dx = an.x - hip.x;
@@ -215,10 +224,11 @@ export function computeRig(look: HumanLook, fr: ClassicFrame): Rig {
       if (skill) glow = f === 0 ? 0.8 : 0.4;
     } else if (grip === 'gauntlet') {
       // 할퀴기: 위로 들었다가 앞아래로 긁음
-      armN = f === 0 ? [2.3, 2.75] : f === 1 ? [1.55, 1.4] : f === 2 ? [0.85, 0.55] : [0.4, 0.95];
+      armN = f === 0 ? (back ? [2.3, 2.75] : RAISED_NEAR_F) : f === 1 ? [1.55, 1.4] : f === 2 ? [0.85, 0.55] : [0.4, 0.95];
       wN = f === 0 ? 2.9 : f === 1 ? 1.7 : f === 2 ? 0.7 : 1.7;
       if (dual) {
-        armF = f === 1 ? [2.2, 2.65] : f === 2 ? [1.55, 1.4] : f === 3 ? [0.85, 0.6] : [0.4, 1.0];
+        // 뒷모습의 먼 손(화면 왼쪽)은 앞으로 들면 뒤통수에 가리므로 바깥 위로 듦
+        armF = f === 1 ? (back ? [-2.4, -2.8] : [2.2, 2.65]) : f === 2 ? [1.55, 1.4] : f === 3 ? [0.85, 0.6] : [0.4, 1.0];
         wF = f === 1 ? 2.9 : f === 2 ? 1.7 : 1.2;
         farFront = f === 2 || f === 3;
       }
@@ -227,7 +237,7 @@ export function computeRig(look: HumanLook, fr: ClassicFrame): Rig {
       if (skill) glow = f === 0 ? 0.8 : 0.4;
     } else if (grip === 'staff') {
       // 지팡이 내려치기
-      armN = f === 0 ? [2.3, 2.7] : f === 1 ? [1.75, 1.85] : f === 2 ? [1.05, 1.25] : [0.5, 0.95];
+      armN = f === 0 ? (back ? [2.3, 2.7] : RAISED_NEAR_F) : f === 1 ? [1.75, 1.85] : f === 2 ? [1.05, 1.25] : [0.5, 0.95];
       wN = f === 0 ? -2.5 : f === 1 ? 2.2 : f === 2 ? 1.45 : 2.5;
       wpnBack = f === 0;
       lean = f === 1 || f === 2 ? 1 : 0;
@@ -242,11 +252,13 @@ export function computeRig(look: HumanLook, fr: ClassicFrame): Rig {
       if (skill) glow = f === 0 ? 0.8 : 0.4;
     } else {
       // 칼·도끼·둔기 (맨손이면 주먹): 머리 위로 들었다가 앞으로 내려침
-      armN = f === 0 ? [-2.65, -2.95] : f === 1 ? [2.65, 2.5] : f === 2 ? [1.4, 1.25] : [0.7, 0.95];
-      wN = f === 0 ? -2.15 : f === 1 ? 2.45 : f === 2 ? 1.2 : 1.7;
+      // (앞모습의 머리 위 그림은 손이 얼굴 앞이 아니라 머리 옆 위, 무기는 머리 위로 비스듬히)
+      armN = f === 0 ? (back ? RAISED_NEAR_B : [-2.65, -2.95]) : f === 1 ? (back ? [2.65, 2.5] : RAISED_NEAR_F) : f === 2 ? [1.4, 1.25] : [0.7, 0.95];
+      wN = f === 0 ? (back ? -2.6 : -2.15) : f === 1 ? (back ? 2.45 : 2.75) : f === 2 ? 1.2 : 1.7;
       wpnBack = f === 0;
       if (grip === 'dual' && dual) {
-        armF = f === 0 ? [0.2, 0.5] : f === 1 ? [-2.6, -2.9] : f === 2 ? [2.45, 2.35] : [1.4, 1.2];
+        // 먼 손이 머리 뒤에 숨지 않게: 앞모습은 머리 오른쪽 위, 뒷모습은 머리 왼쪽 위로 듦
+        armF = f === 0 ? [0.2, 0.5] : f === 1 ? (back ? [-2.6, -2.9] : [2.9, 3.1]) : f === 2 ? (back ? [-3.0, -3.1] : [2.45, 2.35]) : [1.4, 1.2];
         wF = f === 1 ? -2.15 : f === 2 ? 2.45 : f === 3 ? 1.2 : 2.2;
         farFront = f >= 2;
       }
@@ -267,10 +279,15 @@ export function computeRig(look: HumanLook, fr: ClassicFrame): Rig {
       tipF = 1;
     }
   } else if (anim === 'cast') {
-    // 두 팔을 들어 올리고 손에 빛
+    // 두 팔을 들어 올리고 손에 빛 (앞모습의 가까운 손은 얼굴을 가리지 않게 머리 옆 위로)
     const k = f === 0 ? 0.5 : f === 3 ? 0.45 : 1;
-    armN = [lerp(armN[0], 2.55, k), lerp(armN[1], 2.85, k)];
-    armF = [lerp(armF[0], 2.45, k), lerp(armF[1], 2.75, k)];
+    const upN: ArmPose = back ? [2.55, 2.85] : RAISED_NEAR_F;
+    // 뒷모습의 먼 손은 앞으로 들면 뒤통수에 가려 빛만 머리 위에 떠 보이므로, 바깥(화면 왼쪽) 위로 벌려 듦
+    const upF: ArmPose = back ? [-2.8, -2.9] : [2.45, 2.75];
+    // 류트를 안은 가까운 팔은 위로 접혀 있어 반쯤 든 그림에서 손이 턱에 오므로, 앞모습은 내린 팔에서 시작
+    const fromN: ArmPose = grip === 'lute' && !back ? [0.1, 0.3] : armN;
+    armN = [lerp(fromN[0], upN[0], k), lerp(fromN[1], upN[1], k)];
+    armF = [lerp(armF[0], upF[0], k), lerp(armF[1], upF[1], k)];
     farFront = k >= 1 && grip !== 'bow';
     if (grip === 'staff' || grip === 'book') wN = Math.PI;
     else if (grip === 'blade' || grip === 'heavy' || grip === 'dual' || grip === 'spear' || grip === 'short') wN = Math.PI - 0.45;

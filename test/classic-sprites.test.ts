@@ -8,7 +8,8 @@ import { ART_H, ART_OX, ART_OY, ART_W, makeArtBuffer, renderClassicFrame } from 
 import { CLASSIC_IDLE_MS, LruCache, lookSignature, quantizePose, type ClassicPose } from '../src/client/render/classic-core';
 import { CLASSIC_FRAMES_PER_ANIM, HAIR_F, HAIR_M, P, costumeOf, coversHair, gripOf, hairStyleOf, headGearOf, type ClassicAnim, type ClassicFrame, type HairStyleId } from '../src/client/render/classic-kit';
 import { OUTLINE_PART, PixelBuf, SOFT_PART } from '../src/client/render/classic-raster';
-import { parseColor, ramp } from '../src/client/render/classic-palette';
+import { buildClassicPalette, parseColor, ramp } from '../src/client/render/classic-palette';
+import { computeRig } from '../src/client/render/classic-rig';
 
 const pose = (p: Partial<ClassicPose>): ClassicPose => ({ dir: 1, walk: null, act: null, time: 0, ...p });
 
@@ -334,6 +335,47 @@ test('그림: 1px 외곽선이 실루엣을 감싸고, 유령은 푸르스름하
     if ((c & 255) > 200 && ((c >>> 8) & 255) < 90) red++;
   }
   assert.ok(red >= 2, '붉은 눈');
+});
+
+test('그림: 어느 동작에서도 손이 머리(얼굴) 위에 오지 않고, 휘두른 궤적은 몸 위에 겹쳐 그리지 않음', () => {
+  // 앞모습의 가까운 어깨는 화면 왼쪽이라 "위-앞"으로 뻗으면 손이 얼굴을 가리고(빛·무기도 얼굴 위에),
+  // 뒷모습의 먼 손은 앞으로 들면 뒤통수에 숨으므로, 손 가운데가 머리 타원 안에 오면 안 됨
+  for (const weapon of WEAPONS) {
+    for (const shield of [undefined, '#9aa0a6']) {
+      for (const gender of ['m', 'f'] as const) {
+        const look: HumanLook = { gender, hairStyle: 0, hairColor: '#5a3a22', body: '#a08a6a', ...(weapon ? { weapon } : {}), ...(shield ? { shield } : {}) };
+        for (const view of ['F', 'B'] as const) {
+          for (const anim of ANIMS) {
+            for (let f = 0; f < CLASSIC_FRAMES_PER_ANIM; f++) {
+              for (const beast of [false, true]) {
+                const r = computeRig(look, { view, anim, f, ghost: false, beast });
+                for (const [name, h] of [['가까운', r.haN], ['먼', r.haF]] as const) {
+                  const nx = (h.x - r.head.x) / (r.d.headR[0] * 0.9);
+                  const ny = (h.y - r.head.y) / (r.d.headR[1] * 0.9);
+                  assert.ok(nx * nx + ny * ny >= 1, `${weapon}/${shield ? '방패' : '-'}/${gender}/${view}/${anim}${f}${beast ? '/야수' : ''}: ${name} 손이 머리 위`);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  // 궤적이 있는 공격 그림(빛 없음)에서 머리 칸은 피부 4단계 색 그대로 (궤적 색이 섞이지 않음)
+  for (const weapon of ['sword', 'axe', 'stick', 'dualsword', 'gauntlet', 'staff', 'dagger', 'claw'] as const) {
+    for (const view of ['F', 'B'] as const) {
+      const look: HumanLook = { gender: 'm', hairStyle: 0, hairColor: '#5a3a22', body: '#a08a6a', weapon, weaponColor: '#ff5c5c' };
+      // pack() 은 부호 있는 정수, 버퍼는 Uint32Array 이므로 부호 없는 값으로 맞춰 비교
+      const skin = new Set(buildClassicPalette(look).skin.t.map((c) => c >>> 0));
+      const b = renderClassicFrame(look, { view, anim: 'attack', f: 1, ghost: false, beast: false });
+      let soft = 0;
+      for (let i = 0; i < b.part.length; i++) {
+        if (b.part[i] === SOFT_PART) soft++;
+        if (b.part[i] === P.head) assert.ok(skin.has(b.px[i]!), `${weapon}/${view}: 머리 위에 궤적 색`);
+      }
+      assert.ok(soft > 0, `${weapon}/${view}: 궤적이 없음`);
+    }
+  }
 });
 
 test('그림: 걷기 4장과 공격 4장은 서로 다르고, 시전에는 손의 빛이 있음', () => {
