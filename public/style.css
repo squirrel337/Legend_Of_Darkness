@@ -1,4 +1,15 @@
 /* 어둠의 전설 — 게임 화면 스타일 (클래식 가죽·나무 패널) */
+
+/* 고전 도트 글꼴: 갈무리 모노 11 (Galmuri 2.40.3, SIL OFL 1.1, Copyright (c) 2019–2025 Lee Minseo, 예약 글꼴 이름 "Galmuri")
+   라이선스 전문: /fonts/Galmuri-OFL.txt. 12px 에서 한글 12px·영문 6px 칸으로 또렷하게 나옵니다. */
+@font-face {
+  font-family: 'GalmuriMono11';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/GalmuriMono11.woff2') format('woff2');
+}
+
 :root {
   --hud-h: 178px;
   --slot: 34px;
@@ -17,6 +28,10 @@
   --good: #8fff9f;
   --bad: #ff7b6b;
   --font: 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+  /* 대화·메시지 줄: 도트 글꼴 → 굴림·돋움 → 기본 글꼴 (캔버스 이름표·말풍선과 같은 글꼴) */
+  --font-pixel: 'GalmuriMono11', 'Gulim', '굴림', 'Dotum', '돋움', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+  /* 외침·공지의 고전 노란 글씨 */
+  --shout: #f0e040;
   /* 가죽 결 (잡음 무늬) */
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.08 0 0 0 0 0.04 0 0 0 0 0.01 0 0 0 0.5 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   /* 큰 얼룩 */
@@ -624,13 +639,16 @@ select:focus {
   border-radius: 2px;
   box-shadow: inset 0 1px 3px #000, 0 1px 0 rgba(255, 214, 160, 0.14);
   color: #ffe58a;
+  font-family: var(--font-pixel);
   font-size: 12px;
+  line-height: 16px;
   cursor: text;
   overflow: hidden;
 }
 
 .msg-prompt {
   color: var(--gold-dk);
+  font-family: var(--font);
   font-size: 9px;
 }
 
@@ -828,22 +846,25 @@ select:focus {
   height: 100%;
   overflow-y: auto;
   padding: 0 4px;
+  font-family: var(--font-pixel);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 16px;
   user-select: text;
 }
 
+/* 도트 글꼴에는 굵은 모양이 없어 번지므로 이름도 보통 굵기로 */
 .chat-line b,
 .chat-overlay b {
-  font-weight: bold;
+  font-weight: normal;
 }
 
 .ch-say {
   color: #ffffff;
 }
 
+/* 외침·공지·운영자 알림: 원작의 노란 글씨 */
 .ch-shout {
-  color: #ffb050;
+  color: var(--shout);
 }
 
 .ch-whisper {
@@ -854,16 +875,17 @@ select:focus {
   color: #8fe0ff;
 }
 
+/* 시스템 안내는 노란 외침과 구별되게 밝은 미색 */
 .ch-system {
-  color: #ffe36e;
+  color: #ece2c6;
 }
 
 .ch-notice {
-  color: #9fffb0;
+  color: var(--shout);
 }
 
 .ch-gm {
-  color: #ffd76b;
+  color: var(--shout);
 }
 
 .ch-error {
@@ -1051,8 +1073,9 @@ select:focus {
 }
 
 .chat-overlay .ol {
-  font-size: 12.5px;
-  line-height: 1.35;
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  line-height: 16px;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
   transition: opacity 0.9s;
 }

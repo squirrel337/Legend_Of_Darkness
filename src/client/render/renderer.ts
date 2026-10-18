@@ -2,6 +2,7 @@
 import { STATUS_INFO, TILE_H, TILE_W } from '../../shared/constants';
 import { tileInfo } from '../../shared/tiles';
 import { entityPos, isAlly, type CEntity, type ClientState } from '../state';
+import { HEAD_TOP, LABEL_FONT, LABEL_PX, bubbleAlpha, bubbleLines, bubbleShape, bubbleText, drawBubble, drawOutlinedText, entityLabel, labelFontReady } from './labels';
 import { Effects, type Point } from './effects';
 import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
 import { drawChibiFast, type ChibiPose } from './chibi';
@@ -9,7 +10,8 @@ import { drawGroundItem, drawMonster } from './sprites';
 import { drawFlame, drawLiquid, floorCanvas, objectSprite, wallCanvas } from './tiles';
 
 const ACT_MS = 320;
-const FONT = '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+/** 캔버스 글자 글꼴: 고전 도트 글꼴(갈무리 모노 11) → 굴림·돋움 → 예전 글꼴 (labels.ts) */
+const FONT = LABEL_FONT;
 
 interface Drawable {
   depth: number;
@@ -426,45 +428,39 @@ export class Renderer {
   private drawLabels(e: CEntity, now: number): void {
     const ctx = this.ctx;
     const c = this.entityPoint(e, now);
+    // 도트 글자와 말풍선 테두리가 번지지 않도록 정수 픽셀에 맞춥니다
+    const ax = Math.round(c.sx);
+    const ay = Math.round(c.sy);
     const hovered = this.hoverEntity === e;
     const targeted = this.state.targetId === e.id;
     const monsterDef = e.type === 'monster' && e.def ? this.state.monsters.get(e.def) : undefined;
     const scale = monsterDef?.look.size ?? 1;
-    // 소환수 이름은 늘 보이므로 몸 크기에 맞춰 낮게 (주인 이름표와 겹치지 않게)
-    const top =
-      c.sy -
-      (e.type === 'item' ? 26 : isAlly(e) ? 30 + 18 * scale : e.type === 'monster' ? 56 * Math.max(1, scale * 0.95) : 66);
-    ctx.textAlign = 'center';
-    let label: string | null = null;
-    let color = '#ffffff';
-    if (e.type === 'player') {
-      label = e.name;
-      color = e.ghost ? '#a8b8e8' : e.role === 'admin' || e.role === 'gm' ? '#ffd76b' : e.id === this.state.selfId ? '#b8ffb8' : '#ffffff';
-    } else if (e.type === 'npc') {
-      label = e.name;
-      color = '#ffe9a8';
-    } else if (e.type === 'monster' && isAlly(e)) {
-      label = e.ownerName ? `${e.name} (${e.ownerName})` : e.name;
-      color = '#8dff9a';
-    } else if (e.type === 'monster' && (hovered || targeted || monsterDef?.boss)) {
-      label = `${e.name} Lv.${e.level}`;
-      color = monsterDef?.boss ? '#ff9f6b' : '#ffb0b0';
-    } else if (e.type === 'item' && hovered) {
-      label = e.item ? `${this.state.itemName(e.item)}${(e.qty ?? 1) > 1 ? ` x${e.qty}` : ''}` : `${(e.qty ?? 0).toLocaleString('ko-KR')} 골드`;
-      color = '#fff3a0';
-    }
-    if (label) {
-      ctx.font = `${e.type === 'npc' || hovered ? 'bold ' : ''}${isAlly(e) ? 11 : 12}px ${FONT}`;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-      ctx.strokeText(label, c.sx, top);
-      ctx.fillStyle = color;
-      ctx.fillText(label, c.sx, top);
-      if (e.type === 'npc' && e.title) {
-        ctx.font = `11px ${FONT}`;
-        ctx.strokeText(`[${e.title}]`, c.sx, top - 13);
-        ctx.fillStyle = '#9fd3ff';
-        ctx.fillText(`[${e.title}]`, c.sx, top - 13);
+    const ally = isAlly(e);
+    // 이름표 기준선 (소환수는 몸 크기에 맞춰 낮게)
+    const top = ay - Math.round(e.type === 'item' ? 26 : ally ? 30 + 18 * scale : e.type === 'monster' ? 56 * Math.max(1, scale * 0.95) : 66);
+    // 말풍선이 내려오면 안 되는 선: 머리 꼭대기, 보이는 이름표·체력바의 윗선
+    let clear = e.type === 'player' || e.type === 'npc' ? ay - HEAD_TOP : top + 3;
+    // 운영자는 머리 위 왕관(drawEntity)까지 피함
+    if (e.role === 'admin' || e.role === 'gm') clear = Math.min(clear, ay - HEAD_TOP - 15);
+    // 글꼴을 받는 동안(최대 몇 초)은 대체 글꼴로 번쩍이지 않게 글자를 그리지 않습니다
+    const fontOk = labelFontReady();
+    const font = `${LABEL_PX}px ${FONT}`;
+    // 이름표: 원작처럼 마우스를 올렸거나 대상으로 고른 것만 (12px, 1px 외곽선)
+    const label = entityLabel(e, {
+      hovered,
+      targeted,
+      selfId: this.state.selfId,
+      ally,
+      boss: !!monsterDef?.boss,
+      itemName: e.type === 'item' && e.item ? this.state.itemName(e.item) : undefined,
+    });
+    if (label && fontOk) {
+      ctx.font = font;
+      drawOutlinedText(ctx, label.text, ax, top, label.color);
+      clear = Math.min(clear, top - LABEL_PX);
+      if (label.title) {
+        drawOutlinedText(ctx, label.title, ax, top - LABEL_PX - 2, '#9fd3ff');
+        clear = Math.min(clear, top - 2 * LABEL_PX - 2);
       }
     }
     // 체력바
@@ -475,25 +471,20 @@ export class Renderer {
       const w = 30;
       const y = top + 4;
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillRect(c.sx - w / 2 - 1, y - 1, w + 2, 5);
-      ctx.fillStyle = e.type === 'monster' && !isAlly(e) ? '#e04040' : '#40c060';
-      ctx.fillRect(c.sx - w / 2, y, (w * Math.max(0, e.hpPct)) / 100, 3);
+      ctx.fillRect(ax - w / 2 - 1, y - 1, w + 2, 5);
+      ctx.fillStyle = e.type === 'monster' && !ally ? '#e04040' : '#40c060';
+      ctx.fillRect(ax - w / 2, y, Math.round((w * Math.max(0, e.hpPct)) / 100), 3);
+      clear = Math.min(clear, y - 1);
     }
-    // 말풍선
-    if (e.bubble && now < e.bubble.until) {
-      const text = e.bubble.text.length > 40 ? e.bubble.text.slice(0, 39) + '…' : e.bubble.text;
-      ctx.font = `12px ${FONT}`;
-      const tw = ctx.measureText(text).width;
-      const bx = c.sx - tw / 2 - 6;
-      const by = top - (e.type === 'npc' ? 40 : 30);
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.beginPath();
-      ctx.roundRect(bx, by, tw + 12, 18, 6);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fillText(text, c.sx, by + 13);
+    // 말풍선: `이름: 대사`, 원작처럼 글자 단위 줄바꿈, 끝나기 전에 흐려짐. 화면 밖으로 나가지 않게 가로로 밀어 넣음
+    if (e.bubble && fontOk) {
+      const alpha = bubbleAlpha(now, e.bubble.until);
+      if (alpha > 0) {
+        ctx.font = font;
+        const { lines, width } = bubbleLines(ctx, bubbleText(e.name, e.bubble.text));
+        const shape = bubbleShape(width, lines.length, ax, clear - 2, 2 - this.offX, this.cssW - 2 - this.offX);
+        drawBubble(ctx, lines, shape, alpha);
+      }
     }
   }
 

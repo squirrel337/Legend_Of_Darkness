@@ -93,9 +93,17 @@ export class ChatBox {
     this.input.focus();
   }
 
+  /** 화면 알림을 아래 메시지 줄에도 남깁니다 (원작처럼 알림은 노란 글씨, 경고는 붉은 글씨) */
+  notice(text: string, kind: 'info' | 'warn' | 'good' = 'info'): void {
+    this.lineText.className = `msg-text ${kind === 'warn' ? 'ch-error' : 'ch-notice'}`;
+    this.lineText.textContent = text;
+  }
+
   add(ch: ChatChannel, text: string, from?: string): void {
+    // '[공지] …' 처럼 말머리가 이미 붙은 알림에는 [알림]을 또 붙이지 않음
+    const label = ch === 'notice' && text.startsWith('[') ? '' : LABEL[ch];
     const parts = (cls: string) =>
-      h('div', { class: `${cls} ch-${ch}` }, LABEL[ch], from ? h('b', null, `${from}: `) : null, text);
+      h('div', { class: `${cls} ch-${ch}` }, label, from ? h('b', null, `${from}: `) : null, text);
     // 전체 기록
     const atBottom = this.log.scrollTop + this.log.clientHeight >= this.log.scrollHeight - 30;
     this.log.appendChild(parts('chat-line'));
@@ -103,7 +111,7 @@ export class ChatBox {
     if (atBottom) this.log.scrollTop = this.log.scrollHeight;
     // 메시지 줄
     this.lineText.className = `msg-text ch-${ch}`;
-    this.lineText.textContent = `${LABEL[ch]}${from ? `${from}: ` : ''}${text}`;
+    this.lineText.textContent = `${label}${from ? `${from}: ` : ''}${text}`;
     // 화면 왼쪽 위
     const ol = parts('ol');
     this.overlay.appendChild(ol);
