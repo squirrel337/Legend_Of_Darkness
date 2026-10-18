@@ -378,6 +378,29 @@ test('그림: 어느 동작에서도 손이 머리(얼굴) 위에 오지 않고,
   }
 });
 
+test('그림: 앞모습 얼굴은 밝은 기본 살색 위주 (그림자 단계는 먼 쪽 가장자리·턱 밑만)', () => {
+  // 빛(왼쪽 위)을 받는 쪽은 머리카락이 덮어, 구 명암 그대로면 보이는 얼굴이 거의 그림자 단계가 됨
+  for (const gender of ['m', 'f'] as const) {
+    for (let hairStyle = 0; hairStyle < 6; hairStyle++) {
+      for (const outfit of [undefined, 'priest', 'warrior'] as const) {
+        const look: HumanLook = { gender, hairStyle, hairColor: '#1a1a1a', body: '#a08a6a', ...(outfit ? { outfit } : {}) };
+        const skin = buildClassicPalette(look).skin;
+        const light = new Set([skin.t[2] >>> 0, skin.t[3] >>> 0]);
+        const b = renderClassicFrame(look, { view: 'F', anim: 'idle', f: 0, ghost: false, beast: false });
+        let all = 0;
+        let lit = 0;
+        for (let i = 0; i < b.part.length; i++) {
+          if (b.part[i] !== P.head) continue;
+          all++;
+          if (light.has(b.px[i]! >>> 0)) lit++;
+        }
+        assert.ok(all >= 15, `${gender}${hairStyle}/${outfit}: 얼굴 칸이 너무 적음 (${all})`);
+        assert.ok(lit / all >= 0.6, `${gender}${hairStyle}/${outfit}: 밝은 살색 ${lit}/${all}`);
+      }
+    }
+  }
+});
+
 test('그림: 걷기 4장과 공격 4장은 서로 다르고, 시전에는 손의 빛이 있음', () => {
   const look: HumanLook = { gender: 'm', hairStyle: 1, hairColor: '#2a4d8f', body: '#b0b8c0', outfit: 'warrior', weapon: 'sword', weaponColor: '#7fb7ff', shield: '#8a6a45' };
   const sig = (anim: ClassicAnim, f: number) => {
