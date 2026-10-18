@@ -83,6 +83,7 @@ export class Renderer {
           if (best && bestN >= 2) this.wallLike.set(y * W + x, best);
           this.lights.push({ x, y, r: 150, flicker: true });
         } else if (ch === 'L') this.lights.push({ x, y, r: 90, flicker: true });
+        else if (ch === 'l') this.lights.push({ x, y, r: 130, flicker: false });
         else if (ch === 'c') this.lights.push({ x, y, r: 80, flicker: false });
       }
     }
