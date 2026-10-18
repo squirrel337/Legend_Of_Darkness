@@ -1,17 +1,33 @@
 // 직업별 게임 데이터(기술·장비·소환수·길드장·상점·전리품)가 서로 맞물리는지 확인합니다.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import type { ClassId } from '../src/shared/constants';
+import { ASSAIL_COOLDOWN_MS, SKILL_GCD_MS, STATUS_INFO, type ClassId, type StatusId } from '../src/shared/constants';
+import {
+  CRIT_MULT,
+  acMagicMultiplier,
+  acMultiplier,
+  computeDerived,
+  critChance,
+  elementMultiplier,
+  hitChance,
+  magicBase,
+  monsterStats,
+  physicalBase,
+  type DerivedStats,
+} from '../src/shared/formulas';
 import { tileInfo } from '../src/shared/tiles';
 import type { AbilityDef, ItemDef, LootEntry } from '../src/shared/types';
+import { loadConfig } from '../src/server/config';
 import { GameData } from '../src/server/gamedata';
 import { emptyEquipment, normalizeCharacter, type CharacterData } from '../src/server/storage';
-import { bestGearFor, equipError } from '../src/server/systems/character';
+import { autoAllocateOnData, bestGearFor, equipError, setLevelOnData } from '../src/server/systems/character';
 
 const DIR = path.resolve(import.meta.dirname, '..', 'gamedata');
 const gd = GameData.load(DIR);
+const cfg = loadConfig({ ADMIN_PASSWORD: 'x', DATA_DIR: os.tmpdir() } as NodeJS.ProcessEnv);
 
 const NEW_CLASSES: ClassId[] = ['summoner', 'bard', 'beastkin', 'archer', 'gladiator'];
 const TIER_LEVELS = [5, 12, 25, 40, 55, 70, 85, 99];
@@ -41,6 +57,108 @@ function charOf(classId: ClassId, level: number): CharacterData {
 const abilitiesOf = (cls: ClassId): AbilityDef[] => [...gd.abilities.values()].filter((a) => a.classId === cls);
 const gearOf = (cls: ClassId, slot: 'weapon' | 'armor'): ItemDef[] =>
   [...gd.items.values()].filter((it) => it.slot === slot && it.classes?.includes(cls)).sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
+
+// ───────────────────────── 밸런스 모델 ─────────────────────────
+// 같은 레벨 몬스터 하나를 상대로 한 초당 기대 피해. 능력치는 직업 비율대로 자동 분배하고, 레벨에 맞는 최고 장비를 입힙니다.
+// 평타와 피해 기술은 각자의 재사용 대기마다 씁니다 (평타와 기술의 대기는 따로 돌아감). 명중률·치명타·대상 AC를 반영하고,
+// 중독/출혈은 유지율만큼 더합니다. buffed 는 자기 강화(광폭·야수화·신속)와 대상 약화(표식·저주)를 유지율만큼,
+// 은신 기습은 은신 재사용 대기마다 한 번 반영한 값입니다.
+
+const OLD_PHYSICAL: ClassId[] = ['warrior', 'rogue', 'monk'];
+const NEW_PHYSICAL: ClassId[] = ['beastkin', 'archer', 'gladiator'];
+
+function derivedAt(cls: ClassId, level: number): DerivedStats {
+  const d = charOf(cls, 1);
+  setLevelOnData(d, cfg, level);
+  autoAllocateOnData(d, gd, cfg);
+  return computeDerived({ cls: gd.classes.get(cls)!, level, stats: d.stats, bonusHp: 0, bonusMp: 0, equipment: bestGearFor(d, gd) });
+}
+
+const monsterAt = (level: number) => monsterStats({ id: 'x', name: 'x', level, look: { body: 'rat', color: '#000000' } });
+
+interface Dps {
+  base: number;
+  buffed: number;
+}
+const dpsCache = new Map<string, Dps>();
+
+function dpsOf(cls: ClassId, level: number): Dps {
+  const key = `${cls}:${level}`;
+  const cached = dpsCache.get(key);
+  if (cached) return cached;
+  const d = derivedAt(cls, level);
+  const m = monsterAt(level);
+  const roll = (d.dmgMin + d.dmgMax) / 2;
+  const hit = hitChance(d.dex, level, m.dex, level, d.hit);
+  /** 초당 rate 배율만큼 치는 물리 공격의 초당 기대 피해 */
+  const phys = (rate: number, critBonus: number, ac: number): number =>
+    physicalBase(d, level, roll) * rate * hit * (1 + (CRIT_MULT - 1) * critChance(d.dex, critBonus)) * acMultiplier(ac);
+  const strikes: { rate: number; critBonus: number }[] = [{ rate: 1000 / ASSAIL_COOLDOWN_MS, critBonus: 0 }];
+  let magic = 0; // AC 적용 전 마법 피해/초
+  const dots = new Map<StatusId, number>();
+  let might = 1;
+  let speed = 1;
+  let mark = 1;
+  let curse = 0;
+  const mine = abilitiesOf(cls).filter((a) => a.level <= level);
+  const hideCd = mine.find((a) => a.effects.some((e) => e.type === 'status' && e.status === 'hide'))?.cooldownMs;
+  let ambush: { rate: number; critBonus: number } | null = null;
+  for (const a of mine) {
+    const cd = Math.max(a.cooldownMs, SKILL_GCD_MS) / 1000;
+    for (const e of a.effects) {
+      if (e.type === 'physical') {
+        const total = e.mult * (e.hits ?? 1);
+        strikes.push({ rate: total / cd, critBonus: e.critBonus ?? 0 });
+        if (hideCd !== undefined && e.hideBonus) {
+          const rate = (total * e.hideBonus) / (Math.max(hideCd, a.cooldownMs) / 1000);
+          if (!ambush || rate > ambush.rate) ambush = { rate, critBonus: e.critBonus ?? 0 };
+        }
+      } else if (e.type === 'magic') {
+        magic += magicBase(e.base, e.ratio, d[e.stat ?? 'int'], level, d.magic) / cd;
+      } else if (e.type === 'status') {
+        const up = Math.min(1, e.durationMs / Math.max(1, a.cooldownMs)) * (e.chance ?? 1);
+        const pot = e.potency ?? STATUS_INFO[e.status].potency;
+        if (e.status === 'poison' || e.status === 'bleed') dots.set(e.status, Math.max(dots.get(e.status) ?? 0, (pot + level * 1.5) * up));
+        if (e.status === 'might' || e.status === 'beast') might *= 1 + (pot / 100) * up;
+        if (e.status === 'haste') speed *= up / Math.max(0.5, 1 - pot / 100) + (1 - up);
+        if (e.status === 'mark') mark = Math.max(mark, 1 + (pot / 100) * up);
+        if (e.status === 'curse') curse = Math.max(curse, pot * up);
+      }
+    }
+  }
+  const sum = (list: { rate: number; critBonus: number }[], ac: number) => list.reduce((s, x) => s + phys(x.rate, x.critBonus, ac), 0);
+  const dot = [...dots.values()].reduce((s, v) => s + v, 0);
+  const base = sum(strikes, m.ac) + magic * acMagicMultiplier(m.ac) + dot;
+  const buffedStrikes = ambush ? [...strikes, ambush] : strikes;
+  const buffed = (sum(buffedStrikes, m.ac + curse) * might + magic * acMagicMultiplier(m.ac + curse)) * speed * mark + dot;
+  const out = { base, buffed };
+  dpsCache.set(key, out);
+  return out;
+}
+
+/** 소환사가 그 레벨에 부를 수 있는 소환수를 모두 불렀을 때의 초당 기대 피해 (근접 + 마법) */
+function petDpsAt(level: number): number {
+  const m = monsterAt(level);
+  let dps = 0;
+  for (const a of abilitiesOf('summoner')) {
+    if (a.level > level) continue;
+    for (const e of a.effects) {
+      if (e.type !== 'summon') continue;
+      const def = gd.monsters.get(e.monster)!;
+      const s = monsterStats({ ...def, level });
+      const hit = hitChance(s.dex, level, m.dex, level, 0);
+      let one = (((s.dmg[0] + s.dmg[1]) / 2) * hit * acMultiplier(m.ac)) / ((def.attackMs ?? 1400) / 1000);
+      for (const sp of def.spells ?? []) {
+        const sd = gd.abilities.get(sp.id)!;
+        // 몬스터 마법은 재사용 대기가 끝난 뒤 1초마다 chance 확률로 씁니다
+        const every = sd.cooldownMs / 1000 + 1 / sp.chance;
+        for (const ef of sd.effects) if (ef.type === 'magic') one += (magicBase(ef.base, ef.ratio, s.int, level, 0) * acMagicMultiplier(m.ac)) / every;
+      }
+      dps += one * e.max;
+    }
+  }
+  return dps;
+}
 
 test('새 직업이 포함된 게임 데이터가 오류 없이 로드되고, 시작 장비를 바로 입을 수 있다', () => {
   assert.doesNotThrow(() => GameData.load(DIR));
@@ -139,6 +257,12 @@ test('활만 사거리가 길고, 궁수의 무기는 모두 활이다', () => {
     } else assert.ok((it.range ?? 1) === 1, `${it.id}: 근접 무기인데 사거리 ${it.range}`);
   }
   for (const it of gearOf('archer', 'weapon')) assert.equal(it.icon.shape, 'bow', it.id);
+  // 활은 멀리서 쏘고 민첩이 명중·치명타까지 올려 주므로, 같은 단계의 장검보다 피해가 훨씬 낮고 명중 보너스가 없다
+  const swords = gearOf('warrior', 'weapon');
+  gearOf('archer', 'weapon').forEach((bow, i) => {
+    assert.ok(!bow.bonus?.hit, `${bow.id}: 활에 명중 보너스`);
+    assert.ok(bow.dmg![1] <= 0.7 * swords[i]!.dmg![1], `${bow.id}: 피해 ${bow.dmg} / ${swords[i]!.id} ${swords[i]!.dmg}`);
+  });
 });
 
 test('소환 기술은 소환수만 부르고, 소환수는 맵에 생성되지 않는다', () => {
@@ -162,6 +286,93 @@ test('소환 기술은 소환수만 부르고, 소환수는 맵에 생성되지 
   }
   for (const map of gd.maps.values())
     for (const s of map.spawns) assert.ok(!gd.monsters.get(s.monster)?.summon, `${map.id}: 소환수 ${s.monster} 가 맵에 생성됨`);
+});
+
+test('소환수를 모두 불러도 다른 직업 한 명의 몫을 넘지 않는다', () => {
+  // 소환수는 소환자 레벨의 몬스터로 계산되므로, 배율을 "같은 레벨 몬스터 몇 마리 몫"으로 더해 상한을 둡니다
+  let power = 0;
+  let hp = 0;
+  for (const a of abilitiesOf('summoner'))
+    for (const e of a.effects) {
+      if (e.type !== 'summon') continue;
+      const def = gd.monsters.get(e.monster)!;
+      assert.ok((e.count ?? 1) <= e.max, `${a.id}: 한 번에 부르는 수가 최대 수보다 많음`);
+      // 1400ms 는 몬스터의 기본 공격 간격
+      power += ((def.dmgMult ?? 1) * e.max * 1400) / (def.attackMs ?? 1400);
+      hp += (def.hpMult ?? 1) * e.max;
+    }
+  assert.ok(power <= 2, `소환수 전체의 공격 ${power.toFixed(2)}마리 몫 (2 이하)`);
+  assert.ok(hp <= 7, `소환수 전체의 체력 ${hp.toFixed(2)}마리 몫 (7 이하)`);
+  for (const lv of [25, 35, 55, 88, 99]) {
+    const pets = petDpsAt(lv);
+    const warrior = dpsOf('warrior', lv).base;
+    assert.ok(pets <= 0.6 * warrior, `${lv}레벨: 소환수 ${pets.toFixed(0)} / 전사 ${warrior.toFixed(0)}`);
+    if (lv >= 35) assert.ok(pets >= 0.25 * warrior, `${lv}레벨: 소환수가 너무 약함 ${pets.toFixed(0)} / 전사 ${warrior.toFixed(0)}`);
+  }
+});
+
+test('새 근접·원거리 직업의 피해는 기존 직업과 비슷하고, 궁수는 멀리서 쏘는 만큼 전사보다 약하다', () => {
+  for (const lv of [25, 55, 88]) {
+    const war = dpsOf('warrior', lv);
+    const arch = dpsOf('archer', lv);
+    assert.ok(arch.base <= 0.9 * war.base, `${lv}레벨 궁수 ${arch.base.toFixed(0)} / 전사 ${war.base.toFixed(0)}`);
+    assert.ok(arch.buffed <= 0.9 * war.buffed, `${lv}레벨 궁수(강화) ${arch.buffed.toFixed(0)} / 전사 ${war.buffed.toFixed(0)}`);
+  }
+  for (let lv = 10; lv <= 99; lv++) {
+    for (const k of ['base', 'buffed'] as const) {
+      const old = OLD_PHYSICAL.map((c) => dpsOf(c, lv)[k]);
+      const best = Math.max(...old);
+      const worst = Math.min(...old);
+      for (const cls of NEW_PHYSICAL) {
+        const v = dpsOf(cls, lv)[k];
+        // 궁수는 기존 직업 중 가장 센 직업을 넘지 않고, 수인·검투사는 10% 넘게 앞서지 않는다
+        const cap = cls === 'archer' ? 1 : 1.1;
+        assert.ok(v <= cap * best, `${lv}레벨 ${cls}(${k}) ${v.toFixed(0)} / 기존 최고 ${best.toFixed(0)}`);
+        assert.ok(v >= 0.8 * worst, `${lv}레벨 ${cls}(${k}) ${v.toFixed(0)} / 기존 최저 ${worst.toFixed(0)}`);
+      }
+    }
+  }
+});
+
+test('공격·속도 강화와 그룹에 거는 노래는 재사용 대기보다 오래가지 않는다', () => {
+  // 지속 시간이 재사용 대기보다 길면 공짜로 계속 켜 둘 수 있어, 직업 고유의 강화 기술이 의미를 잃습니다
+  const OFFENSIVE: StatusId[] = ['might', 'focus', 'haste', 'beast'];
+  for (const a of gd.abilities.values()) {
+    if (a.classId === 'monster') continue;
+    for (const e of a.effects) {
+      if (e.type !== 'status') continue;
+      if (a.targeting === 'party' || (a.targeting === 'self' && OFFENSIVE.includes(e.status)))
+        assert.ok(e.durationMs <= a.cooldownMs, `${a.id}: ${e.status} ${e.durationMs / 1000}초 / 재사용 ${a.cooldownMs / 1000}초`);
+    }
+  }
+});
+
+test('후반 공격 마법의 고정 속성은 그 레벨대 몬스터 대부분에게 저항받지 않고, 소환사의 마지막 마법에는 속성이 있다', () => {
+  for (const a of gd.abilities.values()) {
+    if (a.classId === 'monster' || a.level < 60 || !a.element || a.element === 'weapon' || a.element === 'none') continue;
+    if (!a.effects.some((e) => e.type === 'magic')) continue;
+    const el = a.element;
+    const band = [...gd.monsters.values()].filter((m) => !m.summon && !m.passive && m.level >= a.level - 10 && m.level <= a.level + 20);
+    const resisted = band.filter((m) => elementMultiplier(el, m.element ?? 'none') < 1);
+    assert.ok(resisted.length * 2 < band.length, `${a.id}(${el}): ${a.level}레벨대 몬스터 ${band.length}종 중 ${resisted.length}종이 저항`);
+  }
+  // 소환사의 궁극 마법은 목걸이의 공격 속성을 따르거나 속성이 정해져 있다
+  const finale = abilitiesOf('summoner').filter((a) => a.level >= 80 && a.effects.some((e) => e.type === 'magic'));
+  assert.ok(finale.length > 0);
+  for (const a of finale) assert.ok(a.element && a.element !== 'none', `${a.id}: 속성 없음`);
+});
+
+test('새 직업 갑옷의 색(게임 속 옷 색)은 서로도, 다른 갑옷과도 겹치지 않는다', () => {
+  const armors = [...gd.items.values()].filter((it) => it.slot === 'armor');
+  for (const cls of NEW_CLASSES)
+    for (const it of gearOf(cls, 'armor')) {
+      const same = armors.filter((o) => o !== it && o.icon.color.toLowerCase() === it.icon.color.toLowerCase());
+      assert.deepEqual(
+        same.map((o) => o.id),
+        [],
+        `${it.id}: 옷 색 ${it.icon.color}`,
+      );
+    }
 });
 
 test('새 직업마다 마을의 빈 칸에 길드장이 서 있다', () => {
