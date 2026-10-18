@@ -1,7 +1,7 @@
 // 시각 효과: 떠오르는 숫자, 마법 투사체, 폭발, 치유 등
-import { ELEMENT_COLORS, type Element } from '../../shared/constants';
+import { DIR_DX, DIR_DY, ELEMENT_COLORS, type Dir, type Element } from '../../shared/constants';
 import type { DamageKind } from '../../shared/protocol';
-import { withAlpha } from './iso';
+import { HALF_H, HALF_W, withAlpha } from './iso';
 
 export interface Point {
   sx: number;
@@ -54,7 +54,20 @@ const DURATION: Record<string, number> = {
   twinslash: 480,
   mark: 1800,
   hit: 260,
+  release: 220,
 };
+
+/** 활시위를 놓는 섬광이 시전자 발밑에서 바라보는 쪽으로 떨어진 거리 (화면 픽셀) */
+const RELEASE_REACH = 13;
+
+/** 바라보는 방향의 화면상 앞쪽 (아이소메트릭: 타일 한 칸의 방향을 화면 좌표로) */
+function frontOffset(dir: Dir | undefined, reach: number): Point {
+  if (dir === undefined) return { sx: 0, sy: 0 };
+  const sx = (DIR_DX[dir]! - DIR_DY[dir]!) * HALF_W;
+  const sy = (DIR_DX[dir]! + DIR_DY[dir]!) * HALF_H;
+  const len = Math.hypot(sx, sy) || 1;
+  return { sx: (sx / len) * reach, sy: (sy / len) * reach };
+}
 
 export class Effects {
   private list: Effect[] = [];
@@ -108,8 +121,19 @@ export class Effects {
     this.list.push({ kind: 'text', text, color, size, start: now, dur, id, at, dx: 0 });
   }
 
-  fx(name: string, el: Element | undefined, targetId: number | null, at: Point, fromId: number | null, from: Point | null, now: number): void {
+  /** facing: 시전자가 바라보는 방향 (아무도 맞히지 못한 화살을 시전자 앞에 그릴 때) */
+  fx(name: string, el: Element | undefined, targetId: number | null, at: Point, fromId: number | null, from: Point | null, now: number, facing?: Dir): void {
     const color = el && el !== 'none' ? ELEMENT_COLORS[el] : defaultColor(name);
+    if ((name === 'arrow' || name === 'volley') && fromId !== null && fromId === targetId) {
+      // 아무도 맞히지 못함 (서버가 시전자 자신에게 효과를 보냄): 시전자 앞에서 시위를 놓는 작은 섬광만.
+      // 시전자에게 꽂히는 것처럼 보이지 않게 맞은 자리 불꽃·떨어지는 화살은 그리지 않음
+      const off = frontOffset(facing, RELEASE_REACH);
+      const shots = name === 'volley' ? 4 : 1;
+      for (let i = 0; i < shots; i++) {
+        this.list.push({ kind: 'fx', name: 'release', color, start: now + i * 70, dur: DURATION.release, targetId, fromId, at, from: null, seed: Math.random(), off });
+      }
+      return;
+    }
     const proj = PROJECTILES.has(name) && from && fromId !== targetId;
     if (name === 'volley') {
       // 화살 여러 발: 시전자가 있으면 날아가고, 없으면 하늘에서 쏟아짐
@@ -451,6 +475,38 @@ function drawFx(ctx: CanvasRenderingContext2D, e: Fx, t: number, p: Point, from:
       ctx.beginPath();
       ctx.arc(cx, cy, 4 * (1 - t * 0.5), 0, Math.PI * 2);
       ctx.fill();
+      break;
+    }
+    case 'release': {
+      // 시위를 놓는 순간 활 앞의 작은 섬광 + 쏜 쪽으로 뻗는 짧은 빛줄기 (아무도 맞히지 못했을 때)
+      ctx.globalCompositeOperation = 'lighter';
+      const a = 1 - t;
+      const y = p.sy - 24;
+      const r = 2.5 + ease * 6;
+      const g = ctx.createRadialGradient(cx, y, 0, cx, y, r + 1);
+      g.addColorStop(0, withAlpha('#ffffff', 0.9 * a));
+      g.addColorStop(0.45, withAlpha(c, 0.7 * a));
+      g.addColorStop(1, withAlpha(c, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, y, r + 1, 0, Math.PI * 2);
+      ctx.fill();
+      // 빛줄기 방향: 시전자 → 섬광 (바라보는 쪽). 방향을 모르면 위로
+      const ox = e.off?.sx ?? 0;
+      const oy = e.off?.sy ?? 0;
+      const base = ox || oy ? Math.atan2(oy, ox) : -Math.PI / 2;
+      ctx.strokeStyle = withAlpha('#ffffff', 0.85 * a);
+      ctx.lineWidth = 1.4;
+      ctx.lineCap = 'round';
+      for (let i = -1; i <= 1; i++) {
+        const ang = base + i * 0.4;
+        const r0 = 3 + ease * 3;
+        const r1 = r0 + 4 + ease * 6 - Math.abs(i) * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * r0, y + Math.sin(ang) * r0);
+        ctx.lineTo(cx + Math.cos(ang) * r1, y + Math.sin(ang) * r1);
+        ctx.stroke();
+      }
       break;
     }
     case 'arrowfall': {

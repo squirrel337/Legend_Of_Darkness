@@ -1,6 +1,5 @@
 // 게임 클라이언트 본체: 서버 메시지 처리, 입력, 이동 예측, 화면 갱신
 import {
-  ASSAIL_COOLDOWN_MS,
   DIR_DX,
   DIR_DY,
   NPC_TALK_RANGE,
@@ -10,7 +9,7 @@ import {
 import type { S2C } from '../shared/protocol';
 import type { PublicServerInfo } from '../shared/types';
 import { Net } from './net';
-import { STATUS_INFO } from '../shared/constants';
+import { AssailPacer } from './assail';
 import { chebyshev, isAlly, isHostile } from './state';
 import { Renderer } from './render/renderer';
 import { ClientState, entityFromSnapshot, entityPos, snapTo, startMove, type CEntity } from './state';
@@ -29,7 +28,8 @@ import { Windows } from './ui/windows';
 const ARROWS: Record<string, Dir> = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 };
 const DEATH_FADE_MS = 500;
 
-type Pending = { kind: 'talk' | 'pickup' | 'approach'; id: number } | null;
+/** 클릭 이동이 끝나면 할 일. range 가 있으면 활로 다가가는 중: 그 사거리 안에 들어오면 멈추고 쏨 */
+type Pending = { kind: 'talk' | 'pickup' | 'approach'; id: number; range?: number } | null;
 
 export class Game {
   readonly state = new ClientState();
@@ -49,7 +49,8 @@ export class Game {
   private server: PublicServerInfo | null = null;
   private heldDirs: Dir[] = [];
   private attackHeld = false;
-  private nextAttackAt = 0;
+  /** 평타 연타 간격 (서버가 알려 주는 실제 간격) */
+  private readonly assail = new AssailPacer();
   private path: Dir[] = [];
   private pending: Pending = null;
   private lastHudTick = 0;
@@ -182,7 +183,9 @@ export class Game {
         if (this.panel.tab === 'skills' || this.panel.tab === 'spells') this.panel.render();
         break;
       case 'cooldown':
-        st.cooldowns.set(m.id, { start: now, end: now + m.ms });
+        // 'assail' 은 기술의 재사용 대기가 아니라 평타 연타 간격 (기술 칸에는 표시하지 않음)
+        if (m.id === 'assail') this.assail.confirmed(m.ms, now);
+        else st.cooldowns.set(m.id, { start: now, end: now + m.ms });
         break;
       case 'map':
         st.setMap(m.map);
@@ -277,7 +280,7 @@ export class Game {
         const from = m.from !== undefined ? st.entities.get(m.from) : undefined;
         const at = target ? this.renderer.entityPoint(target, now) : m.x !== undefined && m.y !== undefined ? { sx: (m.x - m.y) * 32, sy: (m.x + m.y) * 16 + 16 } : null;
         if (!at) break;
-        this.renderer.effects.fx(m.fx, m.el, target?.id ?? null, at, from?.id ?? null, from ? this.renderer.entityPoint(from, now) : null, now);
+        this.renderer.effects.fx(m.fx, m.el, target?.id ?? null, at, from?.id ?? null, from ? this.renderer.entityPoint(from, now) : null, now, from?.dir);
         if (m.fx === 'levelup' && target) this.renderer.effects.text(target.id, at, 'LEVEL UP!', '#ffe066', now, 18, 1800);
         break;
       }
@@ -399,10 +402,11 @@ export class Game {
         this.net.send({ t: 'turn', dir });
       }
       if (held === null) {
-        // 경로가 막혔으면 다시 계산
+        // 경로가 막혔으면 다시 계산 (활로 다가가는 중이면 대상의 지금 자리에서 사거리 안까지만, 이미 안이면 쏨)
         const goal = this.renderer.walkTarget;
         this.path = [];
-        if (goal && (goal.x !== me.x || goal.y !== me.y)) {
+        if (this.pending?.range) this.resumeRanged();
+        else if (goal && (goal.x !== me.x || goal.y !== me.y)) {
           const p = this.findPath(me.x, me.y, goal.x, goal.y, this.pending !== null);
           if (p) this.path = p;
           else this.pending = null;
@@ -419,6 +423,8 @@ export class Game {
     this.net.send({ t: 'walk', dir, x: me.x, y: me.y });
     startMove(me, nx, ny, now);
     if (st.isWarp(nx, ny)) this.path = [];
+    // 활로 다가가는 중: 이 걸음으로 사거리 안에 들어오면 더 걷지 않음 (멈추면 arrive 에서 쏨)
+    if (this.pendingInRange(nx, ny)) this.path = [];
   }
 
   /** 클릭 이동이 끝났을 때 예약된 행동 */
@@ -432,6 +438,8 @@ export class Game {
     if (!me || !e) return;
     if (p.kind === 'talk') this.talkTo(e);
     else if (p.kind === 'pickup' && e.x === me.x && e.y === me.y) this.net.send({ t: 'pickup' });
+    // 활: 사거리 안이면 쏘고, 그동안 대상이 물러났으면 지금 자리 기준으로 다시 다가감
+    else if (p.kind === 'approach' && p.range && isHostile(e)) this.approachRanged(e, p.range);
     else if (p.kind === 'approach') this.faceTowards(e);
   }
 
@@ -525,7 +533,7 @@ export class Game {
   }
 
   private tryAttack(now: number): void {
-    if (now < this.nextAttackAt) return;
+    if (!this.assail.ready(now)) return;
     const me = this.state.me;
     const self = this.state.self;
     if (!me || self?.ghost) return;
@@ -544,14 +552,13 @@ export class Game {
       if (t) this.faceTowards(t);
       this.net.send({ t: 'attack' });
     }
-    // 신속 상태면 평타가 빨라짐 (실제 판정은 서버)
-    const haste = self?.statuses.some((s) => s.id === 'haste') ? STATUS_INFO.haste.potency : 0;
-    this.nextAttackAt = now + ASSAIL_COOLDOWN_MS * (1 - Math.min(60, haste) / 100);
+    // 다음 평타는 서버가 알려 준 실제 간격(신속 반영) 뒤에 (실제 판정은 서버)
+    this.assail.sent(now);
     me.actKind = 'attack';
     me.actStart = now;
   }
 
-  /** 활을 든 채 적을 누르면: 사거리 안이면 바로 쏘고, 아니면 사거리에 들어올 때까지만 걸어감 */
+  /** 활을 든 채 적을 누르면: 사거리 안이면 바로 쏘고, 아니면 사거리에 들어올 때까지만 걸어감 (도착하면 쏨) */
   private approachRanged(e: CEntity, range: number): void {
     const me = this.state.me;
     if (!me) return;
@@ -563,18 +570,26 @@ export class Game {
       this.tryAttack(performance.now());
       return;
     }
-    this.walkTo(e.x, e.y, { kind: 'approach', id: e.id });
-    let x = me.x;
-    let y = me.y;
-    for (let i = 0; i < this.path.length; i++) {
-      const d = this.path[i]!;
-      x += DIR_DX[d]!;
-      y += DIR_DY[d]!;
-      if (chebyshev(x, y, e.x, e.y) <= range) {
-        this.path = this.path.slice(0, i + 1);
-        break;
-      }
-    }
+    // 사거리를 예약에 실어 두면 길찾기·다시 찾기·도착이 모두 사거리 기준
+    this.walkTo(e.x, e.y, { kind: 'approach', id: e.id, range });
+  }
+
+  /** 활로 다가가다 길이 막혔을 때: 대상의 지금 자리 기준으로 다시 다가감 (이미 사거리 안이면 쏨) */
+  private resumeRanged(): void {
+    const p = this.pending;
+    this.pending = null;
+    this.path = [];
+    if (!p?.range) return;
+    const e = this.state.entities.get(p.id);
+    if (e && isHostile(e)) this.approachRanged(e, p.range);
+  }
+
+  /** 활로 다가가는 중이고 (x, y) 가 대상의 사거리 안인지 */
+  private pendingInRange(x: number, y: number): boolean {
+    const p = this.pending;
+    if (!p?.range) return false;
+    const e = this.state.entities.get(p.id);
+    return e !== undefined && chebyshev(x, y, e.x, e.y) <= p.range;
   }
 
   useAbility(id: string): void {
@@ -655,7 +670,7 @@ export class Game {
     const me = this.state.me;
     if (!me) return;
     this.cancelAuto();
-    const path = this.findPath(me.x, me.y, x, y, pending !== null && pending.kind !== 'pickup');
+    const path = this.findPath(me.x, me.y, x, y, pending !== null && pending.kind !== 'pickup', pending?.range);
     if (!path) {
       this.hud.notice('그곳으로 갈 수 없습니다.', 'warn');
       return;
@@ -666,14 +681,19 @@ export class Game {
     if (path.length === 0) this.arrive();
   }
 
-  /** BFS 길찾기. adjacent=true 면 목표 옆 칸까지 */
-  private findPath(sx: number, sy: number, tx: number, ty: number, adjacent: boolean): Dir[] | null {
+  /** BFS 길찾기. adjacent=true 면 목표 옆 칸까지, range > 1 이면 목표에서 그 거리(가로·세로·대각선) 안의 칸까지 */
+  private findPath(sx: number, sy: number, tx: number, ty: number, adjacent: boolean, range = 1): Dir[] | null {
     const st = this.state;
     const W = st.mapWidth;
     const H = st.mapHeight;
     if (tx < 0 || ty < 0 || tx >= W || ty >= H) return null;
     const ghost = st.self?.ghost ?? false;
-    const goal = (x: number, y: number) => (adjacent ? Math.abs(x - tx) + Math.abs(y - ty) <= 1 && !(x === tx && y === ty) : x === tx && y === ty);
+    const goal = (x: number, y: number) =>
+      range > 1
+        ? chebyshev(x, y, tx, ty) <= range && !(x === tx && y === ty)
+        : adjacent
+          ? Math.abs(x - tx) + Math.abs(y - ty) <= 1 && !(x === tx && y === ty)
+          : x === tx && y === ty;
     if (goal(sx, sy)) return [];
     const prev = new Map<number, number>();
     const start = sy * W + sx;
