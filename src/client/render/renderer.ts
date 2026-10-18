@@ -320,6 +320,8 @@ export class Renderer {
     ctx.translate(c.sx, c.sy);
     if (e.type === 'player' || e.type === 'npc') {
       const look = e.look;
+      const hidden = e.statuses.includes('hide');
+      const alpha = hidden ? (e.id === this.state.selfId ? 0.45 : 0.18) : e.ghost ? 0.62 : 1;
       if (look) {
         const pose: ChibiPose = {
           dir: e.dir,
@@ -331,14 +333,14 @@ export class Renderer {
           ghost: e.ghost,
           beast: e.statuses.includes('beast'),
         };
-        const hidden = e.statuses.includes('hide');
-        const alpha = hidden ? (e.id === this.state.selfId ? 0.45 : 0.18) : e.ghost ? 0.62 : 1;
         if (alpha < 1 || flash) this.drawBuffered((b) => drawClassicFast(b, look, pose, this.dpr), alpha, flash);
         else drawClassicFast(ctx, look, pose, this.dpr);
       }
       if (e.role === 'admin' || e.role === 'gm') {
-        // 운영자 왕관: 머리(모자) 바로 위
+        // 운영자 왕관: 머리(모자) 바로 위. 숨기·유령이면 몸과 같은 투명도 (숨은 운영자의 자리가 왕관으로 드러나지 않게)
         const top = -(look ? classicHeadTop(look) : CLASSIC_HEAD_TOP) - 3 - (e.ghost ? 3 : 0);
+        const a0 = ctx.globalAlpha;
+        ctx.globalAlpha = a0 * alpha;
         ctx.fillStyle = 'rgba(255,215,0,0.9)';
         ctx.strokeStyle = 'rgba(60,40,0,0.8)';
         ctx.lineWidth = 1;
@@ -350,6 +352,7 @@ export class Renderer {
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
+        ctx.globalAlpha = a0;
       }
     } else if (e.type === 'monster') {
       const def = e.def ? this.state.monsters.get(e.def) : undefined;
