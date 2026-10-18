@@ -447,15 +447,18 @@ export class Renderer {
     // 글꼴을 받는 동안(최대 몇 초)은 대체 글꼴로 번쩍이지 않게 글자를 그리지 않습니다
     const fontOk = labelFontReady();
     const font = `${LABEL_PX}px ${FONT}`;
-    // 이름표: 원작처럼 마우스를 올렸거나 대상으로 고른 것만 (12px, 1px 외곽선)
-    const label = entityLabel(e, {
-      hovered,
-      targeted,
-      selfId: this.state.selfId,
-      ally,
-      boss: !!monsterDef?.boss,
-      itemName: e.type === 'item' && e.item ? this.state.itemName(e.item) : undefined,
-    });
+    // 이름표: 원작처럼 마우스를 올렸거나 대상으로 고른 것만 (12px, 1px 외곽선). 나머지는 매 프레임 따질 것도 없음
+    const label =
+      hovered || targeted
+        ? entityLabel(e, {
+            hovered,
+            targeted,
+            selfId: this.state.selfId,
+            ally,
+            boss: !!monsterDef?.boss,
+            itemName: e.type === 'item' && e.item ? this.state.itemName(e.item) : undefined,
+          })
+        : null;
     if (label && fontOk) {
       ctx.font = font;
       drawOutlinedText(ctx, label.text, ax, nameY, label.color);

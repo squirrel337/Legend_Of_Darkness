@@ -1,7 +1,8 @@
 /* 어둠의 전설 — 게임 화면 스타일 (클래식 가죽·나무 패널) */
 
-/* 고전 도트 글꼴: 갈무리 모노 11 (Galmuri 2.40.3, SIL OFL 1.1, Copyright (c) 2019–2025 Lee Minseo, 예약 글꼴 이름 "Galmuri")
-   라이선스 전문: /fonts/Galmuri-OFL.txt. 12px 에서 한글 12px·영문 6px 칸으로 또렷하게 나옵니다. */
+/* 고전 도트 글꼴: 갈무리 모노 11 (Galmuri 2.40.3, SIL OFL 1.1, Copyright (c) 2019–2025 Lee Minseo)
+   npm 패키지 galmuri@2.40.3 의 dist/GalmuriMono11.woff2 를 고치지 않고 그대로 씁니다. 라이선스 전문: /fonts/Galmuri-OFL.txt.
+   12px 에서 한글 12px·반각 6px 칸이라 원작의 글자 칸과 같고 또렷하게 나옵니다. */
 @font-face {
   font-family: 'GalmuriMono11';
   font-style: normal;
