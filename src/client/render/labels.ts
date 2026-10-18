@@ -4,7 +4,11 @@
 // - 말풍선은 원작 화면(R2)처럼 반투명한 검은 바탕, 1px 흰 테두리, 흰 12px 글씨, 아래쪽의 작은 꼬리입니다.
 // 캔버스 형식(DOM)에 기대지 않으므로 서버 쪽 테스트에서도 그대로 불러 점검할 수 있습니다.
 
-/** 도트 글꼴 (public/fonts/GalmuriMono11.woff2, SIL OFL 1.1). 한글 12px, 영문·숫자 6px 고정폭 */
+/**
+ * 도트 글꼴 (public/fonts/GalmuriMono11.woff2, SIL OFL 1.1). 한글 12px, 영문·숫자·문장 부호 6px 고정폭.
+ * 원작 글자도 전각 12px·반각 6px 칸에 찍히므로(R2 `수: 운` 의 쌍점과 빈칸이 6px 씩), 반각 글자가 4~8px 인
+ * 비례폭 갈무리 11(쌍점 4px, 빈칸 5px)보다 글자 사이가 원작과 같습니다. 한글 모양은 두 글꼴이 같습니다.
+ */
 export const PIXEL_FONT = 'GalmuriMono11';
 /** 캔버스 글자 글꼴: 도트 글꼴 → 굴림·돋움 → 예전 글꼴 */
 export const LABEL_FONT = `"${PIXEL_FONT}", "Gulim", "굴림", "Dotum", "돋움", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
