@@ -1,7 +1,10 @@
 // 고전 도트 캐릭터(classic-*.ts)의 순수한 부분 점검 (DOM 없음):
-// 자세 → 그림 번호 양자화, 겉모습 서명, 캐시 개수 제한, 머리 모양·의상·모자 해석, 그림 크기와 키.
+// 자세 → 그림 번호 양자화, 겉모습 서명, 캐시 개수 제한, 머리 모양·의상·모자 해석, 그림 크기와 키,
+// 게임 데이터의 NPC·장비 겉모습 전부, 손·궤적·얼굴 명암.
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { test } from 'node:test';
+import { GameData } from '../src/server/gamedata';
 import { CLASS_IDS, type Dir } from '../src/shared/constants';
 import type { HumanLook, IconShape } from '../src/shared/types';
 import { ART_H, ART_OX, ART_OY, ART_W, makeArtBuffer, renderClassicFrame } from '../src/client/render/classic-art';
@@ -267,6 +270,50 @@ test('그림: 모든 직업 x 성별 x 무기 x 앞뒤 x 동작 x 그림을 예�
     }
   });
   assert.ok(n > 2000);
+});
+
+test('그림: 게임 데이터의 모든 NPC 겉모습과 모든 갑옷(직업 무기·투구·방패 포함)을 예외 없이 상자 안에, 유령까지', () => {
+  const gd = GameData.load(path.resolve(import.meta.dirname, '..', 'gamedata'));
+  const buf = makeArtBuffer();
+  const check = (look: HumanLook, tag: string) => {
+    for (const view of ['F', 'B'] as const) {
+      for (const anim of ANIMS) {
+        for (let f = 0; f < CLASSIC_FRAMES_PER_ANIM; f++) {
+          for (const ghost of anim === 'idle' ? [false, true] : [false]) {
+            const bb = opaqueBounds(renderClassicFrame(look, { view, anim, f, ghost, beast: false }, buf));
+            const id = `${tag}/${view}/${anim}${f}${ghost ? '/유령' : ''}`;
+            assert.ok(bb.y >= -165 && bb.y + bb.h <= 25 && bb.x >= -100 && bb.x + bb.w <= 100, `${id} 상자 밖`);
+            assert.ok(bb.x > -ART_OX && bb.x + bb.w < ART_W - ART_OX && bb.y > -ART_OY && bb.y + bb.h < ART_H - ART_OY, `${id} 잘림`);
+          }
+        }
+      }
+    }
+  };
+  assert.ok(gd.npcs.size >= 10);
+  for (const n of gd.npcs.values()) check(n.look, `NPC ${n.id}`);
+  // Player.look() 과 같은 방식: 갑옷 색·장식 색·직업 의상, 그 직업 무기, 투구·방패는 번갈아
+  const items = [...gd.items.values()].filter((i) => i.type === 'equip');
+  const helmets = items.filter((i) => i.slot === 'helmet');
+  const shields = items.filter((i) => i.slot === 'shield');
+  let k = 0;
+  for (const armor of items.filter((i) => i.slot === 'armor')) {
+    const cls = armor.classes?.[0];
+    const weapons = items.filter((i) => i.slot === 'weapon' && (cls ? i.classes?.includes(cls) : !i.classes));
+    const weapon = weapons[k % weapons.length];
+    const look: HumanLook = { gender: k % 2 ? 'f' : 'm', hairStyle: k % 6, hairColor: '#8b5a2b', body: armor.icon.color };
+    if (armor.icon.color2) look.body2 = armor.icon.color2;
+    if (cls) look.outfit = cls;
+    if (weapon) {
+      look.weapon = weapon.icon.shape;
+      look.weaponColor = weapon.icon.color;
+    }
+    if (k % 3 !== 2) look.helmet = helmets[k % helmets.length]!.icon.color;
+    const shield = shields[k % shields.length]!;
+    if (k % 2 === 0 && (!shield.classes || shield.classes.includes(cls ?? 'peasant'))) look.shield = shield.icon.color;
+    check(look, `${armor.id}+${weapon?.id ?? '-'}`);
+    k++;
+  }
+  assert.ok(k >= 80, '갑옷 수');
 });
 
 test('그림: 맨머리 보통 캐릭터의 머리 꼭대기는 발 위 58~62px, 키는 약 1.8~1.9칸', () => {
