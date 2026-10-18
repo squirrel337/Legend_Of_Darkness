@@ -190,6 +190,8 @@ interface GroundMap {
   grid: GroundGrid;
   variant: GroundVariant;
   bounds: { x0: number; y0: number; x1: number; y1: number };
+  /** 조각을 구울 무늬·팔레트까지 준비했는지 (작업자가 굽는 동안 화면 쪽은 격자만) */
+  bakeable: boolean;
   tex: (Uint8Array | null)[];
   pal: (CompiledPalette | null)[];
   /** 칸마다 비칠 수 있는 액체 비트 */
@@ -257,6 +259,7 @@ function prepareGroundMap(map: BakeMap, key: string, bake = true): GroundMap {
     grid,
     variant,
     bounds: mapWorldBounds(grid.w, grid.h),
+    bakeable: bake,
     tex,
     pal,
     cover,
@@ -1264,11 +1267,13 @@ export class Ground {
     const key = chunkKey(this.prefix(), cx, cy);
     const c = this.chunks.get(key);
     if (c) return c;
-    const gm = this.gm!;
+    let gm = this.gm!;
     const dpr = this.dpr;
     // 정수 배율이면 그 배율로 (텍셀을 그대로 늘림), 소수 배율이면 1배로 구워 받은 뒤 부드럽게 늘림
     const s = Math.round(dpr) === dpr ? dpr : 1;
     if (!this.baker.async) {
+      // 작업자가 도중에 죽어 그 자리에서 굽게 되면 무늬·팔레트부터 준비
+      if (!gm.bakeable) gm = this.gm = prepareGroundMap(this.lastMap!, gm.key, true);
       const px = chunkPixels(gm, cx, cy, s);
       const img = s === dpr ? pixelsToCanvas(px) : smoothUp(pixelsToCanvas(px), dpr);
       this.chunks.set(key, img);
