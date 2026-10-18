@@ -440,8 +440,10 @@ export class Renderer {
     const top = ay - Math.round(e.type === 'item' ? 26 : ally ? 30 + 18 * scale : e.type === 'monster' ? 56 * Math.max(1, scale * 0.95) : 66);
     // 말풍선이 내려오면 안 되는 선: 머리 꼭대기, 보이는 이름표·체력바의 윗선
     let clear = e.type === 'player' || e.type === 'npc' ? ay - HEAD_TOP : top + 3;
-    // 운영자는 머리 위 왕관(drawEntity)까지 피함
-    if (e.role === 'admin' || e.role === 'gm') clear = Math.min(clear, ay - HEAD_TOP - 15);
+    // 운영자는 머리 위 왕관(drawEntity, 발에서 67~76px)까지 피하고, 이름표도 왕관을 가리지 않게 그 위에
+    const crown = e.role === 'admin' || e.role === 'gm';
+    if (crown) clear = Math.min(clear, ay - HEAD_TOP - 15);
+    const nameY = crown ? Math.min(top, ay - 78) : top;
     // 글꼴을 받는 동안(최대 몇 초)은 대체 글꼴로 번쩍이지 않게 글자를 그리지 않습니다
     const fontOk = labelFontReady();
     const font = `${LABEL_PX}px ${FONT}`;
@@ -456,11 +458,11 @@ export class Renderer {
     });
     if (label && fontOk) {
       ctx.font = font;
-      drawOutlinedText(ctx, label.text, ax, top, label.color);
-      clear = Math.min(clear, top - LABEL_PX);
+      drawOutlinedText(ctx, label.text, ax, nameY, label.color);
+      clear = Math.min(clear, nameY - LABEL_PX);
       if (label.title) {
-        drawOutlinedText(ctx, label.title, ax, top - LABEL_PX - 2, '#9fd3ff');
-        clear = Math.min(clear, top - 2 * LABEL_PX - 2);
+        drawOutlinedText(ctx, label.title, ax, nameY - LABEL_PX - 2, '#9fd3ff');
+        clear = Math.min(clear, nameY - 2 * LABEL_PX - 2);
       }
     }
     // 체력바
