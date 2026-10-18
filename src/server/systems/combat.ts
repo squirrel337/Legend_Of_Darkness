@@ -135,6 +135,27 @@ function emitDamage(target: Creature, v: number, k: DamageKind): void {
   if (isPlayer(target)) target.markVitals();
 }
 
+/** 전투 중으로 표시합니다 (전투 중에는 자연 회복이 느림). 소환수가 싸우면 주인도 전투 중입니다 */
+function markCombat(c: Creature, now: number): void {
+  c.lastCombatAt = now;
+  if (isMonster(c) && c.owner) c.owner.lastCombatAt = now;
+}
+
+/**
+ * 플레이어 편에게 공격받은 야생 몬스터가 노릴 대상을 정합니다 (빗나가도).
+ * 소환수에게 맞으면 그 소환수로 돌아섭니다 (주인 대신 맞음). 이미 소환수와 싸우는 중이면 그대로 둡니다.
+ * 플레이어에게 맞으면 노리던 대상이 없을 때만 그 플레이어를 노립니다.
+ */
+function provoke(m: Monster, src: Creature, now: number): void {
+  const cur = m.target;
+  if (cur && !cur.isDead && cur.map === m.map) {
+    // 이미 싸우는 중: 소환수가 플레이어에게서 대상을 빼앗을 때만 바꿈
+    if (!isSummon(src) || isSummon(cur)) return;
+  }
+  m.target = src;
+  m.chaseSince = now;
+}
+
 /** 실제로 체력을 깎습니다. 죽으면 사망 처리까지 합니다. */
 export function applyDamage(world: World, src: Creature | null, target: Creature, amount: number, kind: DamageKind): number {
   if (target.isDead || !target.map) return 0;
@@ -154,8 +175,8 @@ export function applyDamage(world: World, src: Creature | null, target: Creature
   dmg = Math.max(1, Math.round(dmg));
   const before = target.hp;
   target.hp = Math.max(0, target.hp - dmg);
-  target.lastCombatAt = now;
-  if (src) src.lastCombatAt = now;
+  markCombat(target, now);
+  if (src) markCombat(src, now);
   if (target.statuses.has('sleep')) removeStatus(target, 'sleep');
   if (isMonster(target)) {
     target.lastDamagedAt = now;
@@ -163,10 +184,7 @@ export function applyDamage(world: World, src: Creature | null, target: Creature
     const credit = src && isSummon(src) ? src.owner : src;
     if (src && credit && isPlayer(credit) && isWild(target)) {
       target.addDamage(credit, Math.min(dmg, before));
-      if (!target.target || target.target.isDead || target.target.map !== target.map) {
-        target.target = src;
-        target.chaseSince = now;
-      }
+      provoke(target, src, now);
     }
   }
   emitDamage(target, dmg, kind);
@@ -214,11 +232,12 @@ export function physicalAttack(world: World, attacker: Creature, target: Creatur
     // 회피: 그만큼(%) 더 잘 피합니다
     (evade !== undefined && rand() < evade.potency / 100);
   if (missed) {
+    const now = Date.now();
     emitDamage(target, 0, 'miss');
-    if (isWild(target) && onPlayerSide(attacker) && !target.target) {
-      target.target = attacker;
-      target.chaseSince = Date.now();
-    }
+    // 빗나가도 싸우는 중입니다
+    markCombat(target, now);
+    markCombat(attacker, now);
+    if (isWild(target) && onPlayerSide(attacker)) provoke(target, attacker, now);
     return 0;
   }
   let base: number;
@@ -402,12 +421,16 @@ export function canFight(p: Player): string | null {
 /**
  * 평타. 근접 무기는 바라보는 앞 칸을 칩니다.
  * 원거리 무기(활, 사거리 > 1)는 targetId 대상(사거리 안의 적)을, 없으면 가장 가까운 적을 쏩니다.
+ * 휘두를 때마다 실제 평타 간격을 재사용 대기 메시지(id 'assail')로 알려 줍니다 (신속이면 짧아짐).
  */
 export function playerAssail(world: World, p: Player, targetId?: unknown, now = Date.now()): void {
   const map = p.map;
   if (!map || p.isDead || !p.canAct) return;
   if (now < p.nextAssailAt) return;
-  p.nextAssailAt = now + Math.round(ASSAIL_COOLDOWN_MS * hasteFactor(p));
+  const cooldownMs = Math.round(ASSAIL_COOLDOWN_MS * hasteFactor(p));
+  p.nextAssailAt = now + cooldownMs;
+  // 클라이언트는 이 간격으로 평타 연타 간격을 맞춥니다 (신속의 세기는 클라이언트가 모름)
+  p.send({ t: 'cooldown', id: 'assail', ms: cooldownMs });
   const wasHidden = p.hasStatus('hide');
   const range = p.derived.range;
   if (range > 1) {
