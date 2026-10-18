@@ -8,9 +8,12 @@ import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, t
 import { ambienceFor, type Ambience } from './ambience';
 import { Atmosphere } from './atmosphere';
 import { CLASSIC_HALF_WIDTH, CLASSIC_HEAD_TOP, classicHeadTop, drawClassicFast, type ClassicPose } from './classic';
+import { baker } from './baker';
 import { Ground } from './ground';
+import { drawFlame } from './props';
+import { objectSprite, wallImage, type Sprite } from './sprite-cache';
+import type { BakedImage } from './bake-types';
 import { drawGroundItem, drawMonster } from './sprites';
-import { drawFlame, objectSprite, wallCanvas } from './tiles';
 
 const ACT_MS = 320;
 /** 어둠 캔버스는 CSS 픽셀의 이 배수만큼 작게 그립니다 (부드러운 빛 구멍뿐이라 늘려도 티가 나지 않음) */
@@ -19,6 +22,11 @@ const DARK_SCALE = 2;
 const FONT = LABEL_FONT;
 /** 운영자 왕관의 높이 (CSS px) */
 const CROWN_H = 9;
+/** 맵에 들어오면 화면 그림이 다 구워질 때까지 검게 가리는 최대 시간과, 그 뒤 밝아지는 시간 */
+const ENTER_HOLD_MS = 600;
+const ENTER_FADE_MS = 200;
+/** 맵에 들어올 때 미리 굽는 벽·물체 그림의 우선순위 (보이는 것·둘레 바닥 조각보다 나중) */
+const PREBUILD_PRIO = 2000;
 
 /** 운영자 왕관의 아래 끝: 도트 캐릭터의 머리(모자) 꼭대기 3px 위, 유령은 떠 있는 만큼 3px 더 (발에서 위로 CSS px) */
 function crownBase(e: CEntity): number {
@@ -42,7 +50,7 @@ export class Renderer {
   private dark: HTMLCanvasElement;
   private darkCtx: CanvasRenderingContext2D;
   /** 바닥 조각 캐시 (물·성수·용암 포함) 와 화면 가장자리 분위기 */
-  private readonly ground = new Ground();
+  private readonly ground = new Ground(baker);
   private readonly atmosphere = new Atmosphere();
   readonly effects = new Effects();
   /** 화면 좌표 = 월드 좌표 + offset */
@@ -58,6 +66,15 @@ export class Renderer {
   private wallLike = new Map<number, string>();
   private lights: { x: number; y: number; r: number; flicker: boolean }[] = [];
   private mapKey = '';
+  private mapW = 0;
+  private mapH = 0;
+  /** 이 맵의 벽·물체 그림을 미리 굽도록 맡긴 배율 (맵이 바뀌거나 배율이 바뀌면 다시) */
+  private prebuiltScale = 0;
+  /** 맵에 들어온(또는 아직 굽지 않은 곳으로 순간이동한) 시각과, 그 뒤 화면이 다 구워진 시각 */
+  private enterAt = -Infinity;
+  private readyAt = -Infinity;
+  /** 지난 프레임에 굽지 못해 밑그림으로 대신한 바닥 조각 수 */
+  private lastMissing = 0;
   private minimapBase: HTMLCanvasElement | null = null;
   /** 반투명/번쩍임 효과를 위해 캐릭터 하나를 먼저 그리는 작은 캔버스 */
   private spriteBuf: [HTMLCanvasElement, CanvasRenderingContext2D] | null = null;
@@ -81,18 +98,24 @@ export class Renderer {
     this.ground.setDpr(this.dpr);
   }
 
-  /** 맵이 바뀌면 벽처럼 그릴 횃불 칸과 광원 목록을 다시 계산 */
-  private prepareMap(): void {
+  /** 맵이 바뀌면 벽처럼 그릴 횃불 칸과 광원 목록을 다시 계산하고, 이 맵의 벽·물체 그림을 미리 굽도록 맡김 */
+  private prepareMap(now: number, ps: number): void {
     const map = this.state.map;
     if (!map) return;
     // 바닥 캐시는 타일 내용이 바뀐 맵에서만 새로 만듭니다 (같은 맵이면 그대로)
     this.ground.setMap(map);
     const key = map.id + ':' + map.tiles.length;
-    if (key === this.mapKey) return;
+    if (key === this.mapKey) {
+      if (ps !== this.prebuiltScale) this.prebuild(ps);
+      return;
+    }
     this.mapKey = key;
+    this.enterAt = now;
     this.wallLike.clear();
     this.lights = [];
     const W = this.state.mapWidth;
+    this.mapW = W;
+    this.mapH = this.state.mapHeight;
     for (let y = 0; y < map.tiles.length; y++) {
       const row = map.tiles[y]!;
       for (let x = 0; x < row.length; x++) {
@@ -116,6 +139,54 @@ export class Renderer {
     }
     for (const w of map.warps) this.lights.push({ x: w.x, y: w.y, r: 90, flicker: false });
     this.minimapBase = null;
+    this.prebuild(ps);
+  }
+
+  /** 칸의 벽 높이 (0: 벽 아님, 1: 낮은 담, 2: 보통 벽과 벽에 붙은 횃불) */
+  private wallLevel(x: number, y: number): number {
+    if (x < 0 || y < 0 || x >= this.mapW || y >= this.mapH) return 0;
+    if (this.wallLike.has(y * this.mapW + x)) return 2;
+    const n = tileInfo(this.state.map!.tiles[y]![x]);
+    return n.kind === 'wall' ? (n.low ? 1 : 2) : 0;
+  }
+
+  /** 같은 높이 이상의 이웃 벽 (1: x+1, 2: y+1, 4: x-1, 8: y-1): 가려지는 면은 생략하고 윗면은 잇습니다 */
+  private wallLinks(x: number, y: number): number {
+    const lv = this.wallLevel(x, y);
+    return (this.wallLevel(x + 1, y) >= lv ? 1 : 0) | (this.wallLevel(x, y + 1) >= lv ? 2 : 0) | (this.wallLevel(x - 1, y) >= lv ? 4 : 0) | (this.wallLevel(x, y - 1) >= lv ? 8 : 0);
+  }
+
+  /** 울타리는 이웃 울타리 쪽으로 밧줄을 잇습니다 (같은 방향 비트) */
+  private fenceLinks(x: number, y: number, ch: string): number {
+    const t = this.state.map!.tiles;
+    return (t[y]![x + 1] === ch ? 1 : 0) | (t[y + 1]?.[x] === ch ? 2 : 0) | (t[y]![x - 1] === ch ? 4 : 0) | (t[y - 1]?.[x] === ch ? 8 : 0);
+  }
+
+  /**
+   * 칸 (x, y) 에 서는 벽·나무·물체 그림. prio 는 굽기 우선순위 (아직 굽는 중이면 null).
+   * 벽이면 { wall, links }, 물체·나무면 { sprite }. 서는 것이 없는 칸이면 undefined.
+   */
+  private standing(x: number, y: number, ps: number, prio: number): { wall: BakedImage | null; links: number; asWall: boolean } | { sprite: Sprite | null } | undefined {
+    const ch = this.state.map!.tiles[y]![x]!;
+    const info = tileInfo(ch);
+    const asWall = this.wallLike.get(y * this.mapW + x);
+    if (info.kind === 'wall' || asWall) {
+      const links = this.wallLinks(x, y);
+      return { wall: wallImage(asWall ?? ch, ps, Math.floor(hash2(x, y, 3) * 4), links, !!asWall, prio), links, asWall: !!asWall };
+    }
+    if (info.kind !== 'tree' && info.kind !== 'object') return undefined;
+    const links = info.shape === 'fence' ? this.fenceLinks(x, y, ch) : 0;
+    return { sprite: objectSprite(ch, Math.floor(hash2(x, y, 7) * 4), ps, links, prio) };
+  }
+
+  /** 이 맵이 쓰는 벽·나무·물체 그림을 모두 미리 굽도록 맡깁니다 (내 자리에서 가까운 것부터, 화면에 보이는 것보다 나중에) */
+  private prebuild(ps: number): void {
+    this.prebuiltScale = ps;
+    if (!baker.async) return;
+    const me = this.state.me;
+    const mx = me?.x ?? 0;
+    const my = me?.y ?? 0;
+    for (let y = 0; y < this.mapH; y++) for (let x = 0; x < this.mapW; x++) this.standing(x, y, ps, PREBUILD_PRIO + Math.abs(x - mx) + Math.abs(y - my));
   }
 
   worldToScreen(p: Point): Point {
@@ -162,7 +233,10 @@ export class Renderer {
     ctx.fillRect(0, 0, this.cssW, this.cssH);
     const me = state.me;
     if (!map || !me) return;
-    this.prepareMap();
+    baker.tick();
+    // 벽·물체 그림은 화면 배율에 맞춘 정수 배율로 미리 그려 두고 CSS 크기로 옮겨 그립니다 (dpr 2 에서도 또렷함)
+    const ps = Math.max(1, Math.ceil(this.dpr));
+    this.prepareMap(now, ps);
 
     const focus = this.entityPoint(me, now);
     this.offX = Math.round(this.cssW / 2 - focus.sx);
@@ -252,32 +326,24 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // 6) 깊이 정렬 그리기
-    // 벽·물체 그림은 화면 배율에 맞춘 정수 배율로 미리 그려 두고 CSS 크기로 옮겨 그립니다 (dpr 2 에서도 또렷함)
-    const ps = Math.max(1, Math.ceil(this.dpr));
-    // 칸의 벽 높이 (0: 벽 아님, 1: 낮은 담, 2: 보통 벽과 벽에 붙은 횃불)
-    const wallLevel = (x: number, y: number): number => {
-      if (x < 0 || y < 0 || x >= W || y >= H) return 0;
-      if (this.wallLike.has(y * W + x)) return 2;
-      const n = tileInfo(map.tiles[y]![x]);
-      return n.kind === 'wall' ? (n.low ? 1 : 2) : 0;
-    };
+    // 6) 깊이 정렬 그리기 (아직 굽는 중인 벽·물체 그림은 이번 프레임에 건너뛰고 수를 셈)
+    let unbaked = 0;
     const list: Drawable[] = [];
     for (let y = 0; y < H; y++) {
       const row = map.tiles[y]!;
       for (let x = 0; x < W; x++) {
-        const ch = row[x]!;
-        const info = tileInfo(ch);
-        const asWall = this.wallLike.get(y * W + x);
-        if (info.kind !== 'wall' && info.kind !== 'tree' && info.kind !== 'object' && !asWall) continue;
+        const kind = tileInfo(row[x]).kind;
+        if (kind !== 'wall' && kind !== 'tree' && kind !== 'object' && !this.wallLike.has(y * W + x)) continue;
         if (!visible(x, y)) continue;
+        const st = this.standing(x, y, ps, 1);
+        if (!st) continue;
         const t = tileTop(x, y);
-        if (info.kind === 'wall' || asWall) {
-          // 같은 높이 이상의 이웃 벽 (1: x+1, 2: y+1, 4: x-1, 8: y-1): 가려지는 면은 생략하고 윗면은 잇습니다
-          const lv = wallLevel(x, y);
-          const links =
-            (wallLevel(x + 1, y) >= lv ? 1 : 0) | (wallLevel(x, y + 1) >= lv ? 2 : 0) | (wallLevel(x - 1, y) >= lv ? 4 : 0) | (wallLevel(x, y - 1) >= lv ? 8 : 0);
-          const wc = wallCanvas(asWall ?? ch, ps, Math.floor(hash2(x, y, 3) * 4), links, !!asWall, now);
+        if ('wall' in st) {
+          const { wall: wc, links, asWall } = st;
+          if (!wc) {
+            unbaked++;
+            continue;
+          }
           // 벽 횃불은 보이는 면 가운데의 받침 위에서 탑니다. 앞의 두 면이 다 가려졌으면 뒤쪽 면에 달린 것으로 보고
           // 벽보다 먼저 그려서 벽 너머로 불꽃 끝만 보이게 합니다 (뒤도 다 막혔으면 불꽃 없이 빛만)
           const front = !(links & 2) || !(links & 1);
@@ -293,12 +359,11 @@ export class Renderer {
             },
           });
         } else {
-          // 울타리는 이웃 울타리 쪽으로 밧줄을 잇습니다
-          const links =
-            info.shape === 'fence'
-              ? (row[x + 1] === ch ? 1 : 0) | (map.tiles[y + 1]?.[x] === ch ? 2 : 0) | (row[x - 1] === ch ? 4 : 0) | (map.tiles[y - 1]?.[x] === ch ? 8 : 0)
-              : 0;
-          const spr = objectSprite(ch, Math.floor(hash2(x, y, 7) * 4), ps, links, now);
+          const spr = st.sprite;
+          if (!spr) {
+            unbaked++;
+            continue;
+          }
           list.push({
             depth: x + y,
             order: 0,
@@ -362,6 +427,32 @@ export class Renderer {
       ctx.fillStyle = 'rgba(60,80,140,0.18)';
       ctx.fillRect(0, 0, this.cssW, this.cssH);
     }
+    this.drawVeil(now, this.ground.missing + unbaked);
+    // 이번 프레임에 요청한 굽기 일을 작업자들에게 맡김
+    baker.flush();
+  }
+
+  /**
+   * 맵에 들어오면 화면 그림(바닥 조각·벽·물체)이 다 구워질 때까지(최대 ENTER_HOLD_MS) 검게 가렸다가 밝힙니다.
+   * 아직 굽지 않은 곳으로 순간이동해 보이는 바닥 조각이 많이 비어도 같게 합니다. unbaked: 이번 프레임에 못 그린 그림 수
+   */
+  private drawVeil(now: number, unbaked: number): void {
+    const missing = this.ground.missing;
+    if (this.readyAt < this.enterAt) {
+      if (unbaked === 0 || now - this.enterAt > ENTER_HOLD_MS) this.readyAt = now;
+    } else if (this.lastMissing === 0 && missing > Math.max(2, this.ground.visible / 3)) {
+      // 다 그려져 있다가 한꺼번에 많이 비면 굽지 않은 곳으로 순간이동한 것
+      this.enterAt = now;
+    }
+    this.lastMissing = missing;
+    const veil = this.readyAt < this.enterAt ? 1 : 1 - (now - this.readyAt) / ENTER_FADE_MS;
+    if (veil <= 0) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = `rgba(5,5,10,${Math.min(1, veil).toFixed(3)})`;
+    ctx.fillRect(0, 0, this.cssW, this.cssH);
+    ctx.restore();
   }
 
   private drawEntity(e: CEntity, now: number): void {

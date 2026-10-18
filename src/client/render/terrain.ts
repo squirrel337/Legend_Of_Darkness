@@ -136,13 +136,22 @@ export function classifyTile(ch: string): TileGround {
   return r;
 }
 
+const colourCache = new Map<string, number | null>();
+
 /** TileInfo 색이 같은 (장식 없는) 바닥 타일의 재질. 나무·바위처럼 바닥색을 지닌 물체용 */
-export function colourMatchFloor(ch: string): number | null {
+function colourMatchFloor(ch: string): number | null {
+  let r = colourCache.get(ch);
+  if (r !== undefined) return r;
   const info = tileInfo(ch);
+  r = null;
   for (const [k, v] of Object.entries(TILESET)) {
-    if (v.kind === 'floor' && v.color === info.color && !v.shape) return classifyTile(k).mat;
+    if (v.kind === 'floor' && v.color === info.color && !v.shape) {
+      r = classifyTile(k).mat;
+      break;
+    }
   }
-  return null;
+  colourCache.set(ch, r);
+  return r;
 }
 
 const N8: readonly (readonly [number, number])[] = [

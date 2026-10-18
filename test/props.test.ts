@@ -162,12 +162,3 @@ test('낮은 돌담 매듭 띠: 무늬가 타일 경계(u=0, 32)에서 끊김 �
   }
   assert.deepEqual([...kinds].sort(), [0, 1, 2], '바탕·가닥·홈이 모두 있어야 함');
 });
-
-test('그림 만드는 시간 예산: 프레임 시각을 주지 않으면 언제나 바로 만든다', async () => {
-  const { buildAllowed } = await load('src/client/render/pixel.ts');
-  assert.equal(buildAllowed(), true);
-  assert.equal(buildAllowed(undefined), true);
-  // 새 프레임 시각이면 예산이 다시 채워짐
-  assert.equal(buildAllowed(1), true);
-  assert.equal(buildAllowed(2), true);
-});

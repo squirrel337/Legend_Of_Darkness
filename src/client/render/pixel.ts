@@ -548,26 +548,6 @@ export function lathe(p: Pix, cx: number, cy: number, H: number, r: (h: number) 
   }
 }
 
-// ───────────────────────── 그림 만드는 시간 예산 ─────────────────────────
-
-/** 한 프레임에 새 그림(캐시에 없는 것)을 만드는 데 쓸 시간 (ms) */
-export const BUILD_BUDGET_MS = 8;
-let frameNow = NaN;
-let frameBudgetEnd = 0;
-
-/**
- * 지금 새 그림을 만들어도 되는지. now 는 렌더러의 프레임 시각이고, 값이 바뀌면 새 프레임으로 보고 예산을 채웁니다.
- * now 를 주지 않으면 (미리보기·시험) 언제나 만듭니다. 예산을 넘기면 캐시는 같은 모양의 다른 그림을 잠깐 대신 씁니다.
- */
-export function buildAllowed(now?: number): boolean {
-  if (now === undefined) return true;
-  if (now !== frameNow) {
-    frameNow = now;
-    frameBudgetEnd = performance.now() + BUILD_BUDGET_MS;
-  }
-  return performance.now() < frameBudgetEnd;
-}
-
 // ───────────────────────── 아이소 입체 (맵 좌표) ─────────────────────────
 
 /**

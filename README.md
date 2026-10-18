@@ -332,7 +332,7 @@ src/
     systems/   전투, AI, 이동, 성장, 소지품, NPC 서비스, 채팅, 그룹
     admin/     관리자 기능(AdminService), 채팅 명령어, 관리자 REST API
     net/       WebSocket 세션 (로그인, 메시지 처리)
-  client/    브라우저 게임 (캔버스 렌더러 + DOM UI)
+  client/    브라우저 게임 (캔버스 렌더러 + DOM UI, 바닥·벽·물체 그림은 Web Worker 에서 굽기)
   admin/     웹 관리자 페이지
 gamedata/    게임 데이터 (JSON)
 public/      HTML/CSS, 빌드된 스크립트(public/build)

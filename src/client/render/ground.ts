@@ -1,10 +1,13 @@
-// 바닥 그리기: 맵 바닥을 256px 조각 캔버스에 미리 구워 두고(LRU), 물·성수·용암만 매 프레임 움직입니다.
+// 바닥 그리기: 맵 바닥을 256px 조각으로 미리 구워 두고(LRU), 물·성수·용암만 매 프레임 움직입니다.
+// 조각은 굽기 작업자(bake-worker.ts)가 화면 밖 스레드에서 굽고, 아직 오지 않은 조각 자리에는 맵 전체의 흐린 밑그림을 깝니다.
 // 조각은 픽셀마다 계산합니다: 재질 고르기(노이즈로 흔들린 유기적 경계) → 무늬 + 큰 얼룩 →
 // 경계 효과(흙길 어두운 테두리, 물가 거품, 용암 그을음) → 풀잎 포기 → 장식(돌멩이·잔가지·낙엽·꽃·고사리·뼈)
 // → 돌 단상 계단 옆면 → 성수 샘의 금 테두리.
 // 텍셀 하나 = CSS 1px. 조각 캔버스는 실제 화면 픽셀 해상도로 만들고, 정수 배율이면 텍셀을 그대로 늘려 또렷하게,
 // 소수 배율이면 부드럽게 늘립니다 (들쭉날쭉한 점보다 고른 점이 낫기 때문).
 import type { MapView } from '../../shared/protocol';
+import { disposeImage, pixelsToCanvas, type BakeMap, type BakedImage, type BakedPixels } from './bake-types';
+import type { Baker } from './baker';
 import { makeCanvas } from './iso';
 import { hashU32, periodicNoise, rng, smooth } from './noise';
 import {
@@ -70,13 +73,13 @@ const OW = CHUNK + 2;
 const BW = OW + APRON * 2;
 /** 경계 거리 저장 단위: 1px = 16 */
 const PX = 16;
-/** 한 프레임에 미리 굽는 조각 수와 시간 한도 */
+/** 작업자 없이 그 자리에서 구울 때 한 프레임에 미리 굽는 조각 수와 시간 한도 */
 const PREFETCH_PER_FRAME = 2;
 const PREFETCH_MS = 6;
 /** 미리 굽는 둘레 너비 (px) */
 const PREFETCH_MARGIN = 192;
-/** 조각 캐시 메모리 한도 (바이트) */
-const CACHE_BYTES = 64 * 1024 * 1024;
+/** 조각 캐시 메모리 한도 (바이트, 화면 배율 1 마다): 배율 1 에서 약 150 조각, 2 에서 약 75 조각 (맵 하나 반) */
+const CACHE_BYTES_PER_DPR = 40 * 1024 * 1024;
 /** 바닥면 1px 이 타일 좌표로 얼마인지 (곧은 경계에 수직으로 잰 값) */
 const TILE_PER_PX = MARGIN_PER_PX / 2;
 
@@ -201,7 +204,7 @@ interface GroundMap {
   isDais: (x: number, y: number) => boolean;
 }
 
-function tilesKey(map: MapView): string {
+function tilesKey(map: BakeMap): string {
   let h = 2166136261;
   for (const row of map.tiles) {
     for (let i = 0; i < row.length; i++) h = Math.imul(h ^ row.charCodeAt(i), 16777619);
@@ -210,7 +213,11 @@ function tilesKey(map: MapView): string {
   return `${map.id}:${map.tiles.length}:${(h >>> 0).toString(36)}`;
 }
 
-function prepareGroundMap(map: MapView, key: string): GroundMap {
+/**
+ * 맵 바닥 준비: 지형 격자, 액체 자리, 성수 샘, 단상 앞 변. bake 가 true 면 조각을 구울 무늬와 팔레트까지
+ * (작업자가 굽는 동안 화면 쪽은 격자만 있으면 됨).
+ */
+function prepareGroundMap(map: BakeMap, key: string, bake = true): GroundMap {
   initNoise();
   const grid = buildGroundGrid(map.tiles);
   const variant = ambienceFor(map.id, map.dark).palette;
@@ -219,7 +226,7 @@ function prepareGroundMap(map: MapView, key: string): GroundMap {
   const need = new Set(grid.used);
   // 풀 팔레트는 다른 바닥 위의 장식(꽃·고사리)과 풀잎 포기 색에도 씀
   need.add(GROUND.GRASS);
-  for (const m of need) {
+  for (const m of bake ? need : []) {
     if (m === VOID || m === EXCLUDED || LIQ[m]) continue;
     tex[m] = groundTexture(m, variant);
     pal[m] = compilePalette(m, variant);
@@ -1032,10 +1039,6 @@ function clamp(v: number, lo: number, hi: number): number {
 
 // ───────────────────────── 조각 출력 ─────────────────────────
 
-let IMG1: ImageData | null = null;
-let SCRATCH: [HTMLCanvasElement, CanvasRenderingContext2D] | null = null;
-let IMGN: { n: number; img: ImageData; buf: Uint32Array } | null = null;
-
 /** 조각 하나의 픽셀을 OUT 에 굽기 (DOM 을 쓰지 않음) */
 function bakePixels(gm: GroundMap, cx: number, cy: number): void {
   const X0 = cx * CHUNK;
@@ -1049,42 +1052,14 @@ function bakePixels(gm: GroundMap, cx: number, cy: number): void {
   poolRims(gm, X0, Y0);
 }
 
-let bakeMap: GroundMap | null = null;
-
-/**
- * 조각 (cx, cy) 의 픽셀 (RGBA Uint32, 한 변 CHUNK + 2, 이웃 조각과 2텍셀 겹침).
- * 캔버스 없이 계산만 하므로 시험과 측정에 씁니다.
- */
-export function bakeGroundChunk(map: MapView, cx: number, cy: number): Uint32Array {
-  const key = tilesKey(map);
-  if (!bakeMap || bakeMap.key !== key) bakeMap = prepareGroundMap(map, key);
-  bakePixels(bakeMap, cx, cy);
-  return OUT.slice();
-}
-
-/** 조각 한 변 (겹침 포함) */
-export const CHUNK_OUT = OW;
-
-/** 조각 하나 굽기 → 화면 해상도 캔버스 */
-function buildChunk(gm: GroundMap, cx: number, cy: number, dpr: number): HTMLCanvasElement {
+/** 조각 하나를 s 배(정수) 장치 픽셀 RGBA 로 굽기: 텍셀 하나를 s×s 로 그대로 늘려 또렷하게 */
+function chunkPixels(gm: GroundMap, cx: number, cy: number, s: number): BakedPixels {
   bakePixels(gm, cx, cy);
-  if (!SCRATCH) SCRATCH = makeCanvas(OW, OW);
-  if (!IMG1) IMG1 = SCRATCH[1].createImageData(OW, OW);
-  const s = Math.round(dpr);
-  if (s === dpr) {
-    if (s === 1) {
-      new Uint32Array(IMG1.data.buffer).set(OUT);
-      const [c, x] = makeCanvas(OW, OW);
-      x.putImageData(IMG1, 0, 0);
-      return c;
-    }
-    // 정수 배율: 텍셀 하나를 s×s 화면 픽셀로 그대로 늘림 (최근접, 또렷함)
-    const n = OW * s;
-    if (!IMGN || IMGN.n !== n) {
-      const img = SCRATCH[1].createImageData(n, n);
-      IMGN = { n, img, buf: new Uint32Array(img.data.buffer) };
-    }
-    const dst = IMGN.buf;
+  const n = OW * s;
+  const data = new Uint8ClampedArray(n * n * 4);
+  const dst = new Uint32Array(data.buffer);
+  if (s === 1) dst.set(OUT);
+  else {
     for (let y = 0; y < OW; y++) {
       const d0 = y * s * n;
       const srow = y * OW;
@@ -1095,19 +1070,93 @@ function buildChunk(gm: GroundMap, cx: number, cy: number, dpr: number): HTMLCan
       }
       for (let r = 1; r < s; r++) dst.copyWithin(d0 + r * n, d0, d0 + n);
     }
-    const [c, x] = makeCanvas(n, n);
-    x.putImageData(IMGN.img, 0, 0);
-    return c;
   }
-  // 소수 배율: 부드럽게 늘림 (점 크기가 고르게)
-  new Uint32Array(IMG1.data.buffer).set(OUT);
-  const [scr, sctx] = SCRATCH;
-  sctx.putImageData(IMG1, 0, 0);
+  return { w: n, h: n, data };
+}
+
+/** 굽기용으로 준비한 맵 바닥 (최근 둘: 맵을 오가는 동안 다시 준비하지 않게) */
+const prepared = new Map<string, GroundMap>();
+
+function preparedMap(map: BakeMap, key: string): GroundMap {
+  let gm = prepared.get(key);
+  if (!gm) {
+    gm = prepareGroundMap(map, key);
+    prepared.set(key, gm);
+    if (prepared.size > 2) prepared.delete(prepared.keys().next().value!);
+  }
+  return gm;
+}
+
+/** 맵 바닥의 열쇠: 맵 id 와 타일 내용 (타일이 같으면 같은 열쇠) */
+export function groundKey(map: BakeMap): string {
+  return tilesKey(map);
+}
+
+/**
+ * 조각 (cx, cy) 의 픽셀 (RGBA Uint32, 한 변 CHUNK + 2, 이웃 조각과 2텍셀 겹침).
+ * 캔버스 없이 계산만 하므로 시험과 측정에 씁니다.
+ */
+export function bakeGroundChunk(map: BakeMap, cx: number, cy: number): Uint32Array {
+  bakePixels(preparedMap(map, tilesKey(map)), cx, cy);
+  return OUT.slice();
+}
+
+/** 조각 (cx, cy) 를 s 배(정수) 해상도 RGBA 로 굽기. key 는 groundKey(map). DOM 을 쓰지 않아 작업자가 부릅니다 */
+export function bakeChunkRGBA(map: BakeMap, key: string, cx: number, cy: number, s: number): BakedPixels {
+  return chunkPixels(preparedMap(map, key), cx, cy, s);
+}
+
+/** 아직 만들지 않은 바닥 무늬 하나를 만듭니다 (쉬는 동안 조금씩). 더 만들 것이 남았으면 true */
+export function warmGroundTexture(): boolean {
+  const next = ALL_TEXTURES.find(([m, v]) => !hasGroundTexture(m, v));
+  if (!next) return false;
+  groundTexture(next[0], next[1]);
+  return ALL_TEXTURES.some(([m, v]) => !hasGroundTexture(m, v));
+}
+
+/** 조각 한 변 (겹침 포함) */
+export const CHUNK_OUT = OW;
+
+/** 소수 배율: 1배 조각을 화면 해상도로 부드럽게 늘림 (점 크기가 고르게) */
+function smoothUp(src: CanvasImageSource, dpr: number): HTMLCanvasElement {
   const n = Math.ceil(OW * dpr);
   const [c, x] = makeCanvas(n, n);
   x.imageSmoothingEnabled = true;
   x.imageSmoothingQuality = 'high';
-  x.drawImage(scr, 0, 0, OW * dpr, OW * dpr);
+  x.drawImage(src, 0, 0, OW * dpr, OW * dpr);
+  return c;
+}
+
+/** 밑그림 한 점이 덮는 CSS px (아직 굽지 못한 조각 자리에 잠깐 까는 흐린 그림이라 칸마다 4×2 점이면 충분) */
+const OVERVIEW_PX = 16;
+
+/** 맵 전체의 흐린 밑그림: 칸마다 바닥 재질의 대표 색 (액체·공허는 투명이라 아래 물이 비침) */
+function buildOverview(gm: GroundMap): HTMLCanvasElement {
+  const b = gm.bounds;
+  const w = Math.ceil((b.x1 - b.x0) / OVERVIEW_PX);
+  const h = Math.ceil((b.y1 - b.y0) / OVERVIEW_PX);
+  const colours = new Uint32Array(GROUND_COUNT);
+  for (let m = 1; m < GROUND_COUNT; m++) {
+    if (LIQ[m]) continue;
+    const r = paletteFor(m, gm.variant).ramps[0]!;
+    colours[m] = rgba32(r[Math.floor(r.length / 2)]!);
+  }
+  const [c, x] = makeCanvas(w, h);
+  const img = x.createImageData(w, h);
+  const out = new Uint32Array(img.data.buffer);
+  const g = gm.grid;
+  for (let j = 0; j < h; j++) {
+    const sy = b.y0 + (j + 0.5) * OVERVIEW_PX;
+    for (let i = 0; i < w; i++) {
+      const sx = b.x0 + (i + 0.5) * OVERVIEW_PX;
+      const tx = Math.floor((sx / 32 + sy / 16) / 2);
+      const ty = Math.floor((sy / 16 - sx / 32) / 2);
+      if (tx < 0 || ty < 0 || tx >= g.w || ty >= g.h) continue;
+      const m = g.base[ty * g.w + tx]!;
+      if (m < GROUND_COUNT) out[j * w + i] = colours[m]!;
+    }
+  }
+  x.putImageData(img, 0, 0);
   return c;
 }
 
@@ -1142,21 +1191,21 @@ export class Ground {
   private lastMap: MapView | null = null;
   private dpr = 1;
   private fresh = false;
-  private readonly chunks = new Lru<string, HTMLCanvasElement>(64, (_k, c) => {
-    // 캔버스 메모리를 바로 돌려줌
-    c.width = 0;
-    c.height = 0;
-  });
+  private readonly chunks = new Lru<string, BakedImage>(64, (_k, c) => disposeImage(c));
   private patterns = new Map<number, LiquidPatterns>();
   private patternCtx: CanvasRenderingContext2D | null = null;
+  /** 아직 굽지 못한 조각 자리에 깔 흐린 밑그림 (맵마다) */
+  private overview: HTMLCanvasElement | null = null;
   private warmQueue: (readonly [number, GroundVariant])[] | null = null;
   private warmTimer = false;
-  /** 확인용 통계: 지금까지 구운 조각 수와 시간, 마지막 프레임에 구운 수와 걸린 시간 */
-  readonly stats = { built: 0, ms: 0, lastFrameBuilt: 0, lastFrameMs: 0 };
+  /** 마지막 프레임에 보인 조각 수와 그 가운데 아직 굽지 못해 밑그림으로 대신한 수 */
+  visible = 0;
+  missing = 0;
 
-  constructor() {
-    // 로그인 화면처럼 한가할 때 바닥 무늬를 미리 만들어 둠
-    this.scheduleWarmup();
+  /** 조각은 굽기 일꾼(baker)의 작업자에서 굽고, 작업자를 못 쓰면 그 자리에서 굽습니다 (그때는 쉬는 시간에 바닥 무늬를 미리 만들어 둠) */
+  constructor(private readonly baker: Baker) {
+    baker.start();
+    if (!baker.async) this.scheduleWarmup();
   }
 
   /** 맵이 바뀌었으면 지형 격자를 다시 만듭니다 (같은 맵이면 아무 일도 안 함) */
@@ -1165,9 +1214,12 @@ export class Ground {
     this.lastMap = map;
     const key = tilesKey(map);
     if (this.gm && this.gm.key === key) return;
-    this.gm = prepareGroundMap(map, key);
+    // 작업자가 굽는다면 이쪽은 격자만 있으면 됨 (무늬는 작업자가 만듦)
+    this.gm = prepareGroundMap(map, key, !this.baker.async);
+    this.overview = null;
     this.fresh = true;
-    this.scheduleWarmup();
+    if (this.baker.async) this.baker.setMap(key, map);
+    else this.scheduleWarmup();
   }
 
   /** 화면 배율이 바뀌면 조각과 물 무늬를 새로 만듭니다 */
@@ -1180,7 +1232,7 @@ export class Ground {
   }
 
   /**
-   * 아직 만들지 않은 바닥 무늬를 쉬는 시간에 하나씩 미리 만듭니다.
+   * 아직 만들지 않은 바닥 무늬를 쉬는 시간에 하나씩 미리 만듭니다 (작업자를 못 쓸 때만).
    * (처음 가는 맵으로 순간이동할 때 무늬 만드는 시간까지 한 프레임에 몰리지 않게)
    */
   private scheduleWarmup(): void {
@@ -1204,28 +1256,59 @@ export class Ground {
     return `${this.gm!.key}|${this.dpr}`;
   }
 
-  private chunk(cx: number, cy: number): HTMLCanvasElement {
+  /**
+   * 조각 그림. 캐시에 없으면 작업자에게 굽기를 맡기고 null (prio: 작을수록 먼저).
+   * 작업자를 못 쓰면 그 자리에서 굽습니다.
+   */
+  private chunk(cx: number, cy: number, prio: number): BakedImage | null {
     const key = chunkKey(this.prefix(), cx, cy);
-    let c = this.chunks.get(key);
-    if (!c) {
-      const t0 = performance.now();
-      c = buildChunk(this.gm!, cx, cy, this.dpr);
-      this.chunks.set(key, c);
-      this.stats.built++;
-      this.stats.ms += performance.now() - t0;
+    const c = this.chunks.get(key);
+    if (c) return c;
+    const gm = this.gm!;
+    const dpr = this.dpr;
+    // 정수 배율이면 그 배율로 (텍셀을 그대로 늘림), 소수 배율이면 1배로 구워 받은 뒤 부드럽게 늘림
+    const s = Math.round(dpr) === dpr ? dpr : 1;
+    if (!this.baker.async) {
+      const px = chunkPixels(gm, cx, cy, s);
+      const img = s === dpr ? pixelsToCanvas(px) : smoothUp(pixelsToCanvas(px), dpr);
+      this.chunks.set(key, img);
+      return img;
     }
-    return c;
+    this.baker.request(key, { kind: 'chunk', map: gm.key, cx, cy, scale: s }, prio, (img) => {
+      if (!img) return;
+      // 굽는 동안 맵이나 배율이 바뀌었으면 버림
+      if (!this.gm || !key.startsWith(this.prefix() + '|')) {
+        disposeImage(img);
+        return;
+      }
+      if (s === this.dpr) this.chunks.set(key, img);
+      else {
+        this.chunks.set(key, smoothUp(img, this.dpr));
+        disposeImage(img);
+      }
+    });
+    return null;
+  }
+
+  /** 아직 굽지 못한 조각 자리: 맵 전체 밑그림의 그 부분을 부드럽게 늘려 깜 */
+  private drawStandIn(ctx: CanvasRenderingContext2D, gm: GroundMap, cx: number, cy: number, dx: number, dy: number): void {
+    this.overview ??= buildOverview(gm);
+    const b = gm.bounds;
+    const k = OW / OVERVIEW_PX;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(this.overview, (cx * CHUNK - b.x0) / OVERVIEW_PX, (cy * CHUNK - b.y0) / OVERVIEW_PX, k, k, dx, dy, Math.ceil(OW * this.dpr), Math.ceil(OW * this.dpr));
+    ctx.imageSmoothingEnabled = false;
   }
 
   /**
    * 바닥 그리기. ctx 는 (dpr 배율 + 카메라 offset) 이 걸린 상태여야 합니다.
    * 보이는 액체를 먼저 깔고 그 위에 조각(액체 자리는 투명)을 화면 픽셀에 1:1 로 붙입니다.
+   * 아직 굽지 못한 조각 자리에는 흐린 밑그림을 깔고 그 수를 missing 에 남깁니다.
    */
   draw(ctx: CanvasRenderingContext2D, offX: number, offY: number, cssW: number, cssH: number, now: number): void {
     const gm = this.gm;
     if (!gm) return;
     const t0 = performance.now();
-    const built0 = this.stats.built;
     const dpr = this.dpr;
     const view = { x0: -offX, y0: -offY, x1: cssW - offX, y1: cssH - offY };
     const vis = chunksByDistance(view, gm.bounds);
@@ -1234,36 +1317,51 @@ export class Ground {
       { x0: view.x0 - PREFETCH_MARGIN, y0: view.y0 - PREFETCH_MARGIN, x1: view.x1 + PREFETCH_MARGIN, y1: view.y1 + PREFETCH_MARGIN },
       gm.bounds,
     );
-    this.chunks.limit = Math.max(ring.length + 8, Math.floor(CACHE_BYTES / per));
+    this.chunks.limit = Math.max(ring.length + 8, Math.floor((CACHE_BYTES_PER_DPR * dpr) / per));
 
     if (gm.liquidBits) this.drawLiquids(ctx, gm, view, now);
 
-    // 보이는 조각은 지금 모두 굽습니다 (맵이 바뀐 첫 프레임, 순간이동, 창 크기 변경)
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
     const ox = Math.round(offX * dpr);
     const oy = Math.round(offY * dpr);
-    for (const [cx, cy] of vis) {
-      const c = this.chunk(cx, cy);
-      ctx.drawImage(c, Math.round(cx * CHUNK * dpr) + ox, Math.round(cy * CHUNK * dpr) + oy);
+    let missing = 0;
+    for (let i = 0; i < vis.length; i++) {
+      const [cx, cy] = vis[i]!;
+      // 보이는 조각은 벽·물체 그림(우선순위 1)보다 먼저, 가운데에서 가까운 것부터
+      const c = this.chunk(cx, cy, i / 100);
+      const dx = Math.round(cx * CHUNK * dpr) + ox;
+      const dy = Math.round(cy * CHUNK * dpr) + oy;
+      if (c) ctx.drawImage(c, dx, dy);
+      else {
+        missing++;
+        this.drawStandIn(ctx, gm, cx, cy, dx, dy);
+      }
     }
     ctx.restore();
+    this.visible = vis.length;
+    this.missing = missing;
 
-    // 둘레 조각은 프레임마다 조금씩 미리 굽기
-    if (!this.fresh) {
-      let n = this.stats.built - built0;
+    if (this.baker.async) {
+      // 둘레 조각은 보이는 것을 다 구운 뒤에 미리 굽기 (작업자에서)
+      const prefix = this.prefix();
+      for (let i = 0; i < ring.length; i++) {
+        const [cx, cy] = ring[i]!;
+        if (!this.chunks.has(chunkKey(prefix, cx, cy))) this.chunk(cx, cy, 1000 + i);
+      }
+    } else if (!this.fresh) {
+      // 그 자리에서 굽는다면: 둘레 조각은 프레임마다 조금씩 (맵이 바뀐 첫 프레임은 쉼)
+      let n = 0;
       const prefix = this.prefix();
       for (const [cx, cy] of ring) {
         if (n >= PREFETCH_PER_FRAME || performance.now() - t0 > PREFETCH_MS) break;
         if (this.chunks.has(chunkKey(prefix, cx, cy))) continue;
-        this.chunk(cx, cy);
+        this.chunk(cx, cy, 0);
         n++;
       }
     }
     this.fresh = false;
-    this.stats.lastFrameBuilt = this.stats.built - built0;
-    this.stats.lastFrameMs = performance.now() - t0;
   }
 
   private liquidPatterns(ctx: CanvasRenderingContext2D, mat: number): LiquidPatterns | null {

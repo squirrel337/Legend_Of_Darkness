@@ -2,7 +2,7 @@
 //
 // 모든 그림은 코드로 한 점씩 칠합니다 (pixel.ts). 빛은 왼쪽 위에서 오고, 외곽선은 같은 계열의 어두운 색이며,
 // 바닥에는 부드러운 타원 그림자를 깝니다. 다 그린 뒤 한 번만 캔버스로 옮겨 (모양, 변형, 배율, 이웃)별로 캐시합니다.
-// 배율은 Math.ceil(dpr) 정수라서 dpr 2 에서도 점이 또렷하고, 화면에는 CSS 크기로 그립니다.
+// 배율은 Math.ceil(dpr) 정수라서 dpr 2 에서도 점이 또렷하고, 화면에는 CSS 크기로 그립니다 (캐시와 굽기는 sprite-cache.ts).
 // 나무·덤불은 flora.ts, 바위는 rocks.ts, 벽은 walls.ts 에 있습니다.
 import { tileInfo, type TileInfo } from '../../shared/tiles';
 import { HALF_H, HALF_W, hash2, makeCanvas, seeded } from './iso';
@@ -11,7 +11,6 @@ import { CAVE_ROCK, boulderPile, rockSprite } from './rocks';
 import {
   Pix,
   blob,
-  buildAllowed,
   face,
   gloss,
   glow,
@@ -1173,49 +1172,21 @@ export function buildObject(ch: string, variant: number, scale = 1, links = 0): 
   return p;
 }
 
-export interface Sprite {
-  canvas: HTMLCanvasElement;
-  /** 캔버스 안의 발 위치 (CSS 픽셀) */
-  ox: number;
-  oy: number;
-  /** 화면에 그릴 CSS 크기 */
-  w: number;
-  h: number;
-  /** 매 프레임 따로 그리는 불꽃 자리 (발 기준 CSS 픽셀, 횃불만) */
-  flame?: { x: number; y: number; scale: number };
+/** 물체·나무 그림 상자 (발 위치 기준 CSS 픽셀). 그릴 모양이 없는 문자면 null */
+export function objectBox(ch: string): Box | null {
+  const shape = tileInfo(ch).shape;
+  return (shape && OBJECTS[shape]?.box) || null;
 }
 
-const objCache = new Map<string, Sprite>();
-/** 모양·배율·이웃 연결마다 처음 만든 그림 (예산을 넘긴 프레임에 잠깐 대신 씀) */
-const standIns = new Map<string, Sprite>();
-let emptySprite: Sprite | null = null;
+/** 매 프레임 따로 그리는 불꽃 자리 (발 기준 CSS 픽셀, 횃불만) */
+export function objectFlame(ch: string): { x: number; y: number; scale: number } | undefined {
+  return tileInfo(ch).shape === 'torch' ? { x: 0, y: -TORCH_TOP - 1, scale: 1 } : undefined;
+}
 
-/**
- * 물체·나무 그림 (캐시). scale 은 내부 해상도 배율(정수, 보통 Math.ceil(dpr)),
- * links 는 울타리처럼 이웃과 잇는 물체의 이웃 방향 비트 (1: x+1, 2: y+1, 4: x-1, 8: y-1).
- * now(프레임 시각)를 주면 한 프레임에 새로 만드는 시간을 제한하고, 넘치면 같은 모양의 다른 변형을 잠깐 씁니다.
- * 화면에는 drawImage(canvas, x - ox, y - oy, w, h) 로 CSS 크기에 맞춰 그립니다.
- */
-export function objectSprite(ch: string, variant: number, scale = 1, links = 0, now?: number): Sprite {
-  const info = tileInfo(ch);
-  const def = info.shape ? OBJECTS[info.shape] : undefined;
-  const s = Math.max(1, Math.round(scale));
-  const key = `${ch}:${((variant % VARIANTS) + VARIANTS) % VARIANTS}:${s}:${def?.linked ? links & 15 : 0}`;
-  let o = objCache.get(key);
-  if (o) return o;
-  const standKey = `${ch}:${s}:${def?.linked ? links & 15 : 0}`;
-  const stand = standIns.get(standKey);
-  if (stand && !buildAllowed(now)) return stand;
-  const p = buildObject(ch, variant, s, links);
-  if (!p) {
-    emptySprite ??= { canvas: makeCanvas(1, 1)[0], ox: 0, oy: 0, w: 1, h: 1 };
-    return emptySprite;
-  }
-  o = { canvas: p.toCanvas(), ox: -p.box.left, oy: -p.box.top, w: p.box.w, h: p.box.h };
-  if (info.shape === 'torch') o.flame = { x: 0, y: -TORCH_TOP - 1, scale: 1 };
-  objCache.set(key, o);
-  if (!stand) standIns.set(standKey, o);
-  return o;
+/** 울타리처럼 이웃과 잇는 물체인지 (그림이 이웃 방향 비트에 따라 달라짐) */
+export function objectLinked(ch: string): boolean {
+  const shape = tileInfo(ch).shape;
+  return !!(shape && OBJECTS[shape]?.linked);
 }
 
 // ───────────────────────── 불꽃 (매 프레임) ─────────────────────────

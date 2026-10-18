@@ -6,7 +6,7 @@ import { TILE_H, TILE_W } from '../../shared/constants';
 import { tileInfo } from '../../shared/tiles';
 import { HALF_H, HALF_W, WALL_H, hash2, seeded } from './iso';
 import { barkFn } from './flora';
-import { Pix, buildAllowed, grain, lathe, mixc, ramp, rgb, rod, speckle, stamp, tone, type RGB, type Ramp } from './pixel';
+import { Pix, grain, lathe, mixc, ramp, rgb, rod, speckle, stamp, tone, type RGB, type Ramp } from './pixel';
 
 /** 낮은 돌담의 높이 (보통 벽의 절반) */
 export const LOW_WALL_H = 20;
@@ -358,27 +358,4 @@ function wallSconce(p: Pix, side: number, T0: number): void {
   rod(l, x, y + 8, 1.4, x, y, 1.2, barkFn(POST_WOOD, 5));
   lathe(l, x, y + 1, 3, (h) => 1.6 + h * 0.5, (q) => tone(q.top ? GLASS : IRON, q.top ? 0.5 : q.v, q.ix, q.iy));
   stamp(p, l, IRON);
-}
-
-const wallCache = new Map<string, HTMLCanvasElement>();
-/** 벽 문자·배율·이웃 연결마다 처음 만든 그림 (예산을 넘긴 프레임에 잠깐 대신 씀) */
-const standIns = new Map<string, HTMLCanvasElement>();
-
-/**
- * 벽 그림 (캐시). 화면에는 drawImage(canvas, 타일 꼭대기 x - HALF_W, 타일 꼭대기 y - WALL_H, TILE_W, TILE_H + WALL_H).
- * now(프레임 시각)를 주면 한 프레임에 새로 만드는 시간을 제한하고, 넘치면 같은 벽·같은 이웃 연결의 다른 변형을 잠깐 씁니다.
- */
-export function wallCanvas(ch: string, scale = 1, variant = 0, links = 0, sconce = false, now?: number): HTMLCanvasElement {
-  const s = Math.max(1, Math.round(scale));
-  const key = `${ch}:${s}:${((variant % VARIANTS) + VARIANTS) % VARIANTS}:${links & 15}:${sconce ? 1 : 0}`;
-  let c = wallCache.get(key);
-  if (c) return c;
-  // 대신 쓸 그림은 이웃 연결이 같은 것 (면이 빠지거나 겹치지 않게), 변형만 다름
-  const standKey = `${ch}:${s}:${links & 15}:${sconce ? 1 : 0}`;
-  const stand = standIns.get(standKey);
-  if (stand && !buildAllowed(now)) return stand;
-  c = buildWall(ch, s, variant, links, sconce).toCanvas();
-  wallCache.set(key, c);
-  if (!stand) standIns.set(standKey, c);
-  return c;
 }
