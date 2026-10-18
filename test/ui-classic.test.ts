@@ -462,13 +462,13 @@ test('도트 글꼴: woff2 파일과 OFL 라이선스가 함께 있고, CSS 와 
   assert.match(css, new RegExp(`--font-pixel:\\s*'${PIXEL_FONT}', 'Gulim', '굴림', 'Dotum', '돋움'`));
 });
 
-test('외침·공지·운영자 알림은 고전 노란 글씨, 다른 대화도 어두운 메시지 줄에서 잘 읽힌다', () => {
+test('외침·공지·운영자 알림은 원작 R2 메시지 줄의 초록 글씨, 다른 대화도 어두운 메시지 줄에서 잘 읽힌다', () => {
   const msgBg = '#130904';
   for (const sel of ['.ch-shout', '.ch-notice', '.ch-gm']) {
     const [r, g, b] = rgb(cssColor(sel));
-    assert.ok(r >= 0xe0 && g >= 0xd0 && b <= 0x70, `${sel} 이(가) 노란색이 아님: ${cssColor(sel)}`);
+    assert.ok(g >= 0xc0 && r <= 0x90 && b <= 0x70, `${sel} 이(가) 초록색이 아님: ${cssColor(sel)}`);
   }
-  assert.equal(cssColor('.ch-shout').toLowerCase(), '#f0e040');
+  assert.equal(cssColor('.ch-shout').toLowerCase(), '#70d050');
   for (const ch of ['say', 'shout', 'whisper', 'group', 'system', 'notice', 'gm', 'error']) {
     const c = cssColor(`.ch-${ch}`);
     assert.ok(contrast(c, msgBg) >= 7, `.ch-${ch} ${c} 대비 ${contrast(c, msgBg).toFixed(1)}`);

@@ -93,7 +93,7 @@ export class ChatBox {
     this.input.focus();
   }
 
-  /** 화면 알림을 아래 메시지 줄에도 남깁니다 (원작처럼 알림은 노란 글씨, 경고는 붉은 글씨) */
+  /** 화면 알림을 아래 메시지 줄에도 남깁니다 (원작처럼 알림은 초록 글씨, 경고는 붉은 글씨) */
   notice(text: string, kind: 'info' | 'warn' | 'good' = 'info'): void {
     this.lineText.className = `msg-text ${kind === 'warn' ? 'ch-error' : 'ch-notice'}`;
     this.lineText.textContent = text;
