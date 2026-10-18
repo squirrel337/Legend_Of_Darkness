@@ -261,6 +261,13 @@ test('정적 파일: 경로 탐색은 막힌다', async () => {
   assert.ok(index.headers.get('content-security-policy'));
 });
 
+test('정적 파일: 도트 글꼴은 font/woff2 로 보낸다', async () => {
+  const res = await fetch(`http://127.0.0.1:${srv.port}/fonts/GalmuriMono11.woff2`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'font/woff2');
+  assert.ok((await res.arrayBuffer()).byteLength > 1000);
+});
+
 test('저장: 서버를 다시 켜도 캐릭터가 남아 있다', async () => {
   player.close();
   admin.close();
