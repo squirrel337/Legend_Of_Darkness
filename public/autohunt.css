@@ -1,0 +1,228 @@
+/* 자동사냥: '자동' 단추, 진행 표시줄, 설정 창 (style.css 의 가죽·금박 색을 그대로 씁니다) */
+
+/* 켜져 있으면 금박으로 빛나는 '자동' 단추 */
+.menu-btn.auto-btn.on {
+  color: #2a1606;
+  background: linear-gradient(#f0cf78, #c29238 60%, #9c7128);
+  box-shadow: inset 0 1px 0 rgba(255, 245, 210, 0.6), 0 0 8px rgba(255, 210, 120, 0.55);
+}
+
+.menu-btn.auto-btn.on svg {
+  animation: auto-turn 2.4s linear infinite;
+}
+
+@keyframes auto-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 화면 아래 가운데, 패널 바로 위의 진행 표시줄 */
+.auto-bar {
+  position: fixed;
+  bottom: calc(var(--hud-h) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  background: var(--grain), linear-gradient(rgba(74, 45, 25, 0.95), rgba(44, 26, 14, 0.95));
+  border: 1px solid #120904;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(217, 180, 90, 0.55), 0 4px 12px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  max-width: calc(100vw - 24px);
+  z-index: 6;
+}
+
+.auto-bar b {
+  color: var(--gold-2);
+  letter-spacing: 1px;
+}
+
+.auto-bar .auto-sep {
+  color: var(--gold-dk);
+}
+
+.auto-bar .auto-state {
+  min-width: 84px;
+  color: var(--text);
+}
+
+.auto-bar[data-state='fighting'] .auto-state {
+  color: #ffc9a8;
+}
+
+.auto-bar[data-state='healing'] .auto-state,
+.auto-bar[data-state='resting'] .auto-state {
+  color: var(--good);
+}
+
+.auto-bar[data-state='returning'] .auto-state,
+.auto-bar[data-state='idle'] .auto-state {
+  color: var(--muted);
+}
+
+/* 도는 금빛 고리 */
+.auto-spin {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(217, 180, 90, 0.3);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: auto-turn 1.1s linear infinite;
+  flex: 0 0 auto;
+}
+
+/* 설정 창 */
+.win-auto {
+  width: 430px;
+}
+
+.win-auto .section-title {
+  margin: 8px 0 4px;
+}
+
+.win-auto .section-title:first-child {
+  margin-top: 0;
+}
+
+.auto-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+}
+
+.auto-label {
+  flex: 0 0 34px;
+  color: var(--muted);
+}
+
+.auto-row input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  height: 6px;
+  accent-color: var(--gold);
+  box-shadow: none;
+  border: 0;
+  background: transparent;
+}
+
+.auto-row .qty-input {
+  width: 64px;
+}
+
+.auto-val {
+  flex: 0 0 150px;
+  color: var(--gold-2);
+  font-size: 12px;
+}
+
+.auto-checks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+  margin-top: 6px;
+}
+
+.auto-check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.auto-check input,
+.auto-ab input {
+  accent-color: var(--gold);
+  margin: 0;
+}
+
+.auto-abilities {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 32vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.auto-ab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  background: rgba(16, 8, 3, 0.4);
+  border: 1px solid rgba(18, 9, 4, 0.7);
+  border-radius: 3px;
+}
+
+.auto-ab.on {
+  background: rgba(120, 84, 30, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(217, 180, 90, 0.35);
+}
+
+.auto-ab img {
+  width: 24px;
+  height: 24px;
+}
+
+.auto-ab-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-ab-name small {
+  color: var(--dim);
+}
+
+.auto-ab-role {
+  color: var(--gold);
+  font-size: 11px;
+}
+
+.auto-ab .btn.tiny {
+  width: 22px;
+  padding: 0;
+}
+
+.win-auto .hint {
+  margin-top: 4px;
+}
+
+.auto-foot {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.auto-foot-gap {
+  flex: 1;
+}
+
+@media (max-width: 720px) {
+  .win-auto {
+    width: calc(100vw - 24px);
+  }
+  .auto-val {
+    flex-basis: 104px;
+  }
+  .auto-checks {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-btn.auto-btn.on svg,
+  .auto-spin {
+    animation: none;
+  }
+}
