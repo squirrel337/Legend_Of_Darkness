@@ -7,8 +7,7 @@ import { Effects, type Point } from './effects';
 import { HALF_H, HALF_W, WALL_H, diamondPath, hash2, makeCanvas, screenToTile, tileCenter, tileTop, withAlpha } from './iso';
 import { ambienceFor, type Ambience } from './ambience';
 import { Atmosphere } from './atmosphere';
-import type { ChibiPose } from './chibi';
-import { CLASSIC_HALF_WIDTH, CLASSIC_HEAD_TOP, classicHeadTop, drawClassicFast } from './classic';
+import { CLASSIC_HALF_WIDTH, CLASSIC_HEAD_TOP, classicHeadTop, drawClassicFast, type ClassicPose } from './classic';
 import { Ground } from './ground';
 import { drawGroundItem, drawMonster } from './sprites';
 import { drawFlame, objectSprite, wallCanvas } from './tiles';
@@ -366,7 +365,7 @@ export class Renderer {
       const hidden = e.statuses.includes('hide');
       const alpha = hidden ? (e.id === this.state.selfId ? 0.45 : 0.18) : e.ghost ? 0.62 : 1;
       if (look) {
-        const pose: ChibiPose = {
+        const pose: ClassicPose = {
           dir: e.dir,
           walk,
           step: (e.x + e.y) & 1,

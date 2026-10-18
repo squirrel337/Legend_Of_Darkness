@@ -75,7 +75,7 @@ function shadowCanvas(scale: number): HTMLCanvasElement {
 }
 
 /**
- * 게임 화면용으로 사람 캐릭터를 그립니다 (drawChibiFast 와 같은 약속).
+ * 게임 화면용으로 사람 캐릭터를 그립니다 (발밑 그림자 포함, 왼쪽을 보면 좌우를 뒤집음).
  * ctx 의 원점이 발 위치이고 1 단위 = 1 CSS px. dpr 은 화면 배율.
  */
 export function drawClassicFast(ctx: CanvasRenderingContext2D, look: HumanLook, pose: ClassicPose, dpr: number): void {

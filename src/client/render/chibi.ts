@@ -1,6 +1,7 @@
 // 치비(SD) 스타일 사람 캐릭터 그리기.
 // 큰 머리와 큰 눈, 굵은 외곽선, 직업별 의상을 모두 코드로 그립니다 (이미지 파일 없음).
-// 좌표는 발 위치(0,0) 기준, 위쪽이 음수 y. 게임 화면에서는 1 단위 = 1 CSS 픽셀입니다.
+// 초상화(아래 패널·캐릭터 창·NPC 대화)와 접속 화면에만 씁니다. 맵 위의 사람은 classic.ts 의 도트 캐릭터입니다.
+// 좌표는 발 위치(0,0) 기준, 위쪽이 음수 y. 1 단위 = 1 CSS 픽셀이고 초상화는 확대해서 그립니다.
 // 기본 그림은 오른쪽(동/북)을 바라보는 3/4 시점이고, 왼쪽을 볼 때는 좌우를 뒤집습니다.
 import type { ClassId, Dir } from '../../shared/constants';
 import type { HumanLook, IconShape } from '../../shared/types';
@@ -18,8 +19,6 @@ export interface ChibiPose {
   ghost?: boolean;
   /** 일러스트용 멋진 자세 (무기를 옆으로 들고 다른 손을 듦) */
   showcase?: boolean;
-  /** 눈 깜빡임을 강제로 정함 (프레임 캐시용) */
-  blink?: boolean;
   /** 야수화 상태 (사나운 기운과 빛나는 눈) */
   beast?: boolean;
 }
@@ -460,7 +459,7 @@ function computeRig(look: HumanLook, p: ChibiPose): Rig {
     armOther: dual ? (wpn === 'gauntlet' ? 0.1 : 0.12) : -0.06,
     weapon: restW,
     mouth: 'smile',
-    blink: p.blink ?? (!p.showcase && t % 3600 < 120),
+    blink: !p.showcase && t % 3600 < 120,
     sway: Math.sin(((t % IDLE_MS) / IDLE_MS) * Math.PI * 2) * 0.8,
     cast: 0,
     weapon2: wpn === 'dualsword' ? 0.55 : restW,
@@ -4322,91 +4321,6 @@ export function drawChibi(ctx: CanvasRenderingContext2D, look: HumanLook, pose: 
   if (pose.dir === 2 || pose.dir === 3) ctx.scale(-1, 1);
   ctx.translate(0, -d.rig.float);
   drawBody(d);
-  ctx.restore();
-}
-
-// ───────────────────────── 게임 화면용 프레임 캐시 ─────────────────────────
-// 캐릭터를 매 프레임 벡터로 그리면 무거워서, 자세를 몇 단계로 나눈 그림을 만들어 두고 복사해 씁니다.
-
-/** 프레임 그림의 범위 (발 기준, CSS 픽셀) */
-const FW = 84;
-const FH = 92;
-const FOX = 42;
-const FOY = 82;
-const WALK_FRAMES = 8;
-const ACT_FRAMES = 8;
-const IDLE_FRAMES = 6;
-const MAX_CACHE_PIXELS = 12_000_000;
-
-const frameCache = new Map<string, HTMLCanvasElement>();
-let cachedPixels = 0;
-const lookKeys = new WeakMap<HumanLook, string>();
-
-function lookKey(look: HumanLook): string {
-  let k = lookKeys.get(look);
-  if (!k) {
-    k = JSON.stringify(look);
-    lookKeys.set(look, k);
-  }
-  return k;
-}
-
-/**
- * 게임 화면용으로 캐릭터를 그립니다 (같은 자세는 미리 그린 그림을 재사용).
- * dpr 은 화면 배율 (선명하게 그리기 위해).
- */
-export function drawChibiFast(ctx: CanvasRenderingContext2D, look: HumanLook, pose: ChibiPose, dpr: number): void {
-  const ghost = pose.ghost === true;
-  const front = pose.dir === 1 || pose.dir === 2;
-  const beast = pose.beast === true && !ghost;
-  // 자세를 몇 단계로 나눕니다
-  let anim: string;
-  const q: ChibiPose = { dir: front ? 1 : 0, walk: null, act: null, time: 1000, blink: false, ghost, beast };
-  if (pose.act !== null && !ghost) {
-    const f = Math.min(ACT_FRAMES - 1, Math.floor(pose.act * ACT_FRAMES));
-    const kind = pose.actKind === 'cast' ? 'cast' : 'attack';
-    anim = `${kind[0]}${f}`;
-    q.act = (f + 0.5) / ACT_FRAMES;
-    q.actKind = kind;
-  } else if (pose.walk !== null && !ghost) {
-    const f = Math.min(WALK_FRAMES - 1, Math.floor(pose.walk * WALK_FRAMES));
-    const step = pose.step ?? 0;
-    anim = `w${step}${f}`;
-    q.walk = (f + 0.5) / WALK_FRAMES;
-    q.step = step;
-  } else {
-    const ph = Math.floor(((pose.time % IDLE_MS) / IDLE_MS) * IDLE_FRAMES);
-    const blink = !ghost && pose.time % 3600 < 120;
-    anim = `i${ph}${blink ? 'b' : ''}`;
-    q.time = ((ph + 0.5) / IDLE_FRAMES) * IDLE_MS;
-    q.blink = blink;
-  }
-  const scale = Math.max(1, Math.min(3, Math.round(dpr * 2) / 2));
-  const key = `${lookKey(look)}|${front ? 'F' : 'B'}|${ghost ? 'g' : ''}${beast ? 'x' : ''}|${anim}|${scale}`;
-  let frame = frameCache.get(key);
-  if (frame) {
-    // 최근에 쓴 것을 뒤로 (오래 안 쓴 것부터 지움)
-    frameCache.delete(key);
-    frameCache.set(key, frame);
-  } else {
-    frame = document.createElement('canvas');
-    frame.width = Math.ceil(FW * scale);
-    frame.height = Math.ceil(FH * scale);
-    const fc = frame.getContext('2d')!;
-    fc.setTransform(scale, 0, 0, scale, FOX * scale, FOY * scale);
-    drawBody(makeDraw(fc, look, q, false));
-    frameCache.set(key, frame);
-    cachedPixels += frame.width * frame.height;
-    for (const [k, c] of frameCache) {
-      if (cachedPixels <= MAX_CACHE_PIXELS) break;
-      frameCache.delete(k);
-      cachedPixels -= c.width * c.height;
-    }
-  }
-  ctx.save();
-  drawShadow(ctx, ghost);
-  if (pose.dir === 2 || pose.dir === 3) ctx.scale(-1, 1);
-  ctx.drawImage(frame, -FOX, -FOY - (ghost ? ghostFloat(pose.time) : 0), FW, FH);
   ctx.restore();
 }
 
