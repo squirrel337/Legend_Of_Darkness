@@ -5,6 +5,7 @@ import {
   DIR_DY,
   SKILL_GCD_MS,
   SPELL_GCD_MS,
+  STATUS_IDS,
   STATUS_INFO,
   dirTowards,
   formatNumber,
@@ -30,11 +31,28 @@ import type { Player } from '../world/Player';
 import type { World } from '../world/World';
 import { dropToGround } from './ground';
 import { gainExp } from './progression';
+import { dismissSummons, summonCreatures, summonDied } from './summons';
 
-const rand = Math.random;
+// 테스트에서 Math.random 을 바꿔 끼울 수 있도록 호출할 때마다 찾습니다
+const rand = () => Math.random();
 const randInt = (a: number, b: number) => a + Math.floor(rand() * (b - a + 1));
 const isPlayer = (c: Creature): c is Player => c.kind === 'player';
 const isMonster = (c: Creature): c is Monster => c.kind === 'monster';
+/** 소환수 (주인이 있는 몬스터) */
+const isSummon = (c: Creature): c is Monster => isMonster(c) && c.owner !== null;
+/** 야생 몬스터 (주인이 없는 몬스터) */
+const isWild = (c: Creature): c is Monster => isMonster(c) && c.owner === null;
+
+/** 플레이어 편인지 (플레이어와 소환수). 아니면 몬스터 편(야생 몬스터) */
+export function onPlayerSide(c: Creature): boolean {
+  return isPlayer(c) || isSummon(c);
+}
+
+/** 신속: 평타/기술 재사용 대기에 곱하는 배율 (최소 0.5) */
+export function hasteFactor(c: Creature): number {
+  const h = c.statuses.get('haste');
+  return h ? Math.max(0.5, 1 - h.potency / 100) : 1;
+}
 
 // ───────────────────────── 상태 효과 ─────────────────────────
 
@@ -78,7 +96,8 @@ export function removeStatus(target: Creature, id: StatusId): void {
   broadcastStatuses(target);
 }
 
-const DEBUFFS: StatusId[] = ['poison', 'curse', 'sleep', 'paralyze'];
+/** 해로운 상태 (중독, 저주, 수면, 마비, 출혈, 표식 …) */
+const DEBUFFS: StatusId[] = STATUS_IDS.filter((id) => STATUS_INFO[id].kind === 'debuff');
 
 export function cleanseDebuffs(target: Creature): void {
   for (const id of DEBUFFS) removeStatus(target, id);
@@ -95,8 +114,8 @@ export function tickStatuses(c: Creature, now: number): void {
     }
     if (now < s.nextTickAt) continue;
     s.nextTickAt = now + 1000;
-    if (s.id === 'poison' && !c.isDead) {
-      // 중독으로는 죽지 않습니다 (체력 1 남김)
+    if ((s.id === 'poison' || s.id === 'bleed') && !c.isDead) {
+      // 중독/출혈로는 죽지 않습니다 (체력 1 남김)
       let dmg = Math.round(s.potency + s.sourceLevel * 1.5);
       if (c.hp - dmg < 1) dmg = c.hp - 1;
       if (dmg > 0 && !(isPlayer(c) && c.god)) {
@@ -127,6 +146,11 @@ export function applyDamage(world: World, src: Creature | null, target: Creature
   let dmg = amount;
   const iron = target.statuses.get('ironskin');
   if (iron) dmg *= 1 - Math.min(90, iron.potency) / 100;
+  // 야수화: 받는 피해 10% 감소
+  if (target.statuses.has('beast')) dmg *= 0.9;
+  // 표식: 받는 피해 증가
+  const mark = target.statuses.get('mark');
+  if (mark) dmg *= 1 + mark.potency / 100;
   dmg = Math.max(1, Math.round(dmg));
   const before = target.hp;
   target.hp = Math.max(0, target.hp - dmg);
@@ -135,8 +159,10 @@ export function applyDamage(world: World, src: Creature | null, target: Creature
   if (target.statuses.has('sleep')) removeStatus(target, 'sleep');
   if (isMonster(target)) {
     target.lastDamagedAt = now;
-    if (src && isPlayer(src)) {
-      target.addDamage(src, Math.min(dmg, before));
+    // 소환수가 준 피해는 주인 몫(경험치/전리품)으로 치고, 몬스터는 때린 소환수를 노립니다
+    const credit = src && isSummon(src) ? src.owner : src;
+    if (src && credit && isPlayer(credit) && isWild(target)) {
+      target.addDamage(credit, Math.min(dmg, before));
       if (!target.target || target.target.isDead || target.target.map !== target.map) {
         target.target = src;
         target.chaseSince = now;
@@ -182,9 +208,14 @@ interface PhysOpts {
 /** 물리 공격 한 번 (플레이어 또는 몬스터) */
 export function physicalAttack(world: World, attacker: Creature, target: Creature, o: PhysOpts): number {
   const hitBonus = isPlayer(attacker) ? attacker.derived.hit : 0;
-  if (rand() > hitChance(attacker.dex, attacker.level, target.dex, target.level, hitBonus)) {
+  const evade = target.statuses.get('evade');
+  const missed =
+    rand() > hitChance(attacker.dex, attacker.level, target.dex, target.level, hitBonus) ||
+    // 회피: 그만큼(%) 더 잘 피합니다
+    (evade !== undefined && rand() < evade.potency / 100);
+  if (missed) {
     emitDamage(target, 0, 'miss');
-    if (isMonster(target) && isPlayer(attacker) && !target.target) {
+    if (isWild(target) && onPlayerSide(attacker) && !target.target) {
       target.target = attacker;
       target.chaseSince = Date.now();
     }
@@ -198,6 +229,8 @@ export function physicalAttack(world: World, attacker: Creature, target: Creatur
     if (o.hideBonus && o.wasHidden) base *= 1 + o.hideBonus;
     const might = attacker.statuses.get('might');
     if (might) base *= 1 + might.potency / 100;
+    const beast = attacker.statuses.get('beast');
+    if (beast) base *= 1 + beast.potency / 100;
     if (rand() < critChance(d.dex, o.critBonus ?? 0)) {
       crit = true;
       base *= CRIT_MULT;
@@ -207,6 +240,8 @@ export function physicalAttack(world: World, attacker: Creature, target: Creatur
     base = randInt(m.stats.dmg[0], m.stats.dmg[1]) * o.mult;
     const might = m.statuses.get('might');
     if (might) base *= 1 + might.potency / 100;
+    const beast = m.statuses.get('beast');
+    if (beast) base *= 1 + beast.potency / 100;
   }
   const dmg = base * acMultiplier(target.ac) * elementMultiplier(o.element, target.defenseElement);
   return applyDamage(world, attacker, target, dmg, crit ? 'crit' : 'phys');
@@ -242,6 +277,8 @@ function killMonster(world: World, m: Monster): void {
   const x = m.x;
   const y = m.y;
   map.remove(m, 'death');
+  // 소환수는 아무에게도 보상을 주지 않고 생성기와도 상관없습니다
+  if (m.owner) return summonDied(m);
   m.spawner?.onDeath(m, now);
 
   // 가장 많은 피해를 준 (접속 중인) 플레이어가 경험치와 전리품을 받습니다
@@ -309,6 +346,7 @@ function killPlayer(world: World, p: Player, killer: Creature | null): void {
   p.hp = 0;
   p.data.deaths++;
   p.statuses.clear();
+  dismissSummons(world, p, '쓰러지자 소환수가 돌아갔습니다.');
   const pen = world.config.deathExpPenalty;
   let lost = 0;
   if (pen > 0 && p.data.exp > 0) {
@@ -362,20 +400,41 @@ export function canFight(p: Player): string | null {
 }
 
 /**
- * 평타. targetId 는 원거리 무기(활)로 노릴 대상 (근접 무기는 무시하고 앞 칸을 칩니다).
- * TODO(원거리): 사거리 안의 대상 공격은 아직 구현되지 않았습니다.
+ * 평타. 근접 무기는 바라보는 앞 칸을 칩니다.
+ * 원거리 무기(활, 사거리 > 1)는 targetId 대상(사거리 안의 적)을, 없으면 가장 가까운 적을 쏩니다.
  */
 export function playerAssail(world: World, p: Player, targetId?: unknown, now = Date.now()): void {
-  void targetId;
   const map = p.map;
   if (!map || p.isDead || !p.canAct) return;
   if (now < p.nextAssailAt) return;
-  p.nextAssailAt = now + ASSAIL_COOLDOWN_MS;
+  p.nextAssailAt = now + Math.round(ASSAIL_COOLDOWN_MS * hasteFactor(p));
+  const wasHidden = p.hasStatus('hide');
+  const range = p.derived.range;
+  if (range > 1) {
+    // 원거리: 대상을 정하고 그쪽을 바라본 뒤 화살을 날립니다 (대상이 없으면 헛손질)
+    let target: Creature | undefined;
+    if (!map.safe) {
+      const picked = typeof targetId === 'number' ? map.entities.get(targetId) : undefined;
+      if (picked && (picked.kind === 'player' || picked.kind === 'monster')) {
+        const c = picked as Creature;
+        if (hostile(p, c) && chebyshev(p, c) <= range) target = c;
+      }
+      target ??= nearestHostile(p, range);
+    }
+    if (target) faceTowards(p, target);
+    map.broadcast({ t: 'act', id: p.id, a: 'attack', dir: p.dir });
+    if (!target) return;
+    breakHide(p);
+    const el = p.offenseElement;
+    map.broadcast({ t: 'fx', fx: 'arrow', id: target.id, from: p.id, el });
+    physicalAttack(world, p, target, { mult: 1, element: el, wasHidden });
+    return;
+  }
   map.broadcast({ t: 'act', id: p.id, a: 'attack', dir: p.dir });
   if (map.safe) return;
-  const wasHidden = p.hasStatus('hide');
-  const target = map.creatureAt(p.x + DIR_DX[p.dir]!, p.y + DIR_DY[p.dir]!);
-  if (!target || !isMonster(target) || target.isDead) return;
+  const target = frontCreature(p);
+  // 같은 편(다른 플레이어, 소환수)은 때리지 않습니다
+  if (!target || !hostile(p, target)) return;
   breakHide(p);
   physicalAttack(world, p, target, { mult: 1, element: p.offenseElement, wasHidden });
 }
@@ -386,38 +445,53 @@ function chebyshev(a: { x: number; y: number }, b: { x: number; y: number }): nu
   return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 }
 
-/** 시전자 기준 적대 관계인지 */
-function hostile(caster: Creature, c: Creature): boolean {
+/**
+ * 시전자 기준 적대 관계인지.
+ * 플레이어 편(플레이어 + 소환수)과 몬스터 편(야생 몬스터)이 서로 적입니다. 무적 플레이어는 대상이 아닙니다.
+ */
+export function hostile(caster: Creature, c: Creature): boolean {
   if (c === caster || c.isDead) return false;
-  if (isPlayer(caster)) return isMonster(c);
-  return isPlayer(c) && !c.god;
+  if (onPlayerSide(caster) === onPlayerSide(c)) return false;
+  return !(isPlayer(c) && c.god);
 }
 
-function friendly(caster: Creature, c: Creature): boolean {
-  if (isPlayer(caster)) return isPlayer(c);
-  return isMonster(c);
+/** 같은 편인지 (회복/강화 대상) */
+export function friendly(caster: Creature, c: Creature): boolean {
+  return onPlayerSide(caster) === onPlayerSide(c);
 }
 
 function frontCreature(c: Creature): Creature | undefined {
   return c.map?.creatureAt(c.x + DIR_DX[c.dir]!, c.y + DIR_DY[c.dir]!);
 }
 
-function nearestHostile(caster: Creature, range: number): Creature | undefined {
+/** 대상 쪽으로 돌아섭니다 (주변에 알림) */
+function faceTowards(c: Creature, t: { x: number; y: number }): void {
+  const d = dirTowards(c.x, c.y, t.x, t.y);
+  if (d !== null && d !== c.dir) {
+    c.dir = d as Dir;
+    c.map?.broadcast({ t: 'turn', id: c.id, dir: c.dir });
+  }
+}
+
+/** 사거리(체비쇼프 거리) 안에서 가장 가까운 적. 바라보는 방향에 있는 대상을 약간 우선합니다 */
+export function nearestHostile(caster: Creature, range: number): Creature | undefined {
   const map = caster.map;
   if (!map) return undefined;
   let best: Creature | undefined;
   let bestScore = Infinity;
-  const pool: Iterable<Creature> = isPlayer(caster) ? map.monsters : map.players;
-  for (const c of pool) {
-    if (!hostile(caster, c)) continue;
-    const d = chebyshev(caster, c);
-    if (d > range) continue;
-    // 바라보는 방향에 있는 대상을 약간 우선
-    const facing = dirTowards(caster.x, caster.y, c.x, c.y) === caster.dir ? -0.5 : 0;
-    const score = d + facing;
-    if (score < bestScore) {
-      best = c;
-      bestScore = score;
+  // 플레이어 편의 적은 야생 몬스터뿐, 몬스터 편의 적은 플레이어와 소환수
+  const pools: Iterable<Creature>[] = onPlayerSide(caster) ? [map.monsters] : [map.players, map.monsters];
+  for (const pool of pools) {
+    for (const c of pool) {
+      if (!hostile(caster, c)) continue;
+      const d = chebyshev(caster, c);
+      if (d > range) continue;
+      const facing = dirTowards(caster.x, caster.y, c.x, c.y) === caster.dir ? -0.5 : 0;
+      const score = d + facing;
+      if (score < bestScore) {
+        best = c;
+        bestScore = score;
+      }
     }
   }
   return best;
@@ -561,20 +635,35 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
       }
       continue;
     }
+    if (e.type === 'summon') {
+      // 소환은 대상과 상관없이 한 번 (플레이어만 소환수를 거느립니다)
+      if (isPlayer(caster)) summonCreatures(world, caster, e);
+      continue;
+    }
     for (const t of list) {
       if (!t.map || (t.isDead && e.type !== 'revive')) continue;
       const el = elementFor(def, caster, e);
       switch (e.type) {
-        case 'physical':
-          physicalAttack(world, caster, t, {
-            mult: e.mult,
-            bonus: e.bonus,
-            critBonus: e.critBonus,
-            hideBonus: e.hideBonus,
-            wasHidden,
-            element: el,
-          });
+        case 'physical': {
+          // 연타: 한 번마다 명중/치명타를 따로 판정하고, 대상이 쓰러지면 멈춥니다
+          const hits = Math.max(1, Math.min(5, e.hits ?? 1));
+          let dealt = 0;
+          for (let i = 0; i < hits && !t.isDead && t.map; i++) {
+            const before = t.hp;
+            physicalAttack(world, caster, t, {
+              mult: e.mult,
+              bonus: e.bonus,
+              critBonus: e.critBonus,
+              hideBonus: e.hideBonus,
+              wasHidden,
+              element: el,
+            });
+            dealt += Math.max(0, before - t.hp);
+          }
+          // 흡혈: 실제로 깎은 체력의 일부만큼 시전자 회복
+          if (e.lifesteal && dealt > 0 && !caster.isDead) healCreature(caster, caster, Math.max(1, Math.round(dealt * e.lifesteal)), false);
           break;
+        }
         case 'magic':
           magicAttack(world, caster, t, e, el);
           break;
@@ -637,6 +726,11 @@ export function playerUseAbility(world: World, p: Player, abilityId: unknown, ta
   if (p.isDead) return p.err('유령 상태에서는 사용할 수 없습니다.');
   if (!p.canAct) return p.err('지금은 행동할 수 없습니다.');
   if (map.safe && OFFENSIVE(def)) return p.err('마을 안에서는 싸울 수 없습니다.');
+  // 소환은 마나/재사용 대기를 쓰기 전에 미리 확인합니다
+  if (def.effects.some((e) => e.type === 'summon')) {
+    if (map.safe) return p.err('마을에서는 소환할 수 없습니다.');
+    if (!map.findFreeNear(p.x, p.y, 4)) return p.err('소환수가 나타날 자리가 없습니다.');
+  }
   if (now < p.gcdUntil) return;
   const cd = p.cooldowns.get(def.id) ?? 0;
   if (now < cd) return p.err(`${def.name}: ${((cd - now) / 1000).toFixed(1)}초 후에 다시 사용할 수 있습니다.`);
@@ -647,13 +741,7 @@ export function playerUseAbility(world: World, p: Player, abilityId: unknown, ta
     const pre = resolveTargets(ctx);
     if (typeof pre === 'string') return p.err(pre);
     const t = pre[0];
-    if (t && t !== p) {
-      const d = dirTowards(p.x, p.y, t.x, t.y);
-      if (d !== null && d !== p.dir) {
-        p.dir = d as Dir;
-        map.broadcast({ t: 'turn', id: p.id, dir: p.dir });
-      }
-    }
+    if (t && t !== p) faceTowards(p, t);
     return castNow(world, p, ctx, pre, now);
   }
   const targets = resolveTargets(ctx);
@@ -665,10 +753,13 @@ function castNow(world: World, p: Player, ctx: CastContext, targets: Creature[],
   const def = ctx.def;
   if (!p.god) p.mp -= def.mp;
   p.markVitals();
-  p.gcdUntil = now + (def.kind === 'spell' ? SPELL_GCD_MS : SKILL_GCD_MS);
+  // 신속이면 공용 대기와 재사용 대기가 줄어듭니다
+  const haste = hasteFactor(p);
+  p.gcdUntil = now + Math.round((def.kind === 'spell' ? SPELL_GCD_MS : SKILL_GCD_MS) * haste);
   if (def.cooldownMs > 0) {
-    p.cooldowns.set(def.id, now + def.cooldownMs);
-    p.send({ t: 'cooldown', id: def.id, ms: def.cooldownMs });
+    const ms = Math.round(def.cooldownMs * haste);
+    p.cooldowns.set(def.id, now + ms);
+    p.send({ t: 'cooldown', id: def.id, ms });
   }
   const wasHidden = p.hasStatus('hide');
   const appliesHide = def.effects.some((e) => e.type === 'status' && e.status === 'hide');
@@ -677,8 +768,8 @@ function castNow(world: World, p: Player, ctx: CastContext, targets: Creature[],
   runEffects(world, ctx, targets, wasHidden);
 }
 
-/** 몬스터가 기술/마법을 사용합니다. 사용했으면 true */
-export function monsterUseAbility(world: World, m: Monster, def: AbilityDef, target: Player): boolean {
+/** 몬스터(소환수 포함)가 기술/마법을 사용합니다. 사용했으면 true */
+export function monsterUseAbility(world: World, m: Monster, def: AbilityDef, target: Creature): boolean {
   if (!m.map || m.dead || !m.canAct) return false;
   const ctx: CastContext = { def, caster: m, forcedTarget: target };
   const range = def.range ?? 7;
