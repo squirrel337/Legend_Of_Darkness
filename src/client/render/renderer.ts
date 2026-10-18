@@ -237,6 +237,15 @@ export class Renderer {
     }
 
     // 6) 깊이 정렬 그리기
+    // 벽·물체 그림은 화면 배율에 맞춘 정수 배율로 미리 그려 두고 CSS 크기로 옮겨 그립니다 (dpr 2 에서도 또렷함)
+    const ps = Math.max(1, Math.ceil(this.dpr));
+    // 칸의 벽 높이 (0: 벽 아님, 1: 낮은 담, 2: 보통 벽과 벽에 붙은 횃불)
+    const wallLevel = (x: number, y: number): number => {
+      if (x < 0 || y < 0 || x >= W || y >= H) return 0;
+      if (this.wallLike.has(y * W + x)) return 2;
+      const n = tileInfo(map.tiles[y]![x]);
+      return n.kind === 'wall' ? (n.low ? 1 : 2) : 0;
+    };
     const list: Drawable[] = [];
     for (let y = 0; y < H; y++) {
       const row = map.tiles[y]!;
@@ -248,23 +257,39 @@ export class Renderer {
         if (!visible(x, y)) continue;
         const t = tileTop(x, y);
         if (info.kind === 'wall' || asWall) {
+          // 같은 높이 이상의 이웃 벽 (1: x+1, 2: y+1, 4: x-1, 8: y-1): 가려지는 면은 생략하고 윗면은 잇습니다
+          const lv = wallLevel(x, y);
+          const links =
+            (wallLevel(x + 1, y) >= lv ? 1 : 0) | (wallLevel(x, y + 1) >= lv ? 2 : 0) | (wallLevel(x - 1, y) >= lv ? 4 : 0) | (wallLevel(x, y - 1) >= lv ? 8 : 0);
+          const wc = wallCanvas(asWall ?? ch, ps, Math.floor(hash2(x, y, 3) * 4), links, !!asWall, now);
+          // 벽 횃불은 보이는 면 가운데의 받침 위에서 탑니다. 앞의 두 면이 다 가려졌으면 뒤쪽 면에 달린 것으로 보고
+          // 벽보다 먼저 그려서 벽 너머로 불꽃 끝만 보이게 합니다 (뒤도 다 막혔으면 불꽃 없이 빛만)
+          const front = !(links & 2) || !(links & 1);
+          const fx = !(links & 2) ? -HALF_W / 2 : HALF_W / 2;
+          const bx = !(links & 8) ? HALF_W / 2 : !(links & 4) ? -HALF_W / 2 : null;
           list.push({
             depth: x + y,
             order: 0,
             draw: () => {
-              ctx.drawImage(wallCanvas(asWall ?? ch), t.sx - HALF_W, t.sy - WALL_H);
-              if (asWall) drawFlame(ctx, t.sx, t.sy - WALL_H / 2 + 6, now, 0.9);
+              if (asWall && !front && bx !== null) drawFlame(ctx, t.sx + bx, t.sy - WALL_H + 10, now, 0.8);
+              ctx.drawImage(wc, t.sx - HALF_W, t.sy - WALL_H, TILE_W, TILE_H + WALL_H);
+              if (asWall && front) drawFlame(ctx, t.sx + fx, t.sy - 4, now, 0.8);
             },
           });
         } else {
-          const spr = objectSprite(ch, Math.floor(hash2(x, y, 7) * 4));
+          // 울타리는 이웃 울타리 쪽으로 밧줄을 잇습니다
+          const links =
+            info.shape === 'fence'
+              ? (row[x + 1] === ch ? 1 : 0) | (map.tiles[y + 1]?.[x] === ch ? 2 : 0) | (row[x - 1] === ch ? 4 : 0) | (map.tiles[y - 1]?.[x] === ch ? 8 : 0)
+              : 0;
+          const spr = objectSprite(ch, Math.floor(hash2(x, y, 7) * 4), ps, links, now);
           list.push({
             depth: x + y,
             order: 0,
             draw: () => {
               const c = tileCenter(x, y);
-              ctx.drawImage(spr.canvas, c.sx - spr.ox, c.sy - spr.oy);
-              if (info.shape === 'torch') drawFlame(ctx, c.sx, c.sy - 44, now);
+              ctx.drawImage(spr.canvas, c.sx - spr.ox, c.sy - spr.oy, spr.w, spr.h);
+              if (spr.flame) drawFlame(ctx, c.sx + spr.flame.x, c.sy + spr.flame.y, now, spr.flame.scale);
             },
           });
         }
