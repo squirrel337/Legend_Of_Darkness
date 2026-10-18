@@ -6,6 +6,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { DEFAULT_AUTO_SETTINGS, sanitizeAutoSettings, type AutoSettings } from '../src/shared/autohunt';
 import { startServer, type RunningServer } from '../src/server/app';
+import { AUTO_STEP_MS, autoHuntTick } from '../src/server/systems/autohunt';
 import { countItem } from '../src/server/systems/character';
 import { applyDamage, applyStatus } from '../src/server/systems/combat';
 import { dropToGround } from '../src/server/systems/ground';
@@ -27,6 +28,15 @@ const cheb = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.
 async function join(name: string): Promise<{ c: Client; p: Player }> {
   const c = await Client.connect(srv.port);
   create(c, name);
+  await c.waitFor('welcome');
+  await c.self();
+  return { c, p: srv.world.findPlayer(name)! };
+}
+
+/** 앞에서 만든 캐릭터로 다시 접속합니다 (새 캐릭터는 10개를 이미 다 만들었음) */
+async function rejoin(name: string): Promise<{ c: Client; p: Player }> {
+  const c = await Client.connect(srv.port);
+  c.send({ t: 'login', name, password: 'pass1234' });
   await c.waitFor('welcome');
   await c.self();
   return { c, p: srv.world.findPlayer(name)! };
@@ -352,6 +362,22 @@ test('직접 걸으면 멈추고, 캐릭터가 쓰러져도 멈춘다', async ()
   place(p, at);
   let mark = startAuto(c);
   await c.waitFor('auto', (m) => m.on, mark);
+  // 서버가 걷게 한 걸음을 아직 받지 못한 클라이언트가 옛 자리에서 걸어도(거절되는 걸음) 바로 멈추고,
+  // 위치를 바로잡아 준 뒤로는 서버가 더 걷게 하지 않습니다
+  mark = c.mark;
+  c.send({ t: 'walk', dir: 2, x: p.x + 5, y: p.y });
+  const stale = await c.waitFor('auto', (m) => !m.on, mark);
+  assert.match(stale.reason ?? '', /직접/);
+  await c.waitFor('pos', () => true, mark);
+  assert.equal(p.auto, null);
+  const corrected = c.mark;
+  const stoppedAt = { x: p.x, y: p.y };
+  await sleep(700);
+  assert.deepEqual({ x: p.x, y: p.y }, stoppedAt);
+  assert.equal(c.msgs.slice(corrected).filter((m) => m.t === 'walk' && m.id === p.id).length, 0);
+
+  mark = startAuto(c);
+  await c.waitFor('auto', (m) => m.on, mark);
   mark = c.mark;
   c.send({ t: 'walk', dir: 2, x: p.x, y: p.y });
   const off = await c.waitFor('auto', (m) => !m.on, mark);
@@ -365,5 +391,198 @@ test('직접 걸으면 멈추고, 캐릭터가 쓰러져도 멈춘다', async ()
   const dead = await c.waitFor('auto', (m) => !m.on, mark);
   assert.match(dead.reason ?? '', /쓰러져/);
   assert.equal(p.auto, null);
+  c.close();
+});
+
+test('범위 기술은 그룹이 아닌 다른 사람이 싸우는 몬스터를 함께 맞히지 않는다', async () => {
+  clearField();
+  const { c, p } = await rejoin('사냥꾼');
+  const admin = srv.world.admin;
+  const other = gm.p;
+  assert.ok(admin.setLevel(GM, p.name, 30).ok);
+  assert.ok(admin.setClass(GM, p.name, 'warrior').ok);
+  assert.ok(admin.learnAll(GM, p.name).ok);
+  for (const id of ['w_whirl', 'w_quake', 'w_cleave']) assert.ok(p.data.skills.includes(id));
+  p.hp = p.maxHp;
+  p.mp = p.maxMp;
+  const at = openSpot(4);
+  place(p, at);
+  place(other, { x: at.x, y: at.y + 3 });
+  other.data.godMode = true;
+  // 다른 사람이 싸우는 몬스터: 내 바로 아래 (주변 4칸·8칸 기술에 맞는 자리)
+  const theirs = spawn('goblin', at.x, at.y + 1);
+  theirs.target = other;
+  theirs.damageBy.set(other.name, 5);
+  freeze(theirs);
+  // 내 사냥감: 내 오른쪽
+  const mine = spawn('goblin', at.x + 1, at.y);
+  mine.target = p;
+  freeze(mine);
+  startAuto(c, { radius: 6 });
+  await until(() => mine.dead, 15_000);
+  assert.equal(theirs.damageBy.has(p.name), false, '남이 싸우는 몬스터는 주변 기술에도 맞지 않음');
+  assert.equal(theirs.hp, theirs.maxHp);
+
+  // 함께 맞는 몬스터가 모두 내 사냥감이면 주변 기술을 씁니다
+  stopAll(p);
+  clearField();
+  place(p, at);
+  p.cooldowns.clear();
+  p.mp = p.maxMp;
+  const pair = [spawn('goblin', at.x + 1, at.y), spawn('goblin', at.x - 1, at.y)];
+  for (const m of pair) {
+    m.target = p;
+    freeze(m);
+  }
+  startAuto(c, { radius: 6 });
+  await until(() => p.cooldowns.has('w_whirl') || p.cooldowns.has('w_quake'), 6000);
+
+  // 대상 지정 범위 마법: 대상 옆에 남이 싸우는 몬스터가 있으면 한 대상 마법만 씁니다
+  stopAll(p);
+  clearField();
+  assert.ok(admin.setLevel(GM, p.name, 45).ok);
+  assert.ok(admin.setClass(GM, p.name, 'wizard').ok);
+  assert.ok(admin.learnAll(GM, p.name).ok);
+  assert.ok(p.data.spells.includes('z_fire3'));
+  p.cooldowns.clear();
+  p.hp = p.maxHp;
+  p.mp = p.maxMp;
+  place(p, at);
+  place(other, { x: at.x + 3, y: at.y + 3 });
+  other.data.godMode = true;
+  const target = spawn('goblin', at.x + 3, at.y);
+  target.target = p;
+  freeze(target);
+  const beside = spawn('goblin', at.x + 3, at.y + 1);
+  beside.target = other;
+  beside.damageBy.set(other.name, 5);
+  freeze(beside);
+  startAuto(c, { radius: 6 });
+  await until(() => target.dead, 15_000);
+  assert.equal(beside.damageBy.has(p.name), false, '대상 옆의 남이 싸우는 몬스터는 범위 마법에 맞지 않음');
+  stopAll(p, other);
+  c.close();
+});
+
+test('필살로 스스로 깎은 체력은 맞은 피해로 치지 않는다 (귀환 주문서·엘릭서를 낭비하지 않음)', async () => {
+  clearField();
+  const { c, p } = await rejoin('제자리');
+  const admin = srv.world.admin;
+  assert.ok(admin.setLevel(GM, p.name, 60).ok);
+  assert.ok(admin.setClass(GM, p.name, 'warrior').ok);
+  assert.ok(admin.learnAbility(GM, p.name, 'w_crash').ok);
+  // 물약은 없고 귀환 주문서는 있음
+  p.data.inventory = p.data.inventory.map((s) => (s && s.item.startsWith('pot_') ? null : s));
+  if (countItem(p.data, 'scroll_recall') === 0) assert.ok(admin.giveItem(GM, p.name, 'scroll_recall', 1).ok);
+  const scrolls = countItem(p.data, 'scroll_recall');
+  p.cooldowns.set('first_aid', Date.now() + 120_000);
+  p.hp = p.maxHp;
+  const at = openSpot(3);
+  place(p, at);
+  // 나를 노리지만 움직이지 못하는 단단한 몬스터 (실제로 때리지는 않음)
+  const boss = spawn('dark_lord', at.x + 1, at.y);
+  boss.target = p;
+  freeze(boss);
+  const settings = { hpPct: 30, recall: true, abilities: ['w_crash'], buffs: false, radius: 6 };
+  let mark = startAuto(c, settings);
+  await until(() => p.cooldowns.has('w_crash'), 5000);
+  assert.ok(p.hp <= Math.ceil(p.maxHp * 0.55), '필살로 체력을 절반 씀');
+  await sleep(1200);
+  assert.ok(p.auto, '체력이 기준보다 높으면 계속 사냥함');
+  assert.equal(p.map, field);
+  assert.equal(countItem(p.data, 'scroll_recall'), scrolls, '귀환 주문서를 쓰지 않음');
+  assert.equal(c.msgs.slice(mark).some((m) => m.t === 'auto' && !m.on), false, '꺼졌다는 알림이 없음');
+
+  // 필살 뒤 기준 아래로 내려가도 위급한 것은 아니므로 엘릭서가 아닌 보통 물약을 마십니다
+  assert.ok(admin.giveItem(GM, p.name, 'pot_hp_3', 5).ok);
+  assert.ok(admin.giveItem(GM, p.name, 'elixir', 2).ok);
+  const elixirs = countItem(p.data, 'elixir');
+  const pots = countItem(p.data, 'pot_hp_3');
+  p.cooldowns.delete('w_crash');
+  p.hp = p.maxHp;
+  mark = startAuto(c, { ...settings, hpPct: 60 });
+  await until(() => countItem(p.data, 'pot_hp_3') < pots, 5000);
+  assert.ok(p.cooldowns.has('w_crash'));
+  assert.equal(countItem(p.data, 'elixir'), elixirs, '엘릭서는 위급할 때만');
+  stopAll(p);
+  c.close();
+});
+
+test('회복 마법이 공용 대기만 기다리는 중이면 물약 대신 잠깐 기다렸다가 마법으로 회복한다', async () => {
+  clearField();
+  const { c, p } = await rejoin('물약러');
+  const admin = srv.world.admin;
+  assert.ok(admin.setLevel(GM, p.name, 10).ok);
+  assert.ok(admin.setClass(GM, p.name, 'priest').ok);
+  assert.ok(admin.learnAbility(GM, p.name, 'p_heal').ok);
+  assert.ok(admin.giveItem(GM, p.name, 'pot_hp_1', 5).ok);
+  place(p, openSpot(3));
+  const pots = countItem(p.data, 'pot_hp_1');
+  // 응급 처치는 쓰지 못하게 하고, 방금 공격 마법을 써서 공용 대기(GCD) 중인 것처럼
+  p.cooldowns.set('first_aid', Date.now() + 120_000);
+  p.mp = p.maxMp;
+  p.hp = Math.floor(p.maxHp * 0.8);
+  const hpBefore = p.hp;
+  p.gcdUntil = Date.now() + 450;
+  startAuto(c, { hpPct: 90 });
+  await until(() => p.cooldowns.has('p_heal'), 3000);
+  assert.equal(countItem(p.data, 'pot_hp_1'), pots, '공용 대기 동안 물약을 마시지 않음');
+  assert.ok(p.hp > hpBefore, '치유 마법으로 회복');
+  await sleep(500);
+  assert.equal(countItem(p.data, 'pot_hp_1'), pots);
+  stopAll(p);
+  c.close();
+});
+
+test('쓸 기술로 회복·강화 기술만 골랐으면 공격 기술은 알아서 고른다', async () => {
+  clearField();
+  const { c, p } = await rejoin('양보왕');
+  const admin = srv.world.admin;
+  assert.ok(admin.setLevel(GM, p.name, 12).ok);
+  assert.ok(admin.setClass(GM, p.name, 'warrior').ok);
+  assert.ok(admin.learnAbility(GM, p.name, 'w_strike').ok);
+  p.hp = p.maxHp;
+  p.mp = p.maxMp;
+  const at = openSpot(3);
+  place(p, at);
+  const orc = spawn('orc', at.x + 1, at.y);
+  orc.target = p;
+  freeze(orc);
+  startAuto(c, { abilities: ['first_aid'], autoAbilities: true });
+  await until(() => p.cooldowns.has('w_strike'), 5000);
+  stopAll(p);
+  c.close();
+});
+
+test('100ms 틱에서도 한 칸을 평균 AUTO_STEP_MS 정도에 걷고, 직접 걷기보다 빠르지는 않다', async () => {
+  clearField();
+  const { c, p } = await rejoin('설정왕');
+  place(p, openSpot(6));
+  const world = srv.world;
+  const mark = startAuto(c, { radius: 12 });
+  await c.waitFor('auto', (m) => m.on, mark);
+  // 실제 틱을 멈추고 100ms 틱을 흉내 내어 걸음 간격을 잽니다
+  world.stop();
+  const steps: number[] = [];
+  try {
+    let t = Date.now();
+    let last = { x: p.x, y: p.y };
+    for (let i = 0; i < 80; i++, t += 100) {
+      autoHuntTick(world, p, t);
+      if (p.x !== last.x || p.y !== last.y) {
+        steps.push(t);
+        last = { x: p.x, y: p.y };
+      }
+    }
+  } finally {
+    world.start();
+  }
+  assert.ok(p.auto, '계속 켜져 있음');
+  assert.ok(steps.length >= 20, `찾는 동안 계속 걸음 (${steps.length}걸음)`);
+  const gaps = steps.slice(1).map((v, i) => v - steps[i]!);
+  const avg = (steps[steps.length - 1]! - steps[0]!) / (steps.length - 1);
+  assert.ok(avg <= AUTO_STEP_MS + 20, `평균 ${avg.toFixed(0)}ms (틱에 맞추기만 하면 300ms)`);
+  assert.ok(Math.min(...gaps) >= 200, `가장 짧은 간격 ${Math.min(...gaps)}ms`);
+  stopAll(p);
   c.close();
 });
