@@ -116,8 +116,9 @@ export class SkillTreeWindow {
     if (this.hover && !this.nodes.has(this.hover)) this.hover = null;
 
     const lay = layoutTree(tree);
-    // 창 너비는 트리에 맞춤 (탭·요약 줄이 들어갈 만큼은 넓게, 너무 넓은 트리는 칸 안에서 스크롤)
-    this.win.el.style.width = `${Math.min(TREE_WIN_MAX_W, Math.max(TREE_WIN_MIN_W, lay.width + 26))}px`;
+    // 창 너비는 트리에 맞춤 (탭·요약 줄이 들어갈 만큼은 넓게, 너무 넓은 트리는 칸 안에서 스크롤).
+    // 넓은 화면에서 정보 칸이 옆에 붙는 몫은 CSS 가 더함 (progression.css 의 --tree-w)
+    this.win.el.style.setProperty('--tree-w', `${Math.min(TREE_WIN_MAX_W, Math.max(TREE_WIN_MIN_W, lay.width + 26))}px`);
     const board = h('div', { class: 'gt-board', style: { width: `${lay.width}px`, height: `${lay.height}px` } });
     this.svg = this.edges(lay, ctx);
     board.appendChild(this.svg);
@@ -212,8 +213,8 @@ export class SkillTreeWindow {
         ),
       ),
       note ? h('div', { class: 'gt-note' }, note) : null,
-      tree.nodes.length ? this.boardWrap : h('div', { class: 'gt-empty' }, '이 직업에는 배울 기술이 없습니다.'),
-      this.info,
+      // 트리 칸 + 정보 칸 (넓은 화면에서는 정보 칸이 옆으로 가서 트리 칸이 창 높이를 다 씀)
+      h('div', { class: 'gt-main' }, tree.nodes.length ? this.boardWrap : h('div', { class: 'gt-empty' }, '이 직업에는 배울 기술이 없습니다.'), this.info),
     );
     if (keep) {
       this.boardWrap.scrollLeft = keep.left;
@@ -321,13 +322,13 @@ export class SkillTreeWindow {
     const status = id ? this.statuses.get(id) : undefined;
     const teacher = teacherOf(cls, st.className(cls));
     if (!id || !node || !status) {
+      // 트리 칸이 넓게 보이도록 안내는 두 줄로 (숙련도의 자세한 설명은 칸에 마우스를 올리면, 도움말(H)에도 있음)
       el.replaceChildren(
         h(
           'div',
           { class: 'gt-hint' },
-          h('div', null, `기술·마법은 ${teacher}에게서 배웁니다. 조건(레벨·골드·재료·선수과목의 숙련도)을 모두 채우면 배울 수 있습니다.`),
-          h('div', null, `숙련도는 기술을 쓸 때마다 확률로 1씩 올라 최대 ${st.data.progression.proficiency.max} 이 되고, 높을수록 위력과 상태 이상 확률이 커집니다.`),
-          h('div', { class: 'dim' }, '칸에 마우스를 올리면 조건을 보여 주고, 누르면 고정합니다. 오른쪽 아래 숫자는 숙련도, 선 위의 숫자는 필요 숙련도입니다.'),
+          h('div', null, `기술·마법은 ${teacher}에게서, 조건(레벨·골드·재료·선수과목 숙련도)을 모두 채우면 배웁니다.`),
+          h('div', { class: 'dim' }, `칸에 마우스를 올리면 조건, 누르면 고정 · 칸 오른쪽 아래 숫자는 숙련도(최대 ${st.data.progression.proficiency.max}), 선 위의 숫자는 필요 숙련도`),
         ),
       );
       return;
