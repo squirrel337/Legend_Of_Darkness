@@ -302,8 +302,14 @@ export function bezierPoint(
 /**
  * 선수과목 선: 위 줄의 칸이면 아래 가운데에서 이 칸 위 가운데로 휘어 내려오고, 같은 줄이면 옆면끼리,
  * (편집기에서 거꾸로 놓은) 아래 줄의 칸이면 위 가운데에서 이 칸 아래로 올라갑니다.
+ * lane 을 주면 (같은 열의 사이 칸을 가로지르지 않게) 열 사이의 빈 길 x = lane 으로 비켜 내려갑니다.
  */
-export function edgeGeometry(a: { x: number; y: number }, b: { x: number; y: number }, node = TREE_NODE): { d: string; badge: { x: number; y: number } } {
+export function edgeGeometry(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  node = TREE_NODE,
+  lane?: number,
+): { d: string; badge: { x: number; y: number } } {
   const r = (v: number) => Math.round(v * 10) / 10;
   const half = node / 2;
   if (a.y === b.y) {
@@ -316,6 +322,15 @@ export function edgeGeometry(a: { x: number; y: number }, b: { x: number; y: num
   // 위 줄 → 아래 줄: 이름표 밑에서 출발 (선이 이름을 가로지르지 않게)
   const p0 = { x: a.x + half, y: down ? a.y + node + TREE_LABEL_H - 4 : a.y };
   const p3 = { x: b.x + half, y: down ? b.y : b.y + node + TREE_LABEL_H - 4 };
+  if (lane !== undefined) {
+    // 옆길: 나가서 꺾고(k), 길을 따라 곧게, 다시 꺾어 들어옴. 필요 숙련도는 들어오기 직전 길 위에
+    const dir = Math.sign(p3.y - p0.y);
+    const k = Math.min(14, Math.abs(p3.y - p0.y) / 4) * dir;
+    const d =
+      `M ${r(p0.x)} ${r(p0.y)} C ${r(p0.x)} ${r(p0.y + k)}, ${r(lane)} ${r(p0.y + k)}, ${r(lane)} ${r(p0.y + 2 * k)} ` +
+      `L ${r(lane)} ${r(p3.y - 2 * k)} C ${r(lane)} ${r(p3.y - k)}, ${r(p3.x)} ${r(p3.y - k)}, ${r(p3.x)} ${r(p3.y)}`;
+    return { d, badge: { x: r(lane), y: r(p3.y - 2 * k - 8 * dir) } };
+  }
   const bend = (p3.y - p0.y) / 2;
   const p1 = { x: p0.x, y: p0.y + bend };
   const p2 = { x: p3.x, y: p3.y - bend };
@@ -370,7 +385,12 @@ export function layoutTree(tree: SkillTreeConfig): TreeLayout {
         (external[c.node.ability] ??= []).push(r);
         continue;
       }
-      const g = edgeGeometry(from, c);
+      // 같은 열에서 줄을 건너뛰는데 그 사이에 다른 칸이 있으면 열 사이의 빈 길로 비켜 감 (마지막 열이면 왼쪽 길)
+      const lo = Math.min(from.y, c.y);
+      const hi = Math.max(from.y, c.y);
+      const blocked = from.x === c.x && cells.some((o) => o !== from && o !== c && o.x === c.x && o.y > lo && o.y < hi);
+      const lane = blocked ? c.x + TREE_NODE / 2 + (c.node.col < cols - 1 ? TREE_COL_W / 2 : -TREE_COL_W / 2) : undefined;
+      const g = edgeGeometry(from, c, TREE_NODE, lane);
       edges.push({ from: r.ability, to: c.node.ability, prof: r.prof, d: g.d, badge: g.badge });
     }
   }

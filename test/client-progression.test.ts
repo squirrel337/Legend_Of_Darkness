@@ -353,6 +353,33 @@ test('선수과목 선: 위 줄 → 아래 줄은 이름표 밑에서 휘어 내
   assert.deepEqual(p, { x: 50, y: 50 });
 });
 
+test('선수과목 선: 같은 열에서 사이 칸을 건너뛰면 열 사이의 빈 길로 비켜 간다 (마지막 열은 왼쪽 길)', () => {
+  const tree: SkillTreeConfig = {
+    nodes: [
+      node('a', 0, 0),
+      node('b', 1, 0, { requires: [{ ability: 'a', prof: 20 }] }),
+      node('c', 2, 0, { requires: [{ ability: 'a', prof: 30 }, { ability: 'b', prof: 10 }] }),
+      node('d', 0, 1),
+      node('e', 2, 1, { requires: [{ ability: 'd', prof: 0 }] }),
+    ],
+  };
+  const lay = layoutTree(tree);
+  const edge = (from: string, to: string) => lay.edges.find((e) => e.from === from && e.to === to)!;
+  const ax = lay.cells.find((c) => c.node.ability === 'a')!.x;
+  const lane = ax + TREE_NODE / 2 + TREE_COL_W / 2;
+  // a → c 는 b 를 가로지르므로 오른쪽 길, a → b·b → c 는 바로 아래라 곧은 곡선
+  assert.ok(edge('a', 'c').d.includes(`L ${lane} `), edge('a', 'c').d);
+  assert.equal(edge('a', 'c').badge.x, lane);
+  assert.ok(!edge('a', 'b').d.includes('L '));
+  assert.ok(!edge('b', 'c').d.includes('L '));
+  // 마지막 열(1)의 d → e 는 사이 칸이 없으니 곧은 곡선
+  assert.ok(!edge('d', 'e').d.includes('L '));
+  // 마지막 열에서 막히면 왼쪽 길
+  const last = layoutTree({ nodes: [node('p', 0, 1), node('q', 1, 1), node('r', 2, 1, { requires: [{ ability: 'p', prof: 5 }] }), node('s', 0, 0)] });
+  const px = last.cells.find((c) => c.node.ability === 'p')!.x;
+  assert.ok(last.edges[0]!.d.includes(`L ${px + TREE_NODE / 2 - TREE_COL_W / 2} `), last.edges[0]!.d);
+});
+
 test('수인 계통 열: 한 열의 기술이 모두 같은 계통이면 그 계통, 섞였거나 계통이 없으면 아님', () => {
   const tree: SkillTreeConfig = {
     columns: ['발톱', '야성', '포유류', '조류', '혼합'],
