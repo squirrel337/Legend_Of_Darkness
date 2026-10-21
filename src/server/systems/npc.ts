@@ -1,4 +1,5 @@
-// NPC 대화와 서비스: 상점, 전직, 기술 배우기, 부활, 창고, 이동, 승급, 능력치 초기화
+// NPC 대화와 서비스: 상점, 직업 선택, 기술 배우기(스킬트리), 전직(환골탈태), 승급 장인(승급·교환), 2차 전직,
+// 부활, 창고, 이동, 능력치 초기화. 성장 체계의 규칙은 progression.ts, 대화 선택지 key 는 docs/progression.md 8.4
 import {
   CLASS_FALLBACK_NAMES,
   NPC_TALK_RANGE,
@@ -6,19 +7,25 @@ import {
   formatNumber,
   type Dir,
 } from '../../shared/constants';
-import { isFirstClass } from '../../shared/progression';
+import {
+  bigNumber,
+  classTier,
+  isFirstClass,
+  rebirthName,
+  secondClassesOf,
+  type ConditionCheck,
+  type ConditionResult,
+} from '../../shared/progression';
 import type { NpcService } from '../../shared/types';
 import type { DialogOption } from '../../shared/protocol';
 import type { Npc } from '../world/Npc';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
 import {
-  abilityAllowedFor,
   addItem,
   addToStorage,
   canFit,
   equipError,
-  learnOnData,
   resetStatsOnData,
   setClassOnData,
   stackSize,
@@ -26,7 +33,25 @@ import {
   unequipToBag,
 } from './character';
 import { cleanseDebuffs, revivePlayer } from './combat';
-import { learnEntries } from './progression';
+import {
+  ascendOnData,
+  beastTypeName,
+  checkAscend,
+  checkRebirth,
+  checkSecondJob,
+  chooseBeastTypeOnData,
+  classBaseVitals,
+  knownBeastType,
+  learnEntries,
+  learnFromTree,
+  pureVitals,
+  rebirthOffered,
+  rebirthOnData,
+  secondJobOnData,
+  tradeExpOnData,
+  tradeHpForStatOnData,
+  tradeLimits,
+} from './progression';
 
 /** 유령은 대화와 부활만, 잠들거나 마비된 상태에서는 아무 서비스도 쓸 수 없습니다 */
 const GHOST_KEYS = new Set(['close', 'back', 'talk', 'about', 'revive']);
@@ -74,6 +99,12 @@ function mainOptions(world: World, p: Player, npc: Npc): DialogOption[] {
         else if (p.data.classId === 'peasant' && isFirstClass(s.classId))
           opts.push({ key: `class:${s.classId}`, label: `${className(world, s.classId)}의 길 걷기 (직업 선택)` });
         else if (p.data.classId === s.classId) opts.push({ key: `learn:${s.classId}`, label: '기술/마법 배우기' });
+        // 99레벨 1차 직업: 이 길드장의 직업으로 전직 (무도가는 무도 사범에게 환골탈태)
+        if (rebirthOffered(p.data, world.data, s.classId))
+          opts.push({
+            key: `rebirth:${s.classId}`,
+            label: `${rebirthName(p.data.classId, world.data.progression)}: ${className(world, s.classId)}(으)로 다시 태어나기`,
+          });
         opts.push({ key: `about:${s.classId}`, label: `${className(world, s.classId)}에 대해 듣기` });
         break;
       case 'revive':
@@ -83,7 +114,12 @@ function mainOptions(world: World, p: Player, npc: Npc): DialogOption[] {
         opts.push({ key: 'heal', label: s.price ? `치료받기 (${formatNumber(s.price)} 골드)` : '치료받기 (무료)' });
         break;
       case 'ascend':
-        opts.push({ key: 'ascend', label: '승급 (경험치 → 체력/마나)' });
+        opts.push({ key: 'ascend', label: '승급 장인의 일 (승급·체력/마나·능력치)' });
+        break;
+      case 'secondJob':
+        opts.push({ key: 'second', label: '2차 전직' });
+        // 계통이 없는 수인 (이 체계 전에 수인이 된 캐릭터)
+        if (p.data.classId === 'beastkin' && !knownBeastType(world.data, p.data.beastType)) opts.push({ key: 'beast', label: '수인 계통 고르기' });
         break;
       case 'teleport':
         opts.push({ key: `tp:${i}`, label: s.label ?? '이동하기' });
@@ -132,8 +168,9 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
   const npc = npcFor(p, npcId, keyRaw.split(':')[0]);
   if (!npc) return;
   p.talkingTo = npc;
-  const [key, arg, arg2] = keyRaw.split(':') as [string, string | undefined, string | undefined];
-  const back = { key: 'back', label: '돌아가기' };
+  const parts = keyRaw.split(':');
+  const [key, arg, arg2] = parts as [string, string | undefined, string | undefined];
+  const back = BACK;
   switch (key) {
     case 'close':
       p.talkingTo = null;
@@ -239,30 +276,17 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
       sendDialog(p, npc, '상처가 모두 아물었습니다.', [back, { key: 'close', label: '대화 끝내기' }]);
       return;
     }
-    case 'ascend': {
+    case 'rebirth':
+      return rebirthDialog(world, p, npc, arg, arg2 === 'yes');
+    case 'ascend':
       if (!service(npc, 'ascend')) return;
-      // 교환 비율은 gamedata/progression.json 의 ascend (승급·체력→능력치 교환은 엔진 트랙이 붙임)
-      const asc = world.data.progression.ascend;
-      const trade = asc.expTrade;
-      const max = Math.min(asc.level, world.config.maxLevel);
-      if (p.level < max) return sendDialog(p, npc, `승급은 ${max}레벨이 된 자만 할 수 있다. 더 수련하고 오게.`, [back]);
-      const cost = trade.exp;
-      const text = `쌓인 경험치: ${formatNumber(p.data.exp)}\n경험치 ${formatNumber(cost)}을(를) 바쳐 최대 체력 +${trade.hp} 또는 최대 마나 +${trade.mp}를 얻을 수 있다.\n(현재 승급 보너스: 체력 +${formatNumber(p.data.bonusHp)}, 마나 +${formatNumber(p.data.bonusMp)})`;
-      if (arg === 'hp' || arg === 'mp') {
-        if (p.data.exp < cost) return sendDialog(p, npc, `경험치가 부족하다.\n\n${text}`, [back]);
-        p.data.exp -= cost;
-        if (arg === 'hp') p.data.bonusHp += trade.hp;
-        else p.data.bonusMp += trade.mp;
-        p.recompute();
-        p.map?.broadcast({ t: 'fx', fx: 'levelup', id: p.id });
-        p.notice(arg === 'hp' ? `최대 체력 +${trade.hp}!` : `최대 마나 +${trade.mp}!`, 'good');
-      }
-      return sendDialog(p, npc, text, [
-        { key: 'ascend:hp', label: `체력 +${trade.hp}` },
-        { key: 'ascend:mp', label: `마나 +${trade.mp}` },
-        back,
-      ]);
-    }
+      return ascendDialog(world, p, npc, parts.slice(1));
+    case 'second':
+      if (!service(npc, 'secondJob')) return;
+      return secondJobDialog(world, p, npc, parts.slice(1));
+    case 'beast':
+      if (!service(npc, 'secondJob')) return;
+      return beastDialog(world, p, npc, arg, arg2 === 'yes');
     case 'tp': {
       const idx = Number(arg);
       const s = service(npc, 'teleport', idx);
@@ -313,6 +337,281 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
   }
 }
 
+// ───────────────────────── 성장 체계 대화 (전직·승급·2차 전직) ─────────────────────────
+
+const BACK: DialogOption = { key: 'back', label: '돌아가기' };
+const CLOSE: DialogOption = { key: 'close', label: '대화 끝내기' };
+
+/** 조건 하나의 지금 값 (대화창 줄 끝에 붙임) */
+function conditionDetail(r: ConditionResult): string {
+  switch (r.cond.type) {
+    case 'ascended':
+      return '';
+    case 'skillProf':
+      return r.have === undefined ? ' (배우지 않음)' : ` (지금 ${r.have})`;
+    case 'level':
+      return ` (지금 ${r.have ?? 0})`;
+    case 'rebirths':
+      return ` (지금 ${r.have ?? 0}번)`;
+    case 'payHp':
+    case 'payMp':
+      // 바친 뒤에도 직업 기본 체력·마나가 남아야 하므로 지금 값이 need 이상이어야 함
+      return r.met ? ` (지금 ${bigNumber(r.have ?? 0)})` : ` (지금 ${bigNumber(r.have ?? 0)}, ${bigNumber(r.need ?? 0)} 이상이어야 바칠 수 있음)`;
+    default:
+      return r.have === undefined ? '' : ` (지금 ${bigNumber(r.have)})`;
+  }
+}
+
+/** 조건 확인 결과를 대화창 줄로 ("○ 순수 체력 14,000 이상 (지금 15,230)", 모자라면 ×) */
+function conditionLines(check: ConditionCheck | undefined): string[] {
+  return (check?.results ?? []).map((r) => `${r.met ? '○' : '×'} ${r.label}${conditionDetail(r)}`);
+}
+
+const signed = (n: number) => `${n >= 0 ? '+' : ''}${formatNumber(n)}`;
+
+/** 전직·2차 전직 뒤: 다시 계산하고 체력·마나를 채운 뒤 내 화면(소지품·기술·상태)과 주변에 알립니다 */
+function afterClassChange(world: World, p: Player): void {
+  p.recompute();
+  p.hp = p.maxHp;
+  p.mp = p.maxMp;
+  p.markInv();
+  p.markAbilities();
+  p.markSelf();
+  p.broadcastLook();
+  p.map?.broadcast({ t: 'fx', fx: 'levelup', id: p.id });
+  world.groups.touch(p);
+}
+
+/**
+ * 전직(무도가는 환골탈태): 새로 들어갈 직업의 길드장에게서 'rebirth:<직업>[:yes]'.
+ * 먼저 하는 일과 조건을 줄마다 보여 주고, 조건을 모두 채웠을 때만 "예" 를 내놓습니다.
+ */
+function rebirthDialog(world: World, p: Player, npc: Npc, targetRaw: string | undefined, yes: boolean): void {
+  const s = npc.def.services.find((x) => x.type === 'class' && x.classId === targetRaw);
+  if (!s || s.type !== 'class' || !isFirstClass(s.classId)) return;
+  const gd = world.data;
+  const target = s.classId;
+  const tName = className(world, target);
+  const name = rebirthName(p.data.classId, gd.progression);
+  const r = checkRebirth(p.data, gd, target);
+  if (!yes || !r.ok) {
+    const rb = gd.progression.rebirth;
+    const lines = [
+      `${name}하면 ${rb.restartLevel}레벨, 경험치 0 으로 돌아가고 능력치도 처음으로 돌아간다.`,
+      '배운 기술과 마법(숙련도 포함), 승급 장인에게 산 체력·마나, 장비와 소지품, 골드와 창고는 그대로 남는다.',
+      '',
+      `${tName}(으)로 ${name}하는 조건:`,
+      ...conditionLines(r.check),
+      '',
+      r.ok ? `정말 ${tName}(으)로 다시 태어나겠는가?` : r.msg,
+    ];
+    return sendDialog(p, npc, lines.join('\n'), r.ok ? [{ key: `rebirth:${target}:yes`, label: `예, ${name}하겠습니다` }, BACK] : [BACK]);
+  }
+  const res = rebirthOnData(p.data, gd, world.config, target);
+  if (!res.ok) return sendDialog(p, npc, res.msg, [BACK]);
+  afterClassChange(world, p);
+  p.notice(res.msg, 'good');
+  world.announce(`${p.name}님이 ${tName}(으)로 ${name}했습니다.`);
+  sendDialog(
+    p,
+    npc,
+    `다시 태어난 것을 축하하네. 이제 그대는 ${p.data.level}레벨 ${tName}이다. 배운 기술과 마법은 그대로 쓸 수 있고, ${tName}의 기술은 나에게 배울 수 있다.`,
+    [{ key: `learn:${target}`, label: '기술/마법 배우기' }, CLOSE],
+  );
+}
+
+type TradeKind = 'hp' | 'mp' | 'stat';
+
+/** 승급 장인: 'ascend' → 메뉴, 'ascend:hp|mp|stat[:<횟수>]' → 교환, 'ascend:do[:yes]' → 승급 */
+function ascendDialog(world: World, p: Player, npc: Npc, args: string[]): void {
+  const gd = world.data;
+  const asc = gd.progression.ascend;
+  if (p.level < asc.level) return sendDialog(p, npc, `승급 장인의 일은 ${asc.level}레벨이 된 자만 맡길 수 있다. 더 수련하고 오게.`, [BACK]);
+  const [what, n] = args;
+  if (what === 'hp' || what === 'mp' || what === 'stat') {
+    if (n === undefined) return tradeMenu(world, p, npc, what);
+    const times = Number(n);
+    const r = what === 'stat' ? tradeHpForStatOnData(p.data, gd, times) : tradeExpOnData(p.data, gd, what, times);
+    if (r.ok) {
+      p.recompute();
+      p.markSelf();
+      p.map?.broadcast({ t: 'fx', fx: 'levelup', id: p.id });
+      p.notice(r.msg, 'good');
+    }
+    return tradeMenu(world, p, npc, what, r.msg);
+  }
+  if (what === 'do') return ascendDo(world, p, npc, n === 'yes');
+  ascendMenu(world, p, npc);
+}
+
+function ascendMenu(world: World, p: Player, npc: Npc, note?: string): void {
+  const gd = world.data;
+  const asc = gd.progression.ascend;
+  const d = p.data;
+  const pure = pureVitals(d, gd);
+  const lim = tradeLimits(d, gd);
+  const t = asc.expTrade;
+  const lines = [
+    ...(note ? [note, ''] : []),
+    `쌓인 경험치: ${bigNumber(d.exp)}`,
+    `순수 체력 ${formatNumber(pure.hp)} · 순수 마력 ${formatNumber(pure.mp)} (산 체력 ${signed(d.bonusHp)} · 산 마나 ${signed(d.bonusMp)})`,
+    '',
+    `경험치 ${bigNumber(t.exp)}을(를) 바치면 최대 체력 +${formatNumber(t.hp)} 또는 최대 마나 +${formatNumber(t.mp)}을(를) 주겠다.`,
+    `최대 체력 ${formatNumber(asc.hpToStat.hp)}을(를) 바치면 능력치 ${formatNumber(asc.hpToStat.stat)}을(를) 주겠다. (직업 기본 체력 ${formatNumber(classBaseVitals(d, gd).hp)} 아래로는 팔 수 없다)`,
+  ];
+  if (d.ascended) lines.push('', `그대는 이미 승급한 ${asc.title}이다.`);
+  else if (isFirstClass(d.classId)) lines.push('', '조건을 채우면 승급할 수 있다. 승급하면 2차 직업 인도자에게 2차 전직을 청할 수 있다.');
+  const opts: DialogOption[] = [
+    { key: 'ascend:hp', label: `경험치로 체력 사기 (${formatNumber(lim.hp)}번 가능)` },
+    { key: 'ascend:mp', label: `경험치로 마나 사기 (${formatNumber(lim.mp)}번 가능)` },
+    { key: 'ascend:stat', label: `체력으로 능력치 사기 (${formatNumber(lim.stat)}번 가능)` },
+  ];
+  if (isFirstClass(d.classId) && !d.ascended) opts.push({ key: 'ascend:do', label: '승급하기' });
+  opts.push(BACK);
+  sendDialog(p, npc, lines.join('\n'), opts);
+}
+
+/** 교환 한 가지의 횟수 고르기: 1번, 10번, 100번, 할 수 있는 만큼 모두 */
+function tradeMenu(world: World, p: Player, npc: Npc, kind: TradeKind, note?: string): void {
+  const gd = world.data;
+  const asc = gd.progression.ascend;
+  const lim = tradeLimits(p.data, gd)[kind];
+  const gainOf = (n: number) =>
+    kind === 'hp'
+      ? `체력 +${formatNumber(asc.expTrade.hp * n)}`
+      : kind === 'mp'
+        ? `마나 +${formatNumber(asc.expTrade.mp * n)}`
+        : `능력치 +${formatNumber(asc.hpToStat.stat * n)}`;
+  const desc =
+    kind === 'stat'
+      ? `최대 체력 ${formatNumber(asc.hpToStat.hp)}을(를) 바칠 때마다 능력치 포인트 ${formatNumber(asc.hpToStat.stat)}을(를) 주겠다. 순수 체력이 직업 기본 체력 아래로 내려가게는 팔 수 없다.`
+      : `경험치 ${bigNumber(asc.expTrade.exp)}을(를) 바칠 때마다 최대 ${gainOf(1)}.`;
+  const status =
+    kind === 'stat'
+      ? `순수 체력 ${formatNumber(pureVitals(p.data, gd).hp)} · 직업 기본 체력 ${formatNumber(classBaseVitals(p.data, gd).hp)} · 남은 능력치 포인트 ${formatNumber(p.data.statPoints)}`
+      : `쌓인 경험치: ${bigNumber(p.data.exp)}`;
+  const counts = [1, 10, 100].filter((n) => n <= lim);
+  if (lim > 1 && !counts.includes(lim)) counts.push(lim);
+  const opts: DialogOption[] = counts.map((n) => ({
+    key: `ascend:${kind}:${n}`,
+    label: `${n === lim && n > 1 ? `${formatNumber(n)}번 모두` : `${formatNumber(n)}번`} (${gainOf(n)})`,
+  }));
+  opts.push({ key: 'ascend', label: '돌아가기' });
+  const lines = [...(note ? [note, ''] : []), desc, status, lim > 0 ? `지금 ${formatNumber(lim)}번 할 수 있다.` : '지금은 할 수 없다.'];
+  sendDialog(p, npc, lines.join('\n'), opts);
+}
+
+function ascendDo(world: World, p: Player, npc: Npc, yes: boolean): void {
+  const gd = world.data;
+  const asc = gd.progression.ascend;
+  const backToMenu: DialogOption = { key: 'ascend', label: '돌아가기' };
+  const r = checkAscend(p.data, gd);
+  if (!yes || !r.ok) {
+    const lines = [
+      `승급하면 ${asc.title}(이)라 불리고, 2차 직업 인도자에게 2차 전직을 청할 수 있다.`,
+      '',
+      '승급 조건:',
+      ...conditionLines(r.check),
+      '',
+      r.ok ? '승급하겠는가? 경험치는 써서 없어진다.' : r.msg,
+    ];
+    return sendDialog(p, npc, lines.join('\n'), r.ok ? [{ key: 'ascend:do:yes', label: '예, 승급하겠습니다' }, backToMenu] : [backToMenu]);
+  }
+  const res = ascendOnData(p.data, gd);
+  if (!res.ok) return ascendMenu(world, p, npc, res.msg);
+  p.recompute();
+  p.markSelf();
+  p.map?.broadcast({ t: 'fx', fx: 'levelup', id: p.id });
+  p.notice(res.msg, 'good');
+  world.announce(`${p.name}님이 승급하여 ${asc.title}이(가) 되었습니다!`);
+  sendDialog(p, npc, `훌륭하다! 이제 그대는 ${asc.title}이다. 마을의 2차 직업 인도자를 찾아가면 2차 전직을 청할 수 있다.`, [backToMenu, CLOSE]);
+}
+
+/**
+ * 2차 직업 인도자: 'second' → 갈 수 있는 길, 'second:<2차 직업>' → 조건(수인은 계통 고르기),
+ * 'second:<2차 직업>:yes' 또는 'second:beastkin:<계통>[:yes]' → 2차 전직
+ */
+function secondJobDialog(world: World, p: Player, npc: Npc, args: string[]): void {
+  const gd = world.data;
+  const sc = gd.progression.second;
+  const cur = p.data.classId;
+  const [targetRaw, a, b] = args;
+  const backTo = (key: string): DialogOption => ({ key, label: '돌아가기' });
+  if (classTier(cur) === 2) return sendDialog(p, npc, `그대는 이미 ${className(world, cur)}의 길을 걷고 있다. (어빌 ${p.data.abilityLevel})`, [BACK]);
+  if (!isFirstClass(cur)) return sendDialog(p, npc, '2차 전직은 1차 직업을 가진 자가 승급한 뒤에야 할 수 있다.', [BACK]);
+  const targets = secondClassesOf(cur, sc.from);
+  if (targetRaw === undefined) {
+    if (targets.length === 0) return sendDialog(p, npc, `${className(world, cur)}에게는 2차 전직의 길이 없다.`, [BACK]);
+    const text = [
+      '승급한 자는 2차 직업으로 나아갈 수 있다.',
+      `레벨은 그대로이고, 새로 어빌리티 레벨(어빌)이 1부터 ${gd.progression.ability.maxLevel}까지 오른다. 배운 기술과 마법은 그대로 쓸 수 있다.`,
+      '',
+      `${className(world, cur)}이(가) 갈 수 있는 길: ${targets.map((t) => className(world, t)).join(', ')}`,
+    ];
+    return sendDialog(p, npc, text.join('\n'), [...targets.map((t) => ({ key: `second:${t}`, label: `${className(world, t)}(으)로 2차 전직` })), BACK]);
+  }
+  const target = targets.find((t) => t === targetRaw);
+  if (!target) return sendDialog(p, npc, `${className(world, cur)}은(는) 그 길로 갈 수 없다.`, [backTo('second')]);
+  const isBeast = target === 'beastkin';
+  const beast = isBeast ? (a ?? null) : null;
+  const yes = isBeast ? b === 'yes' : a === 'yes';
+  if (beast !== null && !knownBeastType(gd, beast)) return sendDialog(p, npc, '그런 계통은 없다.', [backTo('second:beastkin')]);
+  const tName = className(world, target);
+  const r = checkSecondJob(p.data, gd, target, beast);
+  if (!yes || !r.ok) {
+    const lines = [gd.classes.get(target)?.desc ?? '', '', `${tName}(으)로 2차 전직하는 조건:`, ...conditionLines(r.check), ''];
+    const opts: DialogOption[] = [];
+    const unmet = r.check?.results.find((x) => !x.met);
+    if (isBeast && beast === null) {
+      // 수인: 조건을 채웠으면 계통부터 고름
+      if (r.check?.ok) {
+        lines.push('수인은 짐승의 계통을 하나 골라야 한다. 한 번 고르면 바꿀 수 없다.');
+        for (const t of sc.beastTypes) opts.push({ key: `second:beastkin:${t.id}`, label: `${t.name} 수인` });
+      } else lines.push(unmet ? `2차 전직 조건이 모자랍니다: ${unmet.label}` : r.msg);
+    } else if (r.ok) {
+      const what = beast ? `${beastTypeName(gd, beast)} 계통의 ${tName}` : tName;
+      lines.push(`정말 ${what}이(가) 되겠는가? 경험치와 바치는 체력·마력은 써서 없어진다.${beast ? ' 계통은 바꿀 수 없다.' : ''}`);
+      opts.push({ key: beast ? `second:beastkin:${beast}:yes` : `second:${target}:yes`, label: `예, ${what}이(가) 되겠습니다` });
+    } else lines.push(r.msg);
+    opts.push(backTo(beast ? 'second:beastkin' : 'second'));
+    return sendDialog(p, npc, lines.join('\n'), opts);
+  }
+  const res = secondJobOnData(p.data, gd, target, beast);
+  if (!res.ok) return sendDialog(p, npc, res.msg, [backTo('second')]);
+  afterClassChange(world, p);
+  p.notice(res.msg, 'good');
+  const what = p.data.beastType ? `${beastTypeName(gd, p.data.beastType)} 계통의 ${tName}` : tName;
+  world.announce(`${p.name}님이 ${what}(으)로 2차 전직했습니다!`);
+  sendDialog(p, npc, `이제 그대는 ${what}이다. 어빌리티 레벨 1부터 쌓아 가게. ${tName}의 기술은 ${tName} 길드장에게 배울 수 있다.`, [CLOSE]);
+}
+
+/** 계통이 없는 수인(이 체계 전에 수인이 된 캐릭터)이 계통을 한 번 고릅니다: 'beast[:<계통>[:yes]]' */
+function beastDialog(world: World, p: Player, npc: Npc, id: string | undefined, yes: boolean): void {
+  const gd = world.data;
+  const types = gd.progression.second.beastTypes;
+  if (p.data.classId !== 'beastkin') return sendDialog(p, npc, '계통은 수인만 고른다.', [BACK]);
+  if (knownBeastType(gd, p.data.beastType))
+    return sendDialog(p, npc, `그대는 이미 ${beastTypeName(gd, p.data.beastType!)} 계통이다. 계통은 바꿀 수 없다.`, [BACK]);
+  if (id === undefined)
+    return sendDialog(p, npc, '그대는 아직 짐승의 계통을 정하지 않았군. 하나를 고르게. 한 번 고르면 바꿀 수 없다.', [
+      ...types.map((t) => ({ key: `beast:${t.id}`, label: `${t.name} 계통` })),
+      BACK,
+    ]);
+  const t = types.find((x) => x.id === id);
+  if (!t) return;
+  if (!yes)
+    return sendDialog(p, npc, `${t.name} 계통의 수인이 되겠는가? 한 번 정하면 바꿀 수 없다.`, [
+      { key: `beast:${t.id}:yes`, label: `예, ${t.name} 계통으로 하겠습니다` },
+      { key: 'beast', label: '돌아가기' },
+    ]);
+  const r = chooseBeastTypeOnData(p.data, gd, t.id);
+  if (r.ok) {
+    p.markSelf();
+    p.notice(r.msg, 'good');
+  }
+  sendDialog(p, npc, r.msg, [BACK, CLOSE]);
+}
+
 function hasShopItem(npc: Npc, itemId: string): boolean {
   return npc.def.services.some((s) => s.type === 'shop' && s.items.includes(itemId));
 }
@@ -354,24 +653,27 @@ export function sell(world: World, p: Player, npcId: unknown, slot: unknown, qty
   p.sys(`${def.name}${taken.qty > 1 ? ` ${taken.qty}개` : ''}을(를) ${formatNumber(gain)} 골드에 팔았습니다.`);
 }
 
+/**
+ * 길드장 창에서 기술 배우기 ('learnAbility'): 그 기술이 있는 스킬트리를 이 NPC 가 가르쳐야 하고,
+ * 스킬트리의 조건(지금 직업, 레벨/어빌, 골드, 재료, 선수과목 숙련도, 능력치, 수인 계통)으로 판정합니다.
+ * 운영자는 조건 없이 무료로 배웁니다.
+ */
 export function learn(world: World, p: Player, npcId: unknown, abilityId: unknown): void {
   const npc = npcFor(p, npcId, 'service');
   if (!npc || typeof abilityId !== 'string') return;
   const def = world.data.abilities.get(abilityId);
-  if (!def || def.classId === 'monster') return;
-  const teaches = npc.def.services.some((s) => s.type === 'class' && s.classId === def.classId);
-  if (!teaches) return;
-  if (!abilityAllowedFor(def, p.data.classId) && !p.isGm) return p.err('다른 직업의 기술은 배울 수 없습니다.');
-  if (p.level < def.level && !p.isGm) return p.err(`${def.level}레벨이 되어야 배울 수 있습니다.`);
-  if (p.data.skills.includes(def.id) || p.data.spells.includes(def.id)) return p.err('이미 배운 기술입니다.');
-  if (p.data.gold < def.price && !p.isGm) return p.err('골드가 부족합니다.');
-  if (!learnOnData(p.data, def)) return p.err('더 이상 기술을 배울 수 없습니다.');
-  if (!p.isGm) p.data.gold -= def.price;
+  const at = world.data.nodeOf(abilityId);
+  if (!def || !at) return;
+  // 길드장은 자기 직업의 트리를, 수련장 관리인은 평민 트리를 가르칩니다
+  if (!npc.def.services.some((s) => s.type === 'class' && s.classId === at.classId)) return;
+  const r = learnFromTree(p.data, world.data, def.id, { free: p.isGm });
+  if (!r.ok) return p.err(r.msg);
   p.markAbilities();
   p.markInv();
   p.markSelf();
   p.notice(`${def.name}을(를) 배웠습니다! (${def.kind === 'skill' ? 'S' : 'D'} 키)`, 'good');
-  pickOption(world, p, npcId, `learn:${def.classId}`);
+  p.sys(r.msg);
+  pickOption(world, p, npcId, `learn:${at.classId}`);
 }
 
 function storageNpc(p: Player, npcId: unknown): Npc | null {

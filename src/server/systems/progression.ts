@@ -473,7 +473,7 @@ export function tradeHpForStatOnData(data: CharacterData, gd: GameData, times: n
 // ───────────────────────── 2차 전직 (엔진 트랙) ─────────────────────────
 
 /** 이 수인 계통 id 가 지금 설정에 있는지 */
-function knownBeastType(gd: GameData, id: string | null): boolean {
+export function knownBeastType(gd: GameData, id: string | null): boolean {
   return id !== null && gd.progression.second.beastTypes.some((b) => b.id === id);
 }
 
@@ -662,5 +662,6 @@ export function learnFromTree(data: CharacterData, gd: GameData, abilityId: stri
     removeItemQty(data, it.item, it.qty);
     paid.push(`${gd.items.get(it.item)?.name ?? it.item} ${formatNumber(it.qty)}개`);
   }
-  return ok(`${def.name}을(를) 배웠습니다!${paid.length > 0 ? ` (${paid.join(', ')}을(를) 냈습니다)` : ''}`);
+  // 낸 것은 늘 "골드"·"…개" 로 끝나므로 조사는 '를'
+  return ok(`${def.name}을(를) 배웠습니다!${paid.length > 0 ? ` (${paid.join(', ')}를 냈습니다)` : ''}`);
 }
