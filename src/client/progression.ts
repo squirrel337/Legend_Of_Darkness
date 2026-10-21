@@ -19,6 +19,7 @@ import {
   type SkillTreeNode,
 } from '../shared/progression';
 import type { InvSlot, LearnEntry, SelfState } from '../shared/protocol';
+import { detourPoints, pathHits, roundedPath, type Box, type Pt } from '../shared/tree-route';
 import type { AbilityDef, ItemDef } from '../shared/types';
 
 // ───────────────────────── 배우기 조건 (서버와 같은 learnStatus) ─────────────────────────
@@ -302,14 +303,9 @@ export function bezierPoint(
 /**
  * 선수과목 선: 위 줄의 칸이면 아래 가운데에서 이 칸 위 가운데로 휘어 내려오고, 같은 줄이면 옆면끼리,
  * (편집기에서 거꾸로 놓은) 아래 줄의 칸이면 위 가운데에서 이 칸 아래로 올라갑니다.
- * lane 을 주면 (같은 열의 사이 칸을 가로지르지 않게) 열 사이의 빈 길 x = lane 으로 비켜 내려갑니다.
+ * 이 곡선이 다른 칸을 지나가면 layoutTree 가 detourGeometry 로 바꿉니다.
  */
-export function edgeGeometry(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  node = TREE_NODE,
-  lane?: number,
-): { d: string; badge: { x: number; y: number } } {
+export function edgeGeometry(a: { x: number; y: number }, b: { x: number; y: number }, node = TREE_NODE): { d: string; badge: { x: number; y: number } } {
   const r = (v: number) => Math.round(v * 10) / 10;
   const half = node / 2;
   if (a.y === b.y) {
@@ -322,15 +318,6 @@ export function edgeGeometry(
   // 위 줄 → 아래 줄: 이름표 밑에서 출발 (선이 이름을 가로지르지 않게)
   const p0 = { x: a.x + half, y: down ? a.y + node + TREE_LABEL_H - 4 : a.y };
   const p3 = { x: b.x + half, y: down ? b.y : b.y + node + TREE_LABEL_H - 4 };
-  if (lane !== undefined) {
-    // 옆길: 나가서 꺾고(k), 길을 따라 곧게, 다시 꺾어 들어옴. 필요 숙련도는 들어오기 직전 길 위에
-    const dir = Math.sign(p3.y - p0.y);
-    const k = Math.min(14, Math.abs(p3.y - p0.y) / 4) * dir;
-    const d =
-      `M ${r(p0.x)} ${r(p0.y)} C ${r(p0.x)} ${r(p0.y + k)}, ${r(lane)} ${r(p0.y + k)}, ${r(lane)} ${r(p0.y + 2 * k)} ` +
-      `L ${r(lane)} ${r(p3.y - 2 * k)} C ${r(lane)} ${r(p3.y - k)}, ${r(p3.x)} ${r(p3.y - k)}, ${r(p3.x)} ${r(p3.y)}`;
-    return { d, badge: { x: r(lane), y: r(p3.y - 2 * k - 8 * dir) } };
-  }
   const bend = (p3.y - p0.y) / 2;
   const p1 = { x: p0.x, y: p0.y + bend };
   const p2 = { x: p3.x, y: p3.y - bend };
@@ -339,6 +326,53 @@ export function edgeGeometry(
     d: `M ${r(p0.x)} ${r(p0.y)} C ${r(p1.x)} ${r(p1.y)}, ${r(p2.x)} ${r(p2.y)}, ${r(p3.x)} ${r(p3.y)}`,
     badge: { x: r(m.x), y: r(m.y) },
   };
+}
+
+/** 줄 사이 틈의 가운데까지 (이름표 밑 ~ 다음 줄 칸 위) */
+const TREE_GAP_MID = (TREE_ROW_H - TREE_NODE - TREE_LABEL_H) / 2;
+
+/**
+ * 곧은 곡선이 다른 칸에 걸릴 때 돌아가는 선: 출발 칸 밑의 줄 사이 틈 → 도착 칸 옆의 열 사이 길 → 도착 칸 위의 틈 → 도착 칸 위 가운데.
+ * 틈과 길에는 칸이 없어 다른 칸을 지나지 않습니다. 필요 숙련도는 도착 칸 가까운 길 위(길이 없으면 틈 위)에.
+ * 길은 도착 칸의 옆 중 출발 칸 쪽 (같은 열이면 side: 1 오른쪽, -1 왼쪽).
+ * 같은 줄이면 줄 위의 틈으로, 아래 줄에서 위 줄로(편집기에서 거꾸로 놓은 경우)는 위아래를 바꿔 갑니다.
+ */
+export function detourGeometry(a: Pt, b: Pt, node = TREE_NODE, side: 1 | -1 = 1): { d: string; badge: Pt } {
+  const half = node / 2;
+  const ax = a.x + half;
+  const bx = b.x + half;
+  const bottom = (y: number) => y + node + TREE_LABEL_H - 4;
+  let start: Pt;
+  let end: Pt;
+  let gapA: number;
+  let gapB: number;
+  if (a.y === b.y) {
+    start = { x: ax, y: a.y };
+    end = { x: bx, y: b.y };
+    gapA = gapB = a.y - TREE_GAP_MID;
+  } else if (a.y < b.y) {
+    start = { x: ax, y: bottom(a.y) };
+    end = { x: bx, y: b.y };
+    gapA = a.y + node + TREE_LABEL_H + TREE_GAP_MID;
+    gapB = b.y - TREE_GAP_MID;
+  } else {
+    start = { x: ax, y: a.y };
+    end = { x: bx, y: bottom(b.y) };
+    gapA = a.y - TREE_GAP_MID;
+    gapB = b.y + node + TREE_LABEL_H + TREE_GAP_MID;
+  }
+  const lane = bx + (ax < bx ? -1 : ax > bx ? 1 : side) * (TREE_COL_W / 2);
+  const d = roundedPath(detourPoints(start, gapA, end, gapB, lane), 6);
+  const badge = gapA === gapB ? { x: (ax + bx) / 2, y: gapA } : { x: lane, y: gapB + (gapB > gapA ? -14 : 14) };
+  return { d, badge: { x: Math.round(badge.x * 10) / 10, y: Math.round(badge.y * 10) / 10 } };
+}
+
+/** 선이 피해야 할 칸의 자리: 아이콘과 그 밑의 이름표 (이름표는 가운데 맞춤이라 아이콘보다 넓을 수 있음) */
+function cellBoxes(c: TreeCell): Box[] {
+  return [
+    { x: c.x - 2, y: c.y - 2, w: TREE_NODE + 4, h: TREE_NODE + 4 },
+    { x: c.x + TREE_NODE / 2 - 34, y: c.y + TREE_NODE, w: 68, h: TREE_LABEL_H - 3 },
+  ];
 }
 
 /**
@@ -385,12 +419,11 @@ export function layoutTree(tree: SkillTreeConfig): TreeLayout {
         (external[c.node.ability] ??= []).push(r);
         continue;
       }
-      // 같은 열에서 줄을 건너뛰는데 그 사이에 다른 칸이 있으면 열 사이의 빈 길로 비켜 감 (마지막 열이면 왼쪽 길)
-      const lo = Math.min(from.y, c.y);
-      const hi = Math.max(from.y, c.y);
-      const blocked = from.x === c.x && cells.some((o) => o !== from && o !== c && o.x === c.x && o.y > lo && o.y < hi);
-      const lane = blocked ? c.x + TREE_NODE / 2 + (c.node.col < cols - 1 ? TREE_COL_W / 2 : -TREE_COL_W / 2) : undefined;
-      const g = edgeGeometry(from, c, TREE_NODE, lane);
+      // 곧은 곡선이 다른 칸(아이콘·이름표) 뒤로 지나가면 그 칸에서 나온 선처럼 보이므로, 칸이 없는 줄 사이 틈과
+      // 열 사이 길로 돌아감 (같은 열에서 사이 칸을 건너뛸 때 포함, 길은 오른쪽이고 마지막 열이면 왼쪽)
+      let g = edgeGeometry(from, c, TREE_NODE);
+      const others = cells.filter((o) => o !== from && o !== c).flatMap(cellBoxes);
+      if (pathHits(g.d, others)) g = detourGeometry(from, c, TREE_NODE, c.node.col < cols - 1 ? 1 : -1);
       edges.push({ from: r.ability, to: c.node.ability, prof: r.prof, d: g.d, badge: g.badge });
     }
   }

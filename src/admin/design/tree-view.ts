@@ -8,15 +8,10 @@ import { card, issueRow, type Ctx } from './ctx';
 import { nodeActions, renderPanel } from './panels';
 import { renderPreview, renderPreviewSide } from './preview';
 import { parseWhere, type DesignStore } from './state';
+import { cellPos, COLW, edgeRoute, GUT, NH, nodeBox, NW, ROWH, TOP } from './grid';
 import { clamp, josa, shortGold, svg } from './util';
 
-// 격자 크기 (px)
-export const COLW = 160;
-export const ROWH = 112;
-export const GUT = 92;
-export const TOP = 30;
-export const NW = 144;
-export const NH = 66;
+export { cellPos, COLW, GUT, NH, NW, ROWH, TOP } from './grid';
 
 /** 그릴 줄·칸 수: 놓인 노드보다 한 줄·한 칸 더 (옮길 자리) */
 export function gridSize(tree: SkillTreeConfig): { rows: number; cols: number } {
@@ -31,8 +26,6 @@ export function gridSize(tree: SkillTreeConfig): { rows: number; cols: number } 
     cols: clamp(Math.max(maxCol + 2, tree.columns?.length ?? 0), 4, TREE_MAX_COLS),
   };
 }
-
-export const cellPos = (row: number, col: number) => ({ x: GUT + col * COLW + (COLW - NW) / 2, y: TOP + row * ROWH + (ROWH - NH) / 2 });
 
 /** 이 직업 트리의 문제인지 (스킬트리 자리나 이 직업 기술의 값) */
 export function classIssue(store: DesignStore, cls: ClassId) {
@@ -244,34 +237,6 @@ function nodeEl(ctx: Ctx, n: SkillTreeNode): HTMLElement {
   });
 }
 
-/** 선수과목 화살표의 베지어 조절점: 앞 노드 아래의 잇는 점 밑에서 시작해 뒤 노드 위쪽 가운데로 */
-function edgeCurve(a: { x: number; y: number }, b: { x: number; y: number }): [number, number][] {
-  const sx = a.x + NW / 2;
-  const sy = a.y + NH + 8;
-  const tx = b.x + NW / 2;
-  const ty = b.y - 1;
-  const dy = Math.max(28, Math.abs(ty - sy) / 2);
-  return [
-    [sx, sy],
-    [sx, sy + dy],
-    [tx, ty - dy],
-    [tx, ty],
-  ];
-}
-
-function edgePath(a: { x: number; y: number }, b: { x: number; y: number }): string {
-  const [p0, p1, p2, p3] = edgeCurve(a, b);
-  return `M ${p0![0]} ${p0![1]} C ${p1![0]} ${p1![1]}, ${p2![0]} ${p2![1]}, ${p3![0]} ${p3![1]}`;
-}
-
-/** 곡선 위 t (0~1) 자리: 숙련도 글씨를 뒤 노드 쪽에 두어, 한 기술에서 여러 갈래로 나가도 글씨가 겹치지 않게 */
-function edgePoint(a: { x: number; y: number }, b: { x: number; y: number }, t: number): [number, number] {
-  const [p0, p1, p2, p3] = edgeCurve(a, b) as [[number, number], [number, number], [number, number], [number, number]];
-  const u = 1 - t;
-  const f = (i: 0 | 1) => u * u * u * p0[i] + 3 * u * u * t * p1[i] + 3 * u * t * t * p2[i] + t * t * t * p3[i];
-  return [f(0), f(1)];
-}
-
 function drawEdges(ctx: Ctx, el: SVGSVGElement, tree: SkillTreeConfig): void {
   const s = ctx.store;
   const cls = s.cls;
@@ -296,7 +261,10 @@ function drawEdges(ctx: Ctx, el: SVGSVGElement, tree: SkillTreeConfig): void {
       if (!p) continue;
       const a = cellPos(p.row, p.col);
       const b = cellPos(n.row, n.col);
-      const d = edgePath(a, b);
+      // 다른 노드 뒤로 지나가면 그 노드에서 나온 화살표처럼 보이므로 돌아가게 (grid.ts)
+      const others = tree.nodes.filter((x) => x !== p && x !== n).map((x) => nodeBox(cellPos(x.row, x.col)));
+      const route = edgeRoute(a, b, others);
+      const d = route.d;
       const sel = s.sel?.type === 'edge' && s.sel.from === p.ability && s.sel.to === n.ability;
       const late = s.need(cls, p) > s.need(cls, n);
       el.append(svg('path', { d, class: `dz-e${sel ? ' sel' : ''}${late ? ' late' : ''}`, 'marker-end': `url(#${sel ? 'dz-ar-sel' : late ? 'dz-ar-late' : 'dz-ar'})` }));
@@ -309,7 +277,7 @@ function drawEdges(ctx: Ctx, el: SVGSVGElement, tree: SkillTreeConfig): void {
       });
       el.append(hit);
       if (r.prof > 0 || sel) {
-        const [mx, my] = edgePoint(a, b, 0.66);
+        const [mx, my] = route.label;
         el.append(svg('text', { x: mx + 7, y: my + 4, class: `dz-elabel${sel ? ' sel' : ''}` }, r.prof > 0 ? `숙련 ${r.prof}` : '배움'));
       }
     }

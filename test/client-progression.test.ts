@@ -15,10 +15,12 @@ import {
   type SkillTreesConfig,
 } from '../src/shared/progression';
 import type { InvSlot, LearnEntry, SelfState } from '../src/shared/protocol';
+import { samplePath } from '../src/shared/tree-route';
 import {
   TREE_COL_W,
   TREE_GUTTER,
   TREE_HEAD_H,
+  TREE_LABEL_H,
   TREE_NODE,
   TREE_PAD,
   TREE_ROW_H,
@@ -378,6 +380,56 @@ test('선수과목 선: 같은 열에서 사이 칸을 건너뛰면 열 사이�
   const last = layoutTree({ nodes: [node('p', 0, 1), node('q', 1, 1), node('r', 2, 1, { requires: [{ ability: 'p', prof: 5 }] }), node('s', 0, 0)] });
   const px = last.cells.find((c) => c.node.ability === 'p')!.x;
   assert.ok(last.edges[0]!.d.includes(`L ${px + TREE_NODE / 2 - TREE_COL_W / 2} `), last.edges[0]!.d);
+});
+
+/** 선이 지나가는 다른 칸 (아이콘이나 그 밑의 이름표) */
+function crossed(lay: ReturnType<typeof layoutTree>): string[] {
+  const out: string[] = [];
+  for (const e of lay.edges) {
+    const pts = samplePath(e.d);
+    for (const c of lay.cells) {
+      if (c.node.ability === e.from || c.node.ability === e.to) continue;
+      const icon = (p: { x: number; y: number }) => p.x > c.x - 1 && p.x < c.x + TREE_NODE + 1 && p.y > c.y - 1 && p.y < c.y + TREE_NODE + 1;
+      const label = (p: { x: number; y: number }) =>
+        p.x > c.x + TREE_NODE / 2 - 30 && p.x < c.x + TREE_NODE / 2 + 30 && p.y > c.y + TREE_NODE && p.y < c.y + TREE_NODE + TREE_LABEL_H - 4;
+      if (pts.some((p) => icon(p) || label(p))) out.push(`${e.from}→${e.to} 이(가) ${c.node.ability}`);
+    }
+  }
+  return out;
+}
+
+test('선수과목 선: 곧은 곡선이 다른 칸 뒤로 지나가면 (그 칸에서 나온 선처럼 보이므로) 줄 사이 틈과 열 사이 길로 돌아간다', () => {
+  // 전사 트리의 강타 → 함성: 바로 아래의 회오리 베기를 지나 회오리 베기에서 나온 선처럼 보였음
+  const tree: SkillTreeConfig = {
+    nodes: [
+      node('strike', 0, 0),
+      node('whirl', 1, 0, { requires: [{ ability: 'strike', prof: 20 }] }),
+      node('shout', 2, 2, { requires: [{ ability: 'strike', prof: 30 }] }),
+      node('other', 0, 1),
+    ],
+  };
+  const lay = layoutTree(tree);
+  const e = lay.edges.find((x) => x.to === 'shout')!;
+  const straight = edgeGeometry(lay.cells.find((c) => c.node.ability === 'strike')!, lay.cells.find((c) => c.node.ability === 'shout')!);
+  assert.notEqual(e.d, straight.d, '곧은 곡선 대신 돌아가는 선');
+  assert.deepEqual(crossed({ ...lay, edges: [{ ...e, d: straight.d }] }), ['strike→shout 이(가) whirl'], '곧은 곡선은 회오리 베기를 지남');
+  assert.deepEqual(crossed(lay), []);
+  // 도착 칸(열 2) 옆, 출발 칸 쪽(왼쪽)의 열 사이 길을 따라 내려가고 필요 숙련도도 그 길 위에
+  const shout = lay.cells.find((c) => c.node.ability === 'shout')!;
+  const lane = shout.x + TREE_NODE / 2 - TREE_COL_W / 2;
+  assert.ok(e.d.includes(`L ${lane} `), e.d);
+  assert.equal(e.badge.x, lane);
+  assert.ok(e.d.endsWith(`${shout.x + TREE_NODE / 2} ${shout.y}`), '도착 칸 위 가운데로 들어감');
+  // 바로 아래 칸으로 가는 선은 그대로 곧은 곡선
+  assert.ok(!lay.edges.find((x) => x.to === 'whirl')!.d.includes('L '));
+});
+
+test('실제 스킬트리: K 창의 선수과목 선은 다른 칸(아이콘·이름표)을 지나지 않는다', () => {
+  const trees = JSON.parse(fs.readFileSync(path.join(DIR, 'skilltrees.json'), 'utf8')) as SkillTreesConfig;
+  for (const [cls, raw] of Object.entries(trees.trees)) {
+    const tree = { ...raw, nodes: raw.nodes.map((n) => ({ ...n, items: n.items ?? [], requires: n.requires ?? [] })) };
+    assert.deepEqual(crossed(layoutTree(tree)), [], cls);
+  }
 });
 
 test('수인 계통 열: 한 열의 기술이 모두 같은 계통이면 그 계통, 섞였거나 계통이 없으면 아님', () => {
