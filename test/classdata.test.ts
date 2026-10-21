@@ -68,7 +68,7 @@ const kitsOf = (cls: ClassId): Kit[] => {
   if (!all.some(typeOf)) return [{ label: cls, cls, list: all }];
   return gd.progression.second.beastTypes.map((b) => ({ label: `${cls}(${b.name})`, cls, list: all.filter((a) => !typeOf(a) || typeOf(a) === b.id) }));
 };
-const gearOf =(cls: ClassId, slot: 'weapon' | 'armor'): ItemDef[] =>
+const gearOf = (cls: ClassId, slot: 'weapon' | 'armor'): ItemDef[] =>
   [...gd.items.values()].filter((it) => it.slot === slot && it.classes?.includes(cls)).sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
 
 // ───────────────────────── 밸런스 모델 ─────────────────────────

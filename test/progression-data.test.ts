@@ -50,16 +50,17 @@ function statsAt(cls: ClassId, level: number): Record<StatKey, number> {
 }
 
 /**
- * cls 트리에서 배울 수 있는 기술 (조건을 모두 채워 갈 때): 필요 레벨(어빌) 99 안, 선수과목은 이미 배운 것(숙련도는 올릴 수 있다고 봄),
- * 능력치는 statsFrom 직업을 그 레벨까지 자동 분배한 값으로, 수인 계통은 beastType 만.
+ * cls 트리에서 배울 수 있는 기술 (조건을 모두 채워 갈 때): 필요 레벨은 최대 레벨, 필요 어빌은 어빌 최대 안,
+ * 선수과목은 이미 배운 것(숙련도는 써서 올릴 수 있다고 봄), 능력치는 statsFrom 이 주는 값으로, 수인 계통은 beastType 만.
  */
 function learnable(cls: ClassId, inherited: ReadonlySet<string>, beastType: string | null, statsFrom: (n: SkillTreeNode) => Record<StatKey, number>): Set<string> {
+  const cap = classTier(cls) === 2 ? P.ability.maxLevel : cfg.maxLevel;
   const known = new Set(inherited);
   for (const n of treeNodes('peasant')) known.add(n.ability);
   for (let changed = true; changed; ) {
     changed = false;
     for (const n of treeNodes(cls)) {
-      if (known.has(n.ability) || needOf(n) > 99) continue;
+      if (known.has(n.ability) || needOf(n) > cap) continue;
       if (n.beastType !== undefined && n.beastType !== beastType) continue;
       if (!n.requires.every((r) => known.has(r.ability))) continue;
       const stats = statsFrom(n);
@@ -238,7 +239,7 @@ test('재료는 몬스터가 떨어뜨리거나 상점에서 사고, 1차 직업
 
 // ───────────────────────── 배울 수 있는 길 ─────────────────────────
 
-test('1차 직업은 99레벨 안에 트리를 모두 배우고, 승급의 핵심 기술 2개도 그 안에 있다 (능력치는 직업 비율대로 분배한 값으로)', () => {
+test('1차 직업은 최대 레벨 안에 트리를 모두 배우고, 승급의 핵심 기술 2개도 그 안에 있다 (능력치는 직업 비율대로 분배한 값으로)', () => {
   for (const cls of FIRST_CLASSES) {
     const known = firstLearnable(cls);
     for (const n of treeNodes(cls)) assert.ok(known.has(n.ability), `${cls}: ${nameOf(n.ability)} 을(를) 배울 수 없음`);
@@ -253,12 +254,12 @@ test('1차 직업은 99레벨 안에 트리를 모두 배우고, 승급의 핵�
   }
 });
 
-test('2차 직업은 이어받은 1차 직업 기술로 어빌 99 안에 트리를 모두 배우고, 수인은 계통마다 공통 + 그 계통 기술을 모두 배운다', () => {
+test('2차 직업은 이어받은 1차 직업 기술로 어빌 최대 안에 트리를 모두 배우고, 수인은 계통마다 공통 + 그 계통 기술을 모두 배운다', () => {
   for (const cls of SECOND_CLASSES) {
     for (const from of P.second.from[cls]) {
       const inherited = firstLearnable(from);
-      // 2차 직업은 99레벨: 능력치는 1차 직업 때 분배한 그대로
-      const stats = statsAt(from, 99);
+      // 2차 직업은 승급한 레벨 그대로: 능력치는 1차 직업 때 분배한 그대로
+      const stats = statsAt(from, P.ascend.level);
       const types = cls === 'beastkin' ? P.second.beastTypes.map((b) => b.id) : [null];
       for (const bt of types) {
         const known = learnable(cls, inherited, bt, () => stats);
