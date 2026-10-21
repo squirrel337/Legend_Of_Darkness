@@ -19,7 +19,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
-COPY gamedata ./gamedata
+# 관리자 페이지의 직업·스킬트리 탭이 gamedata 의 설계 파일을 고쳐 쓰므로 node 사용자가 쓸 수 있게
+COPY --chown=node:node gamedata ./gamedata
 RUN mkdir -p /app/data && chown -R node:node /app/data
 USER node
 EXPOSE 7777

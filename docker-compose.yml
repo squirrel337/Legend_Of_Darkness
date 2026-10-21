@@ -13,9 +13,11 @@ services:
       PORT: "7777"
       DATA_DIR: /app/data
     volumes:
-      # 캐릭터와 설정이 저장되는 곳 (컨테이너를 지워도 남습니다)
+      # 캐릭터와 설정, 직업·스킬트리 판 기록이 저장되는 곳 (컨테이너를 지워도 남습니다)
       - lod-data:/app/data
-      # 게임 데이터(아이템/몬스터/맵)를 직접 고쳐 쓰려면 아래 줄의 주석을 푸세요
-      # - ./gamedata:/app/gamedata:ro
+      # 게임 데이터: 관리자 페이지의 직업·스킬트리 탭이 저장하면 skilltrees.json·progression.json·abilities.json 을
+      # 고쳐 쓰므로, 이 폴더를 그대로 연결해 두어야 다시 빌드해도 고친 설계가 남습니다 (바꾼 줄은 git diff 로 보임).
+      # 컨테이너 안의 node 사용자(uid 1000)가 쓸 수 있어야 합니다. 저장이 거절되면: sudo chown -R 1000:1000 gamedata
+      - ./gamedata:/app/gamedata
 volumes:
   lod-data:
