@@ -1,6 +1,8 @@
 // 웹 관리자 페이지 (/admin)
 import { CLASS_FALLBACK_NAMES, EQUIP_SLOT_NAMES, ROLE_NAMES, STAT_NAMES, type EquipSlot, type Role, type StatKey } from '../shared/constants';
 import { clear, fmt, h } from '../client/ui/dom';
+import { designDirty, renderDesign } from './design';
+import type { ApiReply } from './design/state';
 
 interface CharSummary {
   name: string;
@@ -40,6 +42,13 @@ interface CharDetail extends CharSummary {
   banReason: string;
   lastIp: string;
   derived: { maxHp: number; maxMp: number; ac: number; str: number; int: number; wis: number; con: number; dex: number } | null;
+  // 성장 체계 (docs/progression.md)
+  rebirths?: number;
+  ascended?: boolean;
+  abilityLevel?: number;
+  abilityExp?: number;
+  beastType?: string | null;
+  prof?: Record<string, number>;
 }
 
 interface GameDataResp {
@@ -64,7 +73,8 @@ interface Status {
   statCap: number;
 }
 
-type View = 'dash' | 'chars' | 'char' | 'settings' | 'audit';
+type View = 'dash' | 'chars' | 'char' | 'design' | 'settings' | 'audit';
+const VIEWS: readonly View[] = ['dash', 'chars', 'design', 'settings', 'audit'];
 
 const app = document.getElementById('app')!;
 const TOKEN_KEY = 'lod-admin-token';
@@ -74,7 +84,8 @@ try {
 } catch {
   token = null;
 }
-let view: View = 'dash';
+/** 주소의 #design 같은 꼬리로 처음 볼 화면을 정함 (새로 고쳐도 같은 탭) */
+let view: View = VIEWS.find((v) => location.hash === `#${v}`) ?? 'dash';
 let currentChar = '';
 let charQuery = '';
 let gd: GameDataResp | null = null;
@@ -91,11 +102,14 @@ function saveToken(t: string | null): void {
   }
 }
 
-class AuthError extends Error {}
+class AuthError extends Error {
+  override name = 'AuthError';
+}
 
-async function api<T = Record<string, unknown>>(path: string, body?: unknown): Promise<T & { ok: boolean; msg?: string }> {
+/** 관리자 API 호출 (HTTP 상태와 함께). 로그인이 풀렸으면 로그인 화면으로 */
+async function request<T = Record<string, unknown>>(method: string, path: string, body?: unknown): Promise<ApiReply<T>> {
   const res = await fetch('/api/admin' + path, {
-    method: body === undefined ? 'GET' : 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -105,7 +119,11 @@ async function api<T = Record<string, unknown>>(path: string, body?: unknown): P
     render();
     throw new AuthError(json.msg ?? '로그인이 필요합니다.');
   }
-  return json;
+  return { status: res.status, json };
+}
+
+async function api<T = Record<string, unknown>>(path: string, body?: unknown): Promise<T & { ok: boolean; msg?: string }> {
+  return (await request<T>(body === undefined ? 'GET' : 'POST', path, body)).json;
 }
 
 let toastTimer = 0;
@@ -164,7 +182,13 @@ function render(): void {
       {
         class: view === id || (id === 'chars' && view === 'char') ? 'active' : '',
         onclick: () => {
+          if (view === 'design' && id !== 'design' && designDirty()) toast('직업·스킬트리에 저장하지 않은 바뀐 곳이 있습니다. 탭으로 돌아오면 그대로 있습니다.', false);
           view = id;
+          try {
+            history.replaceState(null, '', id === 'dash' ? location.pathname : `#${id}`);
+          } catch {
+            /* 주소를 바꿀 수 없는 환경 */
+          }
           render();
         },
       },
@@ -190,7 +214,7 @@ function render(): void {
         '로그아웃',
       ),
     ),
-    h('nav', { class: 'nav' }, navBtn('dash', '대시보드'), navBtn('chars', '캐릭터'), navBtn('settings', '서버 설정'), navBtn('audit', '작업 기록')),
+    h('nav', { class: 'nav' }, navBtn('dash', '대시보드'), navBtn('chars', '캐릭터'), navBtn('design', '직업·스킬트리'), navBtn('settings', '서버 설정'), navBtn('audit', '작업 기록')),
     main,
   );
   void loadTop(stats);
@@ -215,12 +239,14 @@ async function loadTop(el: HTMLElement): Promise<void> {
 
 async function loadView(): Promise<void> {
   clear(main);
+  main.className = view === 'design' ? 'wide' : '';
   main.append(h('div', { class: 'muted' }, '불러오는 중...'));
   try {
     if (!gd) gd = (await api<GameDataResp>('/gamedata')) as GameDataResp;
     if (view === 'dash') await renderDash();
     else if (view === 'chars') await renderChars();
     else if (view === 'char') await renderChar(currentChar);
+    else if (view === 'design') await renderDesign(main, { request, toast });
     else if (view === 'settings') await renderSettings();
     else await renderAudit();
   } catch (e) {

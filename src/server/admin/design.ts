@@ -2,7 +2,8 @@
 // src/shared/design-edit.ts (편집기 전용으로 덧붙인 것).
 //
 //   GET  /api/admin/design                     → DesignBundle (지금 설계 + 편집기가 고를 기술·아이템·직업 + rev)
-//   PUT  /api/admin/design                      DesignSaveBody      → DesignSaveResult (여러 트리·성장 규칙·기술 값을 한 번에, 편집기가 씀)
+//   PUT  /api/admin/design                      DesignSaveBody      → DesignSaveResult (여러 트리·성장 규칙·기술 값을 한 번에, 편집기가 씀;
+//                                                 검사만(dryRun)이면 설계 오류도 200 + ok:false)
 //   PUT  /api/admin/design/skilltree/:classId   SkillTreeSaveBody   → DesignSaveResult
 //   PUT  /api/admin/design/progression          ProgressionSaveBody → DesignSaveResult
 //   GET  /api/admin/design/history              → DesignHistoryList (data/design-history/, 새것부터)
@@ -80,6 +81,8 @@ interface CommitOptions {
   actor: string;
   /** 판 기록·작업 기록 요약 앞에 붙일 말 (되돌리기) */
   prefix?: string;
+  /** 검사만 할 때 설계에 오류가 있어도 HTTP 200 (ok: false) 으로 답함 (편집기의 실시간 검사가 브라우저 콘솔에 오류를 남기지 않게) */
+  softCheck?: boolean;
 }
 
 export class DesignApi {
@@ -224,7 +227,7 @@ export class DesignApi {
       if (typeof p === 'string') return failed(400, p, rev, [bodyIssue(p)]);
       update.abilities = p;
     }
-    return this.commit({ update, rev: dryRun ? null : (body.rev as string), dryRun, actor });
+    return this.commit({ update, rev: dryRun ? null : (body.rev as string), dryRun, actor, softCheck: dryRun });
   }
 
   /** PUT /design/skilltree/:classId: 직업 하나의 트리 (+ 그 직업 기술의 값) */
@@ -310,7 +313,7 @@ export class DesignApi {
     const issues = gd.checkUpdate(o.update);
     if (issues.some(isError)) {
       const n = issues.filter(isError).length;
-      return failed(400, `검사에서 오류 ${n}개가 나와 ${o.dryRun ? '저장할 수 없습니다' : '저장하지 않았습니다'}.`, rev, issues);
+      return failed(o.dryRun && o.softCheck ? 200 : 400, `검사에서 오류 ${n}개가 나와 ${o.dryRun ? '저장할 수 없습니다' : '저장하지 않았습니다'}.`, rev, issues);
     }
     if (o.dryRun) {
       const after = {

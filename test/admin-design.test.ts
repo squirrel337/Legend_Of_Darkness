@@ -114,6 +114,11 @@ test('검사만(dryRun): 고친 트리를 검사해 문제의 자리를 알려 �
   assert.equal(stale.json.rev, b.rev);
   // 서버 최대 레벨보다 높은 필요 레벨은 경고
   assert.ok(stale.json.issues.some((i) => i.level === 'warn' && i.where === 'skilltrees.json(warrior/w_whirl)' && /최대 레벨/.test(i.msg)));
+  // 편집기의 실시간 검사(PUT /design 의 dryRun)는 설계 오류도 200 으로, ok: false 와 문제 목록
+  const cyc2 = await save('/design', { rev: b.rev, skillTrees: { warrior: tree }, dryRun: true } satisfies DesignSaveBody);
+  assert.equal(cyc2.status, 200);
+  assert.equal(cyc2.json.ok, false);
+  assert.ok(cyc2.json.issues.some((i) => i.level === 'error' && /돌고 돕니다/.test(i.msg)));
   // 아무것도 바뀌지 않음
   for (const [f, t] of original) assert.equal(gdText(f), t, f);
   assert.deepEqual(historyFiles(), []);

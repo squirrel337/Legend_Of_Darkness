@@ -30,7 +30,10 @@ export interface DesignSaveBody {
   progression?: ProgressionConfig;
   /** 기술의 이름·설명·마나·재사용 대기 수정 */
   abilities?: AbilityPatch[];
-  /** true 면 검사만 합니다. 판이 달라도 검사는 하고, 응답의 rev 로 서버의 판을 알려 줍니다 (편집기의 실시간 검사) */
+  /**
+   * true 면 검사만 합니다 (편집기의 실시간 검사). 판이 달라도 검사는 하고 응답의 rev 로 서버의 판을 알려 주며,
+   * 설계에 오류가 있어도 HTTP 200 에 ok: false 와 문제 목록으로 답합니다 (요청 자체는 성공이므로).
+   */
   dryRun?: boolean;
 }
 
