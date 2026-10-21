@@ -10,10 +10,12 @@ import { autoAllocate, START_STAT } from '../src/shared/formulas';
 import {
   classTier,
   FIRST_CLASSES,
+  learnStatus,
   profGainChance,
   rebirthName,
   SECOND_CLASSES,
   type FirstClassId,
+  type LearnContext,
   type SkillTreeNode,
 } from '../src/shared/progression';
 import { tileInfo } from '../src/shared/tiles';
@@ -275,6 +277,43 @@ test('2차 직업은 이어받은 1차 직업 기술로 어빌 최대 안에 트
       }
     }
   }
+});
+
+test('서버와 화면이 함께 쓰는 learnStatus 로 실제 트리를 보면: 돌진은 회오리 베기 숙련도 40과 뼛조각 3개, 수인 계통 기술은 그 계통만', () => {
+  const ctx = (o: Partial<LearnContext> & { profs?: Record<string, number>; bag?: Record<string, number> } = {}): LearnContext => {
+    const profs = o.profs ?? {};
+    const bag = o.bag ?? {};
+    return {
+      classId: 'warrior',
+      level: 25,
+      abilityLevel: 0,
+      gold: 1_000_000,
+      stats: statsAt('warrior', o.level ?? 25),
+      beastType: null,
+      learnedCount: () => Object.keys(profs).length,
+      learned: (id) => id in profs,
+      prof: (id) => profs[id] ?? 0,
+      itemCount: (id) => bag[id] ?? 0,
+      ability: (id) => gd.abilities.get(id),
+      itemName: (id) => gd.items.get(id)?.name ?? id,
+      beastTypeName: (id) => P.second.beastTypes.find((b) => b.id === id)?.name ?? id,
+      ...o,
+    };
+  };
+  const charge = gd.nodeOf('w_charge')!;
+  const ready = { profs: { w_strike: 60, w_whirl: 40 }, bag: { mat_bone: 3 } };
+  assert.equal(learnStatus('warrior', charge.node, ctx(ready)).learnable, true);
+  assert.match(learnStatus('warrior', charge.node, ctx({ ...ready, profs: { w_strike: 60, w_whirl: 39 } })).reason!, /회오리 베기 숙련도 40/);
+  assert.match(learnStatus('warrior', charge.node, ctx({ ...ready, bag: { mat_bone: 2 } })).reason!, /뼛조각 3개/);
+  assert.match(learnStatus('warrior', charge.node, ctx({ ...ready, level: 24 })).reason!, /레벨 25/);
+  // 수인: 어빌로 배우고, 계통 기술은 그 계통만 (공통 기술은 누구나)
+  const beast = (beastType: string, id: string) =>
+    learnStatus('beastkin', gd.nodeOf(id)!.node, ctx({ classId: 'beastkin', level: 99, abilityLevel: 25, beastType, profs: { k_beast: 10 }, bag: { mat_fang: 5, mat_bat_wing: 5, mat_salamander_scale: 3 } }));
+  assert.equal(beast('mammal', 'k_pounce').learnable, true);
+  assert.equal(beast('bird', 'k_dive').learnable, true);
+  assert.equal(beast('reptile', 'k_venom').learnable, true);
+  assert.match(beast('bird', 'k_pounce').reason!, /포유류 계통/);
+  assert.match(beast('mammal', 'k_venom').reason!, /파충류 계통/);
 });
 
 test('수인 계통: 계통마다 같은 레벨·가격 칸의 줄이 야수화에서 갈라져 그 계통 안에서 끝까지 이어진다', () => {
