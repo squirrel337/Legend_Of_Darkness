@@ -244,14 +244,32 @@ function nodeEl(ctx: Ctx, n: SkillTreeNode): HTMLElement {
   });
 }
 
-function edgePath(a: { x: number; y: number }, b: { x: number; y: number }): string {
-  // 앞 노드 아래의 잇는 점 밑에서 시작해 뒤 노드 위쪽 가운데로
+/** 선수과목 화살표의 베지어 조절점: 앞 노드 아래의 잇는 점 밑에서 시작해 뒤 노드 위쪽 가운데로 */
+function edgeCurve(a: { x: number; y: number }, b: { x: number; y: number }): [number, number][] {
   const sx = a.x + NW / 2;
   const sy = a.y + NH + 8;
   const tx = b.x + NW / 2;
   const ty = b.y - 1;
   const dy = Math.max(28, Math.abs(ty - sy) / 2);
-  return `M ${sx} ${sy} C ${sx} ${sy + dy}, ${tx} ${ty - dy}, ${tx} ${ty}`;
+  return [
+    [sx, sy],
+    [sx, sy + dy],
+    [tx, ty - dy],
+    [tx, ty],
+  ];
+}
+
+function edgePath(a: { x: number; y: number }, b: { x: number; y: number }): string {
+  const [p0, p1, p2, p3] = edgeCurve(a, b);
+  return `M ${p0![0]} ${p0![1]} C ${p1![0]} ${p1![1]}, ${p2![0]} ${p2![1]}, ${p3![0]} ${p3![1]}`;
+}
+
+/** 곡선 위 t (0~1) 자리: 숙련도 글씨를 뒤 노드 쪽에 두어, 한 기술에서 여러 갈래로 나가도 글씨가 겹치지 않게 */
+function edgePoint(a: { x: number; y: number }, b: { x: number; y: number }, t: number): [number, number] {
+  const [p0, p1, p2, p3] = edgeCurve(a, b) as [[number, number], [number, number], [number, number], [number, number]];
+  const u = 1 - t;
+  const f = (i: 0 | 1) => u * u * u * p0[i] + 3 * u * u * t * p1[i] + 3 * u * t * t * p2[i] + t * t * t * p3[i];
+  return [f(0), f(1)];
 }
 
 function drawEdges(ctx: Ctx, el: SVGSVGElement, tree: SkillTreeConfig): void {
@@ -291,9 +309,8 @@ function drawEdges(ctx: Ctx, el: SVGSVGElement, tree: SkillTreeConfig): void {
       });
       el.append(hit);
       if (r.prof > 0 || sel) {
-        const mx = (a.x + b.x) / 2 + NW / 2;
-        const my = (a.y + NH + 8 + b.y) / 2;
-        el.append(svg('text', { x: mx + 8, y: my + 4, class: `dz-elabel${sel ? ' sel' : ''}` }, r.prof > 0 ? `숙련 ${r.prof}` : '배움'));
+        const [mx, my] = edgePoint(a, b, 0.66);
+        el.append(svg('text', { x: mx + 7, y: my + 4, class: `dz-elabel${sel ? ' sel' : ''}` }, r.prof > 0 ? `숙련 ${r.prof}` : '배움'));
       }
     }
   }
@@ -342,6 +359,14 @@ function onPointerDown(ctx: Ctx, e: PointerEvent, wrap: HTMLElement): void {
   }
   e.preventDefault();
   const id = nodeEl.dataset.id!;
+  // 속성 칸에서 고치던 값이 있으면 먼저 반영하고(change), 이번 누름은 고르기만 (다시 그리면 끌던 노드가 바뀌므로)
+  const v = s.version;
+  const active = document.activeElement as HTMLElement | null;
+  if (active && active !== nodeEl && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) active.blur();
+  if (s.version !== v) {
+    s.sel = { type: 'node', id };
+    return ctx.render();
+  }
   const n = s.node(s.cls, id);
   if (!n) return;
   const start = boardPoint(wrap, e);

@@ -206,6 +206,7 @@ export class DesignStore {
     this.issues = b.warnings;
     this.version++;
     this.checkedVersion = this.version;
+    this.checking = false;
     this.loaded = true;
     this.fixSelection();
   }
@@ -389,6 +390,7 @@ export class DesignStore {
   async save(force = false): Promise<'ok' | 'invalid' | 'conflict' | 'error' | 'none'> {
     if (!this.dirty) return 'none';
     window.clearTimeout(this.checkTimer);
+    this.checking = false;
     this.saving = true;
     this.changed();
     try {

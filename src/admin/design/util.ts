@@ -31,10 +31,11 @@ export const pct = (v: number) => String(Math.round(v * 10000) / 100);
 /** 천 단위 쉼표 */
 export const fmtNum = (n: number) => formatNumber(n);
 
-/** 짧은 골드 표시 (노드 칸처럼 좁은 곳): 2,000 · 1.2만 · 12만 · 1억 */
+/** 짧은 골드 표시 (노드 칸처럼 좁은 곳): 800 · 2천 · 1.2만 · 12만 · 1억 */
 export function shortGold(n: number): string {
   const trim = (v: number) => String(Math.round(v * 10) / 10);
-  if (n < 10_000) return formatNumber(n);
+  if (n < 1_000) return formatNumber(n);
+  if (n < 10_000) return `${trim(n / 1_000)}천`;
   if (n < 100_000_000) return `${trim(n / 10_000)}만`;
   return `${trim(n / 100_000_000)}억`;
 }

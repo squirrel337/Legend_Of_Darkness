@@ -140,6 +140,8 @@ const itemName = (id: string) => gd?.items.find((i) => i.id === id)?.name ?? id;
 const abilityName = (id: string) => gd?.abilities.find((a) => a.id === id)?.name ?? id;
 const mapName = (id: string) => gd?.maps.find((m) => m.id === id)?.name ?? id;
 const when = (ms: number) => (ms ? new Date(ms).toLocaleString('ko-KR') : '-');
+/** 수인 계통 이름 (기본 계통; 직업·스킬트리 탭에서 바꾼 이름은 그 탭에서 봄) */
+const BEAST_NAMES: Record<string, string> = { mammal: '포유류', bird: '조류', reptile: '파충류' };
 const dur = (sec: number) => {
   const d = Math.floor(sec / 86400);
   const hh = Math.floor((sec % 86400) / 3600);
@@ -515,6 +517,11 @@ function drawChar(c: CharDetail): void {
         kv('마지막 접속', when(c.lastLoginAt)),
         kv('마지막 IP', c.lastIp || '-'),
         kv('만든 날', when(c.createdAt)),
+        // 성장 체계: 전직 횟수, 승급, 2차 직업의 어빌, 수인 계통
+        kv('전직 횟수', `${c.rebirths ?? 0}번`),
+        kv('승급', c.ascended ? '함' : '아직'),
+        c.abilityLevel ? kv('어빌 (어빌 경험치)', `${c.abilityLevel} (${fmt(c.abilityExp ?? 0)})`) : null,
+        c.classId === 'beastkin' ? kv('수인 계통', c.beastType ? (BEAST_NAMES[c.beastType] ?? c.beastType) : '아직 고르지 않음') : null,
       ),
     ),
     h(
@@ -570,13 +577,21 @@ function drawChar(c: CharDetail): void {
       h(
         'div',
         { class: 'box' },
-        h('h2', null, `기술 ${c.skills.length} · 마법 ${c.spells.length}`),
+        h('h2', null, `기술 ${c.skills.length} · 마법 ${c.spells.length}`, h('small', { class: 'muted', style: 'font-weight:400' }, ' (옆의 수는 숙련도)')),
         h('datalist', { id: 'admin-abilities' }, ...data.abilities.map((a) => h('option', { value: a.name }, `${className(a.classId)} · Lv.${a.level}`))),
         h('div', { class: 'row' }, learnInput, btn('배우게 하기', () => act(name, 'learnAbility', { query: learnInput.value }))),
         h(
           'div',
           { class: 'chips' },
-          ...[...c.skills, ...c.spells].map((id) => h('span', { class: 'chip' }, abilityName(id), h('button', { title: '잊게 하기', onclick: () => act(name, 'forgetAbility', { id }) }, '×'))),
+          ...[...c.skills, ...c.spells].map((id) =>
+            h(
+              'span',
+              { class: 'chip', title: c.prof?.[id] !== undefined ? `숙련도 ${c.prof[id]}` : '' },
+              abilityName(id),
+              c.prof?.[id] !== undefined ? h('small', { class: 'muted' }, ` ${c.prof[id]}`) : null,
+              h('button', { title: '잊게 하기', onclick: () => act(name, 'forgetAbility', { id }) }, '×'),
+            ),
+          ),
         ),
         h('h2', { style: 'margin-top:14px' }, '상태'),
         h('div', { class: 'row' }, btn('완전 회복', () => act(name, 'heal')), btn('부활', () => act(name, 'revive')), btn(c.godMode ? '무적 끄기' : '무적 켜기', () => act(name, 'setGod', { on: !c.godMode }))),

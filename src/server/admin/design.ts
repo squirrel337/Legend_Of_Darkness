@@ -339,8 +339,13 @@ export class DesignApi {
     });
     const warnings = [...applied, ...this.serverIssues(gd.skillTrees, gd.progression)];
     const newRev = this.rev();
-    if (changes.length === 0) return reply(200, { ok: true, msg: '바뀐 것이 없습니다.', issues: warnings, rev: newRev } satisfies DesignSaveResult);
-    const summary = o.prefix ? `${o.prefix}: ${summarizeChanges(changes, 3)}` : summarizeChanges(changes);
+    const newTexts = this.texts();
+    const changedFiles = DESIGN_FILES.filter((f) => newTexts[f] !== oldTexts[f]);
+    if (changes.length === 0 && changedFiles.length === 0)
+      return reply(200, { ok: true, msg: '바뀐 것이 없습니다.', issues: warnings, rev: newRev } satisfies DesignSaveResult);
+    // 손으로 고친 파일 때문에 기술의 레벨·가격만 트리와 달랐던 경우에도 맞춘 파일은 남김
+    const base = changes.length ? summarizeChanges(changes, o.prefix ? 3 : 4) : '기술 파일의 레벨·가격을 스킬트리에 맞춤';
+    const summary = o.prefix ? `${o.prefix}: ${base}` : base;
     if (!o.kind) {
       // 트리·기술 값이 바뀐 직업이 하나뿐이고 성장 규칙은 그대로면 그 직업의 트리 저장으로 남김
       const classes = new Set(changes.flatMap((c) => (c.classId ? [c.classId] : [])));
@@ -349,8 +354,6 @@ export class DesignApi {
       if (classes.size === 1 && !prog) o.classId = [...classes][0];
     }
 
-    const newTexts = this.texts();
-    const changedFiles = DESIGN_FILES.filter((f) => newTexts[f] !== oldTexts[f]);
     let entry: DesignHistoryEntry;
     try {
       entry = this.writeHistory(o, summary, before);
@@ -372,7 +375,7 @@ export class DesignApi {
     const target = o.kind === 'progression' ? '성장 규칙' : o.classId ? `${names.className(o.classId)} 트리` : o.kind === 'restore' ? '설계 전체' : '직업·스킬트리';
     this.world.audit.write(o.actor, o.kind === 'restore' ? 'restoreDesign' : 'saveDesign', target, summary);
     log.info(`[관리자] ${o.actor} 직업·스킬트리 ${o.kind === 'restore' ? '되돌리기' : '저장'}: ${summary} (파일: ${changedFiles.join(', ') || '없음'})`);
-    const msg = `${o.kind === 'restore' ? '되돌렸습니다' : '저장했습니다'}. 게임에 바로 반영했습니다. (${changes.length}곳)`;
+    const msg = `${o.kind === 'restore' ? '되돌렸습니다' : '저장했습니다'}. 게임에 바로 반영했습니다.${changes.length ? ` (${changes.length}곳)` : ''}`;
     return reply(200, { ok: true, msg, issues: warnings, rev: newRev } satisfies DesignSaveResult);
   }
 

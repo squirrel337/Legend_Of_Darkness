@@ -375,3 +375,33 @@ test('되돌리려는 판이 지금 데이터와 맞지 않으면(없는 기술)
   const prog: ProgressionConfig = srv.world.data.progression;
   assert.equal(prog.ascend.title, '마스터');
 });
+
+test('손으로 고쳐 트리와 어긋난 기술의 레벨은, 바꾼 곳이 없어도 저장하면 트리에 맞춰 abilities.json 에 쓴다', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-design-sync-'));
+  const gd2 = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-design-sync-gd-'));
+  fs.cpSync(path.join(ROOT, 'gamedata'), gd2, { recursive: true });
+  const file = path.join(gd2, 'abilities.json');
+  const orig = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, orig.replace(/("id":"w_whirl"[^\n]*?"level":)12,/, (_m, head: string) => `${head}13,`));
+  const s2 = await startServer(testConfig(dir, { GAMEDATA_DIR: gd2 }));
+  try {
+    assert.ok(s2.world.data.designWarnings.some((w) => w.where === 'skilltrees.json(warrior/w_whirl)'), '불러올 때 경고');
+    const base = `http://127.0.0.1:${s2.port}/api/admin`;
+    const login = await fetch(`${base}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ADMIN_PW }) });
+    const auth = { Authorization: `Bearer ${String(((await login.json()) as { token: string }).token)}` };
+    const rev = ((await (await fetch(`${base}/design`, { headers: auth })).json()) as DesignBundle).rev;
+    const res = await fetch(`${base}/design`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...auth }, body: JSON.stringify({ rev }) });
+    const json = (await res.json()) as DesignSaveResult;
+    assert.equal(res.status, 200, JSON.stringify(json));
+    assert.match(json.msg, /저장했습니다/);
+    assert.equal(fs.readFileSync(file, 'utf8'), orig, '트리의 레벨(12)로 맞춰 처음 파일 그대로');
+    assert.deepEqual(s2.world.data.designWarnings, []);
+    const hist = fs.readdirSync(path.join(dir, 'design-history'));
+    assert.equal(hist.length, 1);
+    assert.match((JSON.parse(fs.readFileSync(path.join(dir, 'design-history', hist[0]!), 'utf8')) as { summary: string }).summary, /레벨·가격을 스킬트리에 맞춤/);
+  } finally {
+    await s2.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(gd2, { recursive: true, force: true });
+  }
+});
