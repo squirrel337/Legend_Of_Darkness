@@ -46,6 +46,13 @@ function errorsOf(edit: (d: { progression: ProgressionConfig; skillTrees: SkillT
 
 const has = (list: DesignIssue[], re: RegExp) => list.some((i) => re.test(`${i.where} ${i.msg}`));
 
+/** 설계를 고쳐 검사한 결과의 경고만 */
+function warningsOf(edit: (d: { progression: ProgressionConfig; skillTrees: SkillTreesConfig }) => void): DesignIssue[] {
+  const d = { progression: readJson('progression.json') as ProgressionConfig, skillTrees: readJson('skilltrees.json') as SkillTreesConfig };
+  edit(d);
+  return checkDesign(d, gd).filter((i) => i.level === 'warn');
+}
+
 // ───────────────────────── 설계 파일 ─────────────────────────
 
 test('progression.json 의 기본값은 설계 문서(원작 수치)와 같다', () => {
@@ -169,6 +176,21 @@ test('설계 검사는 없는 id, 선수과목 순환, 범위 밖 값, 알 수 �
   assert.ok(has(errorsOf((d) => (node(d, 'beastkin', 'k_rend').beastType = 'fish')), /알 수 없는 수인 계통 'fish'/));
   assert.ok(has(errorsOf((d) => (node(d, 'warrior', 'w_whirl').row = node(d, 'warrior', 'w_strike').row)), /이미 강타/));
   assert.ok(has(errorsOf((d) => d.skillTrees.trees.warrior.nodes.push({ ...node(d, 'rogue', 'r_stab') })), /도적의 기술/));
+});
+
+test('설계 검사는 성장이 막히는 설계를 경고한다: 숙련도가 오르지 않음, 어빌 경험치 0, 승급 없이 2차 전직', () => {
+  assert.deepEqual(warningsOf(() => {}), [], '기본 설계는 경고 없음');
+  const noProf = warningsOf((d) => {
+    d.progression.proficiency.baseChance = 0;
+    d.progression.proficiency.minChance = 0;
+  });
+  assert.ok(has(noProf, /progression\.json\(proficiency\).*숙련도가 오르지 않습니다/), JSON.stringify(noProf));
+  // 둘 중 하나만 0 이면 오름
+  assert.deepEqual(warningsOf((d) => (d.progression.proficiency.minChance = 0)), []);
+  assert.ok(has(warningsOf((d) => (d.progression.ability.expRatio = 0)), /progression\.json\(ability\).*어빌 1 에 머뭅니다/));
+  const noAsc = warningsOf((d) => (d.progression.second.conditions.archer = d.progression.second.conditions.archer.filter((c) => c.type !== 'ascended')));
+  assert.ok(has(noAsc, /second\.conditions\.archer.*승급하지 않아도 궁사\(으\)로 2차 전직/), JSON.stringify(noAsc));
+  assert.equal(noAsc.length, 1, '그 직업만');
 });
 
 test('잘못된 설계 파일이 있으면 서버가 어디가 틀렸는지 알려 주고 시작하지 않는다', () => {

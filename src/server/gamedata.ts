@@ -658,7 +658,9 @@ export function checkProgression(raw: unknown, refs: DesignRefs): DesignIssue[] 
     const base = numField(out, 'proficiency', prof, 'baseChance', 0, 1);
     numField(out, 'proficiency', prof, 'slowdown', 0, 1);
     const min = numField(out, 'proficiency', prof, 'minChance', 0, 1);
-    if (base !== undefined && min !== undefined && min > base)
+    if (base === 0 && min === 0)
+      out.warn('proficiency', 'baseChance 와 minChance 가 모두 0 이라 숙련도가 오르지 않습니다. 숙련도가 필요한 선수과목과 승급 조건을 아무도 채울 수 없습니다.');
+    else if (base !== undefined && min !== undefined && min > base)
       out.warn('proficiency', 'minChance 가 baseChance 보다 커서 숙련도와 상관없이 늘 같은 확률로 오릅니다.');
     const lo = numField(out, 'proficiency', prof, 'effectMin', 0.01, 10);
     const hi = numField(out, 'proficiency', prof, 'effectMax', 0.01, 10);
@@ -672,8 +674,10 @@ export function checkProgression(raw: unknown, refs: DesignRefs): DesignIssue[] 
   // 어빌리티
   const ab = section('ability', ['maxLevel', 'expRatio', 'hpPerLevel', 'mpPerLevel']);
   if (ab) {
-    intField(out, 'ability', ab, 'maxLevel', 1, 999);
-    numField(out, 'ability', ab, 'expRatio', 0, 10);
+    const abMax = intField(out, 'ability', ab, 'maxLevel', 1, 999);
+    const ratio = numField(out, 'ability', ab, 'expRatio', 0, 10);
+    if (ratio === 0 && abMax !== 1)
+      out.warn('ability', 'expRatio 가 0 이라 어빌 경험치를 받지 않아 2차 직업이 어빌 1 에 머뭅니다 (어빌 2 이상이 필요한 2차 직업 기술을 배울 수 없음).');
     intField(out, 'ability', ab, 'hpPerLevel', 0, 100_000);
     intField(out, 'ability', ab, 'mpPerLevel', 0, 100_000);
   }
@@ -735,7 +739,12 @@ export function checkProgression(raw: unknown, refs: DesignRefs): DesignIssue[] 
       classList(out, refs, w, v, FIRST_CLASSES);
       if (Array.isArray(v) && v.length === 0) out.warn(w, `${designClassName(refs, id)}(으)로 2차 전직할 수 있는 1차 직업이 없습니다.`);
     });
-    perClass(out, refs, 'second.conditions', sc.conditions, SECOND_CLASSES, conditionList);
+    perClass(out, refs, 'second.conditions', sc.conditions, SECOND_CLASSES, (v, w, id) => {
+      conditionList(v, w);
+      // 원작(과 설계 문서)은 승급한 뒤에만 2차 전직
+      if (Array.isArray(v) && !v.some((c) => isObj(c) && c.type === 'ascended'))
+        out.warn(w, `승급 조건(ascended)이 없어 승급하지 않아도 ${designClassName(refs, id)}(으)로 2차 전직할 수 있습니다.`);
+    });
     if (!Array.isArray(sc.beastTypes) || sc.beastTypes.length === 0)
       out.error('second.beastTypes', '수인 계통이 하나 이상 있어야 합니다. ([{ "id": "mammal", "name": "포유류" }, ...])');
     else {
