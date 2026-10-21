@@ -447,18 +447,22 @@ test('5레벨 직업 선택은 1차 직업 길드장만 내놓고, 길드장의 
   c.send({ t: 'pick', npc: master.id, key: 'learn:warrior' });
   const learn = await c.waitFor('learn', () => true, mark);
   assert.equal(learn.classId, 'warrior');
-  assert.deepEqual(
-    learn.list.map((e) => e.id),
-    gd.treeOf('warrior').nodes.map((n) => n.ability),
-  );
-  const strike = learn.list.find((e) => e.id === 'w_strike')!;
-  assert.equal(strike.learnable, true, JSON.stringify(strike));
-  assert.equal(strike.level, 5);
-  assert.equal(strike.price, 100);
-  const whirl = learn.list.find((e) => e.id === 'w_whirl')!;
-  assert.equal(whirl.learnable, false);
-  assert.match(whirl.reason!, /레벨 12/);
-  assert.ok(whirl.reqs.some((r) => r.kind === 'level' && !r.met && r.need === 12));
+  // 트리의 기술이 모두, 필요 레벨 순으로
+  const tree = gd.treeOf('warrior').nodes;
+  assert.deepEqual(learn.list.map((e) => e.id).sort(), tree.map((n) => n.ability).sort());
+  for (let i = 1; i < learn.list.length; i++) assert.ok(learn.list[i]!.level >= learn.list[i - 1]!.level, '필요 레벨 순');
+  for (const e of learn.list) {
+    const node = tree.find((n) => n.ability === e.id)!;
+    assert.equal(e.level, node.level);
+    assert.equal(e.price, node.gold);
+    assert.equal(e.learned, false);
+    // 배울 수 있는지는 조건을 모두 채웠는지와 같고, 아니면 첫 번째로 모자란 조건이 이유
+    assert.equal(e.learnable, e.reqs.every((r) => r.met), e.id);
+    if (!e.learnable) assert.ok(e.reason && e.reqs.some((r) => !r.met && e.reason!.includes(r.label)), `${e.id}: ${e.reason}`);
+  }
+  const high = learn.list.find((e) => e.level > 5)!;
+  assert.equal(high.learnable, false);
+  assert.ok(high.reqs.some((r) => r.kind === 'level' && !r.met && r.need === high.level && r.have === 5));
   c.close();
 });
 

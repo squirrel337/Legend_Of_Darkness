@@ -471,7 +471,8 @@ function intField(out: IssueList, w: string, o: Record<string, unknown>, key: st
   const v = o[key];
   if (v === undefined && optional) return undefined;
   if (!isInt(v, lo, hi)) {
-    out.error(w, `${key} 는 ${lo}~${hi >= Number.MAX_SAFE_INTEGER ? '' : hi} 사이의 정수여야 합니다. (지금: ${JSON.stringify(v) ?? '없음'})`);
+    const range = hi >= Number.MAX_SAFE_INTEGER ? `${lo} 이상의` : `${lo}~${hi} 사이의`;
+    out.error(w, `${key} 는 ${range} 정수여야 합니다. (지금: ${JSON.stringify(v) ?? '없음'})`);
     return undefined;
   }
   return v;

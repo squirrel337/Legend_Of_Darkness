@@ -72,7 +72,7 @@ function mainOptions(world: World, p: Player, npc: Npc): DialogOption[] {
         // 5레벨 직업 선택은 1차 직업 길드장만 (2차 직업 스승은 그 직업이 된 사람에게 기술만 가르침)
         if (s.classId === 'peasant') opts.push({ key: 'learn:peasant', label: '기본 기술 배우기' });
         else if (p.data.classId === 'peasant' && isFirstClass(s.classId))
-          opts.push({ key: `class:${s.classId}`, label: `${className(world, s.classId)}의 길 걷기 (전직)` });
+          opts.push({ key: `class:${s.classId}`, label: `${className(world, s.classId)}의 길 걷기 (직업 선택)` });
         else if (p.data.classId === s.classId) opts.push({ key: `learn:${s.classId}`, label: '기술/마법 배우기' });
         opts.push({ key: `about:${s.classId}`, label: `${className(world, s.classId)}에 대해 듣기` });
         break;
@@ -171,11 +171,11 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
       // 2차 직업은 승급 뒤 2차 전직으로만 (5레벨에 고를 수 있는 것은 1차 직업뿐)
       if (!s || s.type !== 'class' || !isFirstClass(s.classId)) return;
       const cls = world.data.classes.get(s.classId)!;
-      if (p.data.classId !== 'peasant') return sendDialog(p, npc, '이미 다른 길을 걷고 있군. 한 번 정한 길은 되돌릴 수 없다네.', [back]);
+      if (p.data.classId !== 'peasant') return sendDialog(p, npc, '이미 다른 길을 걷고 있군. 다른 길은 99레벨에 전직해서 걸을 수 있다네.', [back]);
       const need = world.config.classLevel;
       if (p.level < need && !p.isGm) return sendDialog(p, npc, `아직 이르네. ${need}레벨이 되면 다시 찾아오게.`, [back]);
       if (arg2 !== 'yes') {
-        return sendDialog(p, npc, `${cls.desc}\n\n정말 ${cls.name}의 길을 걷겠는가? 직업은 한 번 정하면 바꿀 수 없다.`, [
+        return sendDialog(p, npc, `${cls.desc}\n\n정말 ${cls.name}의 길을 걷겠는가? 한 번 정하면 99레벨에 전직하기 전까지는 바꿀 수 없다.`, [
           { key: `class:${cls.id}:yes`, label: `예, ${cls.name}이(가) 되겠습니다` },
           back,
         ]);
