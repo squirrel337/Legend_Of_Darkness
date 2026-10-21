@@ -221,6 +221,17 @@ export function unequipToBag(data: CharacterData, gd: GameData, slot: EquipSlot)
   return true;
 }
 
+/** 지금 직업이 입을 수 없는 장비(다른 직업 전용)를 벗겨 소지품(꽉 차면 창고)으로 옮깁니다. 옮긴 개수를 돌려줍니다 */
+export function unequipUnwearable(data: CharacterData, gd: GameData): number {
+  let n = 0;
+  for (const s of EQUIP_SLOTS) {
+    const id = data.equipment[s];
+    const def = id ? gd.items.get(id) : undefined;
+    if (def?.classes && def.classes.length > 0 && !def.classes.includes(data.classId) && unequipToBag(data, gd, s)) n++;
+  }
+  return n;
+}
+
 /**
  * 직업 변경 (평민의 5레벨 직업 선택과 관리자 명령): 다른 직업의 기술/마법과 못 쓰는 장비를 정리합니다.
  * 전직·2차 전직은 기술을 그대로 가지므로 이 함수를 쓰지 않습니다 (progression.ts).
@@ -241,11 +252,7 @@ export function setClassOnData(data: CharacterData, gd: GameData, classId: Class
     data.abilityExp = 0;
   }
   if (classId !== 'beastkin') data.beastType = null;
-  for (const s of EQUIP_SLOTS) {
-    const id = data.equipment[s];
-    const def = id ? gd.items.get(id) : undefined;
-    if (def?.classes && def.classes.length > 0 && !def.classes.includes(classId)) unequipToBag(data, gd, s);
-  }
+  unequipUnwearable(data, gd);
 }
 
 /** 직업과 레벨에 맞는 가장 좋은 장비 목록 (관리자 지급용) */

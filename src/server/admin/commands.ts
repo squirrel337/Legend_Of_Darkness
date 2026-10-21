@@ -238,7 +238,7 @@ const COMMANDS: Command[] = [
     names: ['만렙', 'max', 'maxout'],
     level: 'gm',
     usage: '/만렙 [이름] [직업]',
-    desc: '만렙 + 능력치 최대 + 모든 기술 + 최고 장비를 한 번에!',
+    desc: '만렙 + 능력치 최대 + 모든 기술(숙련도 최대) + 최고 장비를 한 번에! (2차 직업은 어빌도 최대)',
     run: (ctx, args) => {
       const { target, rest } = split(ctx, args, 0);
       const cls = rest[0] ? parseClass(rest[0]) : null;
@@ -317,6 +317,74 @@ const COMMANDS: Command[] = [
       const what = rest.join(' ');
       if (!what || what === '전부' || what === 'all' || what === '모두') return report(ctx.p, ctx.admin.learnAll(ctx.p.name, target));
       report(ctx.p, ctx.admin.learnAbility(ctx.p.name, target, what));
+    },
+  },
+  {
+    names: ['숙련도', 'prof'],
+    level: 'gm',
+    usage: '/숙련도 [이름] 전부|기술이름 [값]',
+    desc: '배운 기술·마법의 숙련도를 설정합니다. (값을 빼면 최대)',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 1);
+      let list = [...rest];
+      let value: number | undefined;
+      const last = num(list[list.length - 1]);
+      if (list.length > 1 && last !== null) {
+        value = last;
+        list = list.slice(0, -1);
+      }
+      const what = list.join(' ');
+      if (!what) return ctx.p.err('사용법: /숙련도 [이름] 전부|기술이름 [값]');
+      const all = ['전부', '모두', 'all'].includes(what);
+      report(ctx.p, ctx.admin.setProficiency(ctx.p.name, target, all ? 'all' : what, value));
+    },
+  },
+  {
+    names: ['어빌', 'ability'],
+    level: 'gm',
+    usage: '/어빌 [이름] 레벨',
+    desc: '2차 직업의 어빌리티 레벨을 설정합니다.',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 1);
+      const n = num(rest[0]);
+      if (n === null) return ctx.p.err('사용법: /어빌 [이름] 레벨');
+      report(ctx.p, ctx.admin.setAbilityLevel(ctx.p.name, target, n));
+    },
+  },
+  {
+    names: ['승급', 'ascend'],
+    level: 'gm',
+    usage: '/승급 [이름] [켜기|끄기]',
+    desc: '승급 여부(칭호, 2차 전직 조건)를 바꿉니다.',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 0);
+      const v = (rest[0] ?? '').toLowerCase();
+      const on = ['켜기', 'on', '1'].includes(v) ? true : ['끄기', 'off', '0'].includes(v) ? false : null;
+      report(ctx.p, ctx.admin.setAscended(ctx.p.name, target, on));
+    },
+  },
+  {
+    names: ['전직횟수', 'rebirths'],
+    level: 'gm',
+    usage: '/전직횟수 [이름] 수',
+    desc: '전직(환골탈태) 횟수를 설정합니다.',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 1);
+      const n = num(rest[0]);
+      if (n === null) return ctx.p.err('사용법: /전직횟수 [이름] 수');
+      report(ctx.p, ctx.admin.setRebirths(ctx.p.name, target, n));
+    },
+  },
+  {
+    names: ['계통', 'beast'],
+    level: 'gm',
+    usage: '/계통 [이름] 포유류|조류|파충류|없음',
+    desc: '수인의 계통을 바꿉니다. (없음: 2차 직업 인도자에게서 다시 고르게)',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 1);
+      const v = rest[0];
+      if (!v) return ctx.p.err('사용법: /계통 [이름] 포유류|조류|파충류|없음');
+      report(ctx.p, ctx.admin.setBeastType(ctx.p.name, target, ['없음', 'none'].includes(v) ? null : v));
     },
   },
   {
@@ -497,8 +565,15 @@ const COMMANDS: Command[] = [
       const d = admin.characterDetail(nm(args[0]) || p.name);
       if (!d) return p.err('캐릭터를 찾을 수 없습니다.');
       const cls = world.data.classes.get(d.classId)?.name ?? d.classId;
+      const beast = d.beastType ? world.data.progression.second.beastTypes.find((b) => b.id === d.beastType)?.name ?? d.beastType : '';
+      const growth = [
+        `전직 ${d.rebirths}번`,
+        ...(d.ascended ? [world.data.progression.ascend.title] : []),
+        ...(d.abilityLevel > 0 ? [`어빌 ${d.abilityLevel}`] : []),
+        ...(beast ? [`${beast} 계통`] : []),
+      ].join(' · ');
       p.sys(
-        `${d.name} — ${cls} ${d.level}레벨, 경험치 ${formatNumber(d.exp)}, 골드 ${formatNumber(d.gold)}, ` +
+        `${d.name} — ${cls} ${d.level}레벨 (${growth}), 경험치 ${formatNumber(d.exp)}, 골드 ${formatNumber(d.gold)}, ` +
           `힘${d.stats.str} 지능${d.stats.int} 지혜${d.stats.wis} 건강${d.stats.con} 민첩${d.stats.dex}, ` +
           `포인트 ${d.statPoints}, 권한 ${ROLE_NAMES[d.role]}, ${d.online ? '접속 중' : '오프라인'} (${d.mapId} ${d.x},${d.y})`,
       );

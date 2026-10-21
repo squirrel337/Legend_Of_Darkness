@@ -30,7 +30,7 @@ import type { Monster } from '../world/Monster';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
 import { dropToGround } from './ground';
-import { gainExp } from './progression';
+import { gainExp, gainProficiency, proficiencyMultiplier } from './progression';
 import { dismissSummons, summonCreatures, summonDied } from './summons';
 
 // 테스트에서 Math.random 을 바꿔 끼울 수 있도록 호출할 때마다 찾습니다
@@ -221,6 +221,8 @@ interface PhysOpts {
   hideBonus?: number;
   wasHidden?: boolean;
   element: Element;
+  /** 플레이어 기술의 숙련도 배율 (평타·몬스터는 없음) */
+  power?: number;
 }
 
 /** 물리 공격 한 번 (플레이어 또는 몬스터) */
@@ -245,6 +247,7 @@ export function physicalAttack(world: World, attacker: Creature, target: Creatur
   if (isPlayer(attacker)) {
     const d = attacker.derived;
     base = physicalBase(d, attacker.level, randInt(d.dmgMin, d.dmgMax)) * o.mult + (o.bonus ?? 0);
+    base *= o.power ?? 1;
     if (o.hideBonus && o.wasHidden) base *= 1 + o.hideBonus;
     const might = attacker.statuses.get('might');
     if (might) base *= 1 + might.potency / 100;
@@ -274,9 +277,17 @@ function statValue(c: Creature, stat: string | undefined, fallback: 'int' | 'wis
   return (c as Monster).stats.int;
 }
 
-export function magicAttack(world: World, caster: Creature, target: Creature, e: Extract<AbilityEffect, { type: 'magic' }>, element: Element): number {
+/** 마법 공격 한 번. power 는 플레이어 기술의 숙련도 배율 */
+export function magicAttack(
+  world: World,
+  caster: Creature,
+  target: Creature,
+  e: Extract<AbilityEffect, { type: 'magic' }>,
+  element: Element,
+  power = 1,
+): number {
   const magicPct = isPlayer(caster) ? caster.derived.magic : 0;
-  let base = magicBase(e.base, e.ratio, statValue(caster, e.stat, 'int'), caster.level, magicPct);
+  let base = magicBase(e.base, e.ratio, statValue(caster, e.stat, 'int'), caster.level, magicPct) * power;
   const focus = caster.statuses.get('focus');
   if (focus) base *= 1 + focus.potency / 100;
   base *= 0.9 + rand() * 0.2;
@@ -316,11 +327,12 @@ function killMonster(world: World, m: Monster): void {
   const cfg = world.config;
   const exp = m.stats.exp * cfg.expRate;
   if (exp > 0) {
+    // 2차 직업은 받은 경험치(배율·그룹 분배 뒤)의 일부를 어빌 경험치로도 받습니다 (gainExp 의 fromKill)
     const sharers = world.groups.expSharers(top, map, x, y);
-    if (sharers.length <= 1) gainExp(top, exp);
+    if (sharers.length <= 1) gainExp(top, exp, { fromKill: true });
     else {
       const each = (exp * (1 + 0.1 * (sharers.length - 1))) / sharers.length;
-      for (const p of sharers) gainExp(p, each);
+      for (const p of sharers) gainExp(p, each, { fromKill: true });
     }
   }
   const [gmin, gmax] = m.stats.gold;
@@ -527,6 +539,8 @@ interface CastContext {
   targetId?: number;
   /** 몬스터 시전 시 대상 */
   forcedTarget?: Creature;
+  /** 숙련도 배율 (플레이어만): 피해·회복과 해로운 상태가 걸릴 확률에 곱함 */
+  power?: number;
 }
 
 /** 시전 대상 목록을 고릅니다. 실패하면 이유 문자열 */
@@ -648,6 +662,7 @@ function dash(caster: Creature, distance: number): void {
 function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidden: boolean): void {
   const { def, caster } = ctx;
   const map = caster.map!;
+  const power = ctx.power ?? 1;
   let list = targets;
   for (const e of def.effects) {
     if (e.type === 'dash') {
@@ -680,26 +695,29 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
               hideBonus: e.hideBonus,
               wasHidden,
               element: el,
+              power,
             });
             dealt += Math.max(0, before - t.hp);
           }
-          // 흡혈: 실제로 깎은 체력의 일부만큼 시전자 회복
+          // 흡혈: 실제로 깎은 체력의 일부만큼 시전자 회복 (깎은 체력이 숙련도를 따르므로 따로 곱하지 않음)
           if (e.lifesteal && dealt > 0 && !caster.isDead) healCreature(caster, caster, Math.max(1, Math.round(dealt * e.lifesteal)), false);
           break;
         }
         case 'magic':
-          magicAttack(world, caster, t, e, el);
+          magicAttack(world, caster, t, e, el, power);
           break;
         case 'heal': {
           const magicPct = isPlayer(caster) ? caster.derived.magic : 0;
-          let amt = magicBase(e.base, e.ratio, statValue(caster, e.stat, 'wis'), caster.level, magicPct);
+          let amt = magicBase(e.base, e.ratio, statValue(caster, e.stat, 'wis'), caster.level, magicPct) * power;
           const focus = caster.statuses.get('focus');
           if (focus) amt *= 1 + focus.potency / 100;
           healCreature(caster, t, amt, false);
           break;
         }
         case 'status': {
-          if (e.chance !== undefined && rand() > e.chance) {
+          // 숙련도: 해로운 상태가 걸릴 확률에 배율 (확률이 없으면 1로 보고 곱한 뒤 1에서 자름)
+          const chance = power !== 1 && STATUS_INFO[e.status].kind === 'debuff' ? Math.min(1, (e.chance ?? 1) * power) : e.chance;
+          if (chance !== undefined && rand() > chance) {
             map.broadcast({ t: 'dmg', id: t.id, v: 0, k: 'miss', hp: t.hpPct });
             break;
           }
@@ -713,7 +731,7 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
           if (isPlayer(t)) revivePlayer(t, e.hpPct);
           break;
         case 'restoreMp':
-          restoreMana(caster, caster.maxMp * e.pct);
+          restoreMana(caster, caster.maxMp * e.pct * power);
           break;
         case 'sacrifice': {
           const cost = Math.floor(caster.hp * e.hpPct);
@@ -721,7 +739,7 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
           caster.hp = Math.max(1, caster.hp - cost);
           if (isPlayer(caster)) caster.markVitals();
           map.broadcast({ t: 'dmg', id: caster.id, v: cost, k: 'dot', hp: caster.hpPct });
-          applyDamage(world, caster, t, cost * e.mult * elementMultiplier(el, t.defenseElement), 'crit');
+          applyDamage(world, caster, t, cost * e.mult * power * elementMultiplier(el, t.defenseElement), 'crit');
           break;
         }
       }
@@ -758,7 +776,7 @@ export function playerUseAbility(world: World, p: Player, abilityId: unknown, ta
   const cd = p.cooldowns.get(def.id) ?? 0;
   if (now < cd) return p.err(`${def.name}: ${((cd - now) / 1000).toFixed(1)}초 후에 다시 사용할 수 있습니다.`);
   if (p.mp < def.mp && !p.god) return p.err('마나가 부족합니다.');
-  const ctx: CastContext = { def, caster: p, ...(typeof targetId === 'number' ? { targetId } : {}) };
+  const ctx: CastContext = { def, caster: p, power: proficiencyMultiplier(p, def.id), ...(typeof targetId === 'number' ? { targetId } : {}) };
   // 대상 쪽을 바라보게
   if (def.targeting === 'enemy' || def.targeting === 'enemyArea' || def.targeting === 'ally') {
     const pre = resolveTargets(ctx);
@@ -789,6 +807,8 @@ function castNow(world: World, p: Player, ctx: CastContext, targets: Creature[],
   if (!appliesHide && OFFENSIVE(def)) breakHide(p);
   p.map!.broadcast({ t: 'act', id: p.id, a: def.kind === 'spell' ? 'cast' : 'skill', dir: p.dir });
   runEffects(world, ctx, targets, wasHidden);
+  // 실제로 쓴 기술·마법의 숙련도가 확률로 오릅니다 (허수아비를 쳐도 됨)
+  gainProficiency(p, def.id);
 }
 
 /** 몬스터(소환수 포함)가 기술/마법을 사용합니다. 사용했으면 true */
