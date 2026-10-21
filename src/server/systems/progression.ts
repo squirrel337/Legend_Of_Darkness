@@ -5,11 +5,13 @@ import { isStatKey, type ClassId, type StatKey } from '../../shared/constants';
 import { computeDerived } from '../../shared/formulas';
 import {
   abilityVitals,
+  describeCondition,
   learnStatus,
   type Condition,
   type ConditionCheck,
   type FirstClassId,
   type LearnContext,
+  type NameLookup,
 } from '../../shared/progression';
 import type { LearnEntry } from '../../shared/protocol';
 import type { ServerConfig } from '../config';
@@ -114,6 +116,14 @@ export function classBaseVitals(data: CharacterData, gd: GameData): { hp: number
   };
 }
 
+/** describeCondition 에 넘길 이름 찾기 (서버의 게임 데이터로) */
+export function namesOf(gd: GameData): NameLookup {
+  return {
+    abilityName: (id) => gd.abilities.get(id)?.name ?? id,
+    itemName: (id) => gd.items.get(id)?.name ?? id,
+  };
+}
+
 /** 서버 쪽 배우기 조건 확인에 쓰는 캐릭터 정보 (클라이언트도 같은 모양을 SelfState 에서 만들어 learnStatus 를 부름) */
 export function learnContextOf(data: CharacterData, gd: GameData): LearnContext {
   const learned = new Set([...data.skills, ...data.spells]);
@@ -163,8 +173,10 @@ const NOT_YET = '아직 준비 중인 기능입니다.';
  */
 export function checkConditions(data: CharacterData, gd: GameData, conds: readonly Condition[]): ConditionCheck {
   void data;
-  void gd;
-  return { ok: conds.length === 0, results: [] };
+  // 틀: 모든 조건을 채우지 못한 것으로 봅니다 (엔진 트랙이 실제 값과 비교하도록 채움)
+  const names = namesOf(gd);
+  const results = conds.map((cond) => ({ cond, met: false, label: describeCondition(cond, names) }));
+  return { ok: results.length === 0, results };
 }
 
 /**

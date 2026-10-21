@@ -165,18 +165,33 @@ export class GameData {
    * 파일 쓰기·판 기록·접속자에게 { t: 'design' } 보내기·플레이어 다시 계산은 부르는 쪽(관리자 트랙의 design.ts)이 합니다.
    */
   applyDesign(next: DesignUpdate): DesignIssue[] {
+    const { issues, apply } = this.prepareDesign(next);
+    if (!issues.some(isError)) apply();
+    return issues;
+  }
+
+  /** applyDesign 과 같은 검사만 하고 아무것도 바꾸지 않습니다 (관리자 편집기의 dryRun, 저장 전 미리 검사) */
+  checkUpdate(next: DesignUpdate): DesignIssue[] {
+    return this.prepareDesign(next).issues;
+  }
+
+  /** 새 설계를 검사하고, 오류가 없을 때 부를 반영 함수를 함께 돌려줍니다 */
+  private prepareDesign(next: DesignUpdate): { issues: DesignIssue[]; apply: () => void } {
     const patches = next.abilities ?? [];
     const issues = checkAbilityPatches(patches, this);
-    if (issues.some(isError)) return issues;
+    if (issues.some(isError)) return { issues, apply: () => undefined };
     // 기술 이름이 바뀌어도 검사 메시지가 새 이름을 쓰도록, 고친 기술로 검사합니다
     const abilities = new Map(this.abilities);
     for (const p of patches) abilities.set(p.id, { ...abilities.get(p.id)!, ...pickPatch(p) });
     const design = { progression: next.progression ?? this.progression, skillTrees: next.skillTrees ?? this.skillTrees };
     issues.push(...checkDesign(design, { classes: this.classes, items: this.items, abilities }));
-    if (issues.some(isError)) return issues;
-    for (const p of patches) Object.assign(this.abilities.get(p.id)!, pickPatch(p));
-    this.setDesign(design.progression as ProgressionConfig, normalizeSkillTrees(design.skillTrees), issues);
-    return issues;
+    return {
+      issues,
+      apply: () => {
+        for (const p of patches) Object.assign(this.abilities.get(p.id)!, pickPatch(p));
+        this.setDesign(design.progression as ProgressionConfig, normalizeSkillTrees(design.skillTrees), issues);
+      },
+    };
   }
 
   /**

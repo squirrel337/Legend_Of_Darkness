@@ -148,7 +148,7 @@ README 와 이 문서는 통합할 때 정리합니다.
 
 ### 8.5 함수
 
-`src/server/systems/progression.ts` — 구현됨: `vitalsBonus`, `pureVitals`, `classBaseVitals`, `learnContextOf`, `learnEntries`. 엔진 트랙이 채울 것 (모양 확정, 지금은 실패나 0·1 을 돌려줌):
+`src/server/systems/progression.ts` — 구현됨: `vitalsBonus`, `pureVitals`, `classBaseVitals`, `namesOf`(조건 설명용 이름 찾기), `learnContextOf`, `learnEntries`. 엔진 트랙이 채울 것 (모양 확정, 지금은 실패나 0·1 을 돌려줌):
 
 ```ts
 checkConditions(data, gd, conds): ConditionCheck        // 값을 바꾸지 않음, 조건마다 결과 하나
@@ -171,7 +171,7 @@ learnFromTree(data, gd, abilityId, { free? }): ProgressionResult
 // ProgressionResult = { ok, msg, check?: ConditionCheck }
 ```
 
-`src/server/gamedata.ts` — `gd.progression`, `gd.skillTrees` (설계가 바뀌면 통째로 바뀌므로 붙잡아 두지 말고 쓸 때마다 `world.data.…` 로 읽기), `gd.treeOf(직업)`, `gd.nodeOf(기술)`, `gd.designWarnings`, `gd.applyDesign({ progression?, skillTrees?, abilities?: AbilityPatch[] }): DesignIssue[]` (오류가 하나라도 있으면 아무것도 바꾸지 않음, 파일은 쓰지 않음), `gd.reloadDesign(dir)`, 검사 함수 `checkDesign`·`checkProgression`·`checkSkillTrees`·`checkAbilityPatches`, `normalizeSkillTrees`. 문제는 `DesignIssue { level: 'error' | 'warn', where: "skilltrees.json(warrior/w_whirl)", msg }`. 파일을 다시 쓸 때는 `formatSkillTrees`·`formatProgression`·`formatListFile`(abilities.json) 로 지금 파일과 같은 모양을 지킵니다 (바꾼 줄만 차이로 보임).
+`src/server/gamedata.ts` — `gd.progression`, `gd.skillTrees` (설계가 바뀌면 통째로 바뀌므로 붙잡아 두지 말고 쓸 때마다 `world.data.…` 로 읽기), `gd.treeOf(직업)`, `gd.nodeOf(기술)`, `gd.designWarnings`, `gd.applyDesign({ progression?, skillTrees?, abilities?: AbilityPatch[] }): DesignIssue[]` (오류가 하나라도 있으면 아무것도 바꾸지 않음, 파일은 쓰지 않음), `gd.checkUpdate(같은 인자)` (검사만, dryRun 용), `gd.reloadDesign(dir)`, 검사 함수 `checkDesign`·`checkProgression`·`checkSkillTrees`·`checkAbilityPatches`, `normalizeSkillTrees`. 문제는 `DesignIssue { level: 'error' | 'warn', where: "skilltrees.json(warrior/w_whirl)", msg }`. 파일을 다시 쓸 때는 `formatSkillTrees`·`formatProgression`·`formatListFile`(abilities.json) 로 지금 파일과 같은 모양을 지킵니다 (바꾼 줄만 차이로 보임).
 
 `src/server/admin/design.ts` — `DesignApi.handle(method, path, readBody, actor) → { status, body } | null` (인증 뒤 `api.ts` 가 부름, 지금은 501):
 

@@ -191,6 +191,10 @@ test('applyDesign: 올바른 설계는 서버를 끄지 않고 바로 반영하�
   trees.trees.warrior.nodes.find((n) => n.ability === 'w_whirl')!.requires.push({ ability: 'w_strike', prof: 30 });
   const prog = JSON.parse(JSON.stringify(live.progression)) as ProgressionConfig;
   prog.ascend.title = '대가';
+  // 미리 검사(dryRun)는 아무것도 바꾸지 않음
+  assert.deepEqual(live.checkUpdate({ skillTrees: trees, progression: prog, abilities: [{ id: 'w_whirl', name: '큰 회오리' }] }), []);
+  assert.equal(live.abilities.get('w_whirl')!.name, '회오리 베기');
+  assert.equal(live.progression.ascend.title, '마스터');
   const ok = live.applyDesign({ skillTrees: trees, progression: prog, abilities: [{ id: 'w_whirl', name: '큰 회오리', mp: 7 }] });
   assert.deepEqual(ok.filter((i) => i.level === 'error'), []);
   assert.deepEqual(live.nodeOf('w_whirl')!.node.requires, [{ ability: 'w_strike', prof: 30 }]);
