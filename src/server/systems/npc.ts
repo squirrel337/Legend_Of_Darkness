@@ -198,7 +198,7 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
       p.broadcastLook();
       p.map?.broadcast({ t: 'fx', fx: 'levelup', id: p.id });
       p.notice(`${cls.name}의 길을 걷기 시작했습니다!`, 'good');
-      world.announce(`${p.name}님이 ${cls.name}(으)로 전직했습니다.`);
+      world.announce(`${p.name}님이 ${cls.name}의 길을 걷기 시작했습니다.`);
       sendDialog(p, npc, `좋다! 이제 그대는 ${cls.name}이다. 시작 장비를 입혀 주었다. 기술은 나에게 배울 수 있다.`, [
         { key: `learn:${cls.id}`, label: '기술/마법 배우기' },
         { key: 'close', label: '대화 끝내기' },

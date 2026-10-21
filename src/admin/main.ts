@@ -621,7 +621,7 @@ async function renderSettings(): Promise<void> {
       field('inviteCode', '초대 코드', invite),
       field('deathExpPenalty', '사망 경험치 손실', death, '0 ~ 1 (0.05 = 현재 레벨 경험치의 5%)'),
       field('startLevel', '새 캐릭터 시작 레벨', startLevel),
-      field('classLevel', '전직 가능 레벨', classLevel),
+      field('classLevel', '직업 선택 레벨', classLevel),
       h(
         'button',
         {
