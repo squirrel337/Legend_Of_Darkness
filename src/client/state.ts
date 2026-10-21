@@ -174,12 +174,16 @@ export class ClientState {
     this.mapNames = new Map(data.maps.map((m) => [m.id, m.name]));
   }
 
+  /** 설계(기술·스킬트리·성장 규칙)를 바꿔 끼운 횟수 (창이 다시 그릴지 가릴 때) */
+  designGen = 0;
+
   /** 관리자가 직업·스킬트리 설계를 바꿨을 때 ('design'): welcome 의 같은 항목을 바꿔 끼웁니다 */
   applyDesign(m: Extract<S2C, { t: 'design' }>): void {
     this.data.abilities = m.abilities;
     this.data.skillTrees = m.skillTrees;
     this.data.progression = m.progression;
     this.abilities = new Map(m.abilities.map((a) => [a.id, a]));
+    this.designGen++;
   }
 
   /** 배우기 조건 확인용 캐릭터 정보 (서버의 learnContextOf 와 같은 값, 내 상태를 아직 받지 못했으면 null) */

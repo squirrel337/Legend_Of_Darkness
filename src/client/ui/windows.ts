@@ -223,21 +223,25 @@ export class Windows {
     this.renderLearn(list, true);
   }
 
-  /** 기술 배우기 창이 열린 채로 골드·소지품·기술·숙련도가 바뀌면 지금 상태로 다시 판정합니다 */
-  refreshLearn(): void {
+  /**
+   * 기술 배우기 창이 열린 채로 골드·소지품·기술·숙련도가 바뀌면 지금 상태로 다시 판정합니다.
+   * force: 설계가 바뀌었을 때처럼 목록이 같아도 (기술 이름·설명이 바뀌었을 수 있어) 다시 그림
+   */
+  refreshLearn(force = false): void {
     const d = this.learnData;
     if (!d || !this.learn.open) return;
     const st = this.game.state;
     const ctx = st.learnContext();
     if (!ctx) return;
-    this.renderLearn(refreshLearnEntries(d.classId, d.list, st.data.skillTrees[d.classId], ctx), false);
+    this.renderLearn(refreshLearnEntries(d.classId, d.list, st.data.skillTrees[d.classId], ctx), force);
   }
 
   private renderLearn(list: LearnEntry[], force: boolean): void {
     const d = this.learnData;
     if (!d) return;
     const st = this.game.state;
-    const key = JSON.stringify([list, this.hideLearned, st.gold]);
+    // 배운 줄의 숙련도는 목록에 없으므로 숙련도도 함께 비교
+    const key = JSON.stringify([list, this.hideLearned, st.gold, st.self?.prof]);
     if (!force && key === this.learnKey) return;
     this.learnKey = key;
     const scroll = this.learn.body.querySelector('.learn-list')?.scrollTop ?? 0;

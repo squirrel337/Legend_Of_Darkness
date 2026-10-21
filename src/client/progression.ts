@@ -66,25 +66,35 @@ export function clientLearnContext(s: LearnSource): LearnContext {
 }
 
 /**
- * 서버가 보낸 길드장 창 목록을 지금 클라이언트 상태로 다시 판정합니다 (창이 열린 채로 골드·재료·숙련도가 바뀔 때).
- * 트리에서 찾지 못한 기술은 서버의 판정을 그대로 둡니다.
+ * 길드장 창 목록 (서버 progression.ts 의 learnEntries 와 같은 순서·값): classId 트리의 기술마다 배우는 조건의 상태,
+ * 필요 레벨(어빌) → 줄 → 칸 순서. 기술 정의를 모르는 칸은 뺍니다.
+ */
+export function learnEntriesFor(classId: ClassId, tree: SkillTreeConfig, ctx: LearnContext): LearnEntry[] {
+  const need = (n: { level?: number; abilityLevel?: number }) => n.abilityLevel ?? n.level ?? 0;
+  return tree.nodes
+    .filter((n) => ctx.ability(n.ability) !== undefined)
+    .sort((a, b) => need(a) - need(b) || a.row - b.row || a.col - b.col)
+    .map((n) => {
+      const s = learnStatus(classId, n, ctx);
+      return {
+        id: n.ability,
+        level: n.level ?? 0,
+        abilityLevel: n.abilityLevel ?? 0,
+        price: n.gold,
+        learned: s.learned,
+        learnable: s.learnable,
+        ...(s.reason !== undefined ? { reason: s.reason } : {}),
+        reqs: s.reqs,
+      };
+    });
+}
+
+/**
+ * 열린 길드장 창의 목록을 지금 클라이언트 상태로 다시 만듭니다 (창이 열린 채로 골드·재료·숙련도·설계가 바뀔 때).
+ * 트리를 알면 트리에서 다시 만들고(설계에서 빠진 기술은 사라지고 새 기술이 보임), 모르면 서버가 보낸 목록 그대로.
  */
 export function refreshLearnEntries(classId: ClassId, list: readonly LearnEntry[], tree: SkillTreeConfig | undefined, ctx: LearnContext): LearnEntry[] {
-  return list.map((e) => {
-    const node = tree?.nodes.find((n) => n.ability === e.id);
-    if (!node) return e;
-    const s = learnStatus(classId, node, ctx);
-    return {
-      id: e.id,
-      level: node.level ?? 0,
-      abilityLevel: node.abilityLevel ?? 0,
-      price: node.gold,
-      learned: s.learned,
-      learnable: s.learnable,
-      ...(s.reason !== undefined ? { reason: s.reason } : {}),
-      reqs: s.reqs,
-    };
-  });
+  return tree ? learnEntriesFor(classId, tree, ctx) : [...list];
 }
 
 /** 채우지 못한 조건 옆에 붙일 지금 값: "지금 8", "2/3개", "배우지 않음" (채웠으면 빈 문자열) */
@@ -159,7 +169,8 @@ export function profChanceLine(prof: number, c: ProficiencyConfig): string {
 
 /**
  * 스킬트리 창의 탭: 지금 직업 → (2차 직업이면) 2차 전직해 온 1차 직업 → 배운 기술이 있는 다른 직업(전직 전 직업) → 평민.
- * 트리가 없는 직업은 뺍니다.
+ * 2차 전직해 온 직업은 저장하지 않으므로, 갈 수 있는 1차 직업이 하나뿐일 때만 그 직업을 넣고(기본 설정),
+ * 여럿이면 배운 기술이 있는 직업만 넣습니다. 트리가 없는 직업은 뺍니다.
  */
 export function treeTabs(
   classId: ClassId,
@@ -172,7 +183,8 @@ export function treeTabs(
     if (!out.includes(c) && trees[c]) out.push(c);
   };
   add(classId);
-  if (isSecondClass(classId)) for (const f of secondFrom[classId] ?? []) add(f);
+  const from = isSecondClass(classId) ? (secondFrom[classId] ?? []) : [];
+  if (from.length === 1) add(from[0]!);
   for (const c of CLASS_IDS) {
     if (c === 'peasant' || !trees[c]) continue;
     if (trees[c]!.nodes.some((n) => learned(n.ability))) add(c);
@@ -200,9 +212,9 @@ export function treeNote(
     let how = '';
     // 전직(무도가는 환골탈태)으로 그 직업이 될 수 있으면, 승급한 1차 직업이 2차 전직으로 갈 수 있으면 그 길을 알려 줌
     const canRebirth = !self.ascended || prog.rebirth.allowAfterAscend;
-    if (isFirstClass(cur) && isFirstClass(viewed) && canRebirth && prog.rebirth.targets[cur].includes(viewed))
-      how = ` ${className(viewed)}(으)로 ${prog.rebirth.names[cur]}하면 배울 수 있습니다.`;
-    else if (isFirstClass(cur) && isSecondClass(viewed) && prog.second.from[viewed].includes(cur))
+    if (isFirstClass(cur) && isFirstClass(viewed) && canRebirth && (prog.rebirth.targets[cur] ?? []).includes(viewed))
+      how = ` ${className(viewed)}(으)로 ${prog.rebirth.names[cur] ?? '전직'}하면 배울 수 있습니다.`;
+    else if (isFirstClass(cur) && isSecondClass(viewed) && (prog.second.from[viewed] ?? []).includes(cur))
       how = ` ${self.ascended ? '' : '승급한 뒤 '}${className(viewed)}(으)로 2차 전직하면 배울 수 있습니다.`;
     const beast = hasBeast ? ` 수인은 2차 전직 때 ${names} 중 한 계통을 고릅니다.` : '';
     return `지금 직업의 기술이 아니라 배울 수 없습니다.${how} 이미 배운 기술은 그대로 쓸 수 있습니다.${beast}`;

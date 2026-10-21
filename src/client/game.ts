@@ -71,6 +71,11 @@ export class Game {
    * 바로 앞에 'levelUp'·'abilityLevelUp' 을 받았을 때만 글씨를 붙입니다.
    */
   private levelText: { text: string; color: string; until: number } | null = null;
+  /**
+   * 다른 사람의 반짝임(fx 'levelup'): 같은 묶음에 레벨이 오른 모습('look')이 뒤따를 때만 "LEVEL UP!" 을 붙입니다
+   * (승급·교환은 모습이 안 오고, 전직은 레벨이 내려감). 엔티티 id → 반짝일 때의 레벨과 기다릴 시각
+   */
+  private levelFx = new Map<number, { level: number; until: number }>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -210,6 +215,7 @@ export class Game {
         break;
       case 'map':
         st.setMap(m.map);
+        this.levelFx.clear();
         for (const e of m.entities) st.entities.set(e.id, entityFromSnapshot(e));
         this.path = [];
         this.pending = null;
@@ -303,15 +309,22 @@ export class Game {
         if (!at) break;
         this.renderer.effects.fx(m.fx, m.el, target?.id ?? null, at, from?.id ?? null, from ? this.renderer.entityPoint(from, now) : null, now, from?.dir);
         if (m.fx === 'levelup' && target) {
-          if (target.id !== st.selfId) this.renderer.effects.text(target.id, at, 'LEVEL UP!', '#ffe066', now, 18, 1800);
-          else if (this.levelText && now <= this.levelText.until) this.renderer.effects.text(target.id, at, this.levelText.text, this.levelText.color, now, 18, 1800);
-          if (target.id === st.selfId) this.levelText = null;
+          if (target.id !== st.selfId) this.levelFx.set(target.id, { level: target.level, until: now + LEVEL_TEXT_MS });
+          else {
+            if (this.levelText && now <= this.levelText.until) this.renderer.effects.text(target.id, at, this.levelText.text, this.levelText.color, now, 18, 1800);
+            this.levelText = null;
+          }
         }
         break;
       }
       case 'look': {
         const e = st.entities.get(m.id);
         if (!e) break;
+        const fx = this.levelFx.get(m.id);
+        if (fx) {
+          this.levelFx.delete(m.id);
+          if (now <= fx.until && m.level > fx.level) this.renderer.effects.text(e.id, this.renderer.entityPoint(e, now), 'LEVEL UP!', '#ffe066', now, 18, 1800);
+        }
         e.look = m.look;
         e.ghost = m.ghost;
         e.level = m.level;
@@ -401,7 +414,7 @@ export class Game {
         this.hud.updateSelf();
         this.charWin.refresh();
         this.skillTree.refresh(true);
-        this.windows.refreshLearn();
+        this.windows.refreshLearn(true);
         break;
       case 'kick':
         this.kickReason = m.reason;

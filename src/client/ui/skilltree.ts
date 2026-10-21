@@ -103,8 +103,8 @@ export class SkillTreeWindow {
     const tabs = treeTabs(s.classId, ctx.learned, trees, prog.second.from);
     const cls = this.view && trees[this.view] ? this.view : (tabs[0] ?? s.classId);
     const tree: SkillTreeConfig = trees[cls] ?? { nodes: [] };
-    // 보이는 것을 정하는 값이 모두 같으면 다시 그리지 않음
-    const key = JSON.stringify([cls, s.classId, s.level, s.abilityLevel, s.beastType, s.base, s.prof, st.gold, st.skills, st.spells, st.inventory, tree]);
+    // 보이는 것을 정하는 값이 모두 같으면 다시 그리지 않음 (설계가 바뀌면 designGen 이 바뀜)
+    const key = JSON.stringify([cls, st.designGen, s.classId, s.level, s.abilityLevel, s.beastType, s.ascended, s.base, s.prof, st.gold, st.skills, st.spells, st.inventory]);
     if (!force && key === this.drawnKey) return;
     this.drawnKey = key;
     const keep = this.treeClass === cls && this.boardWrap ? { left: this.boardWrap.scrollLeft, top: this.boardWrap.scrollTop } : null;
@@ -326,7 +326,7 @@ export class SkillTreeWindow {
           'div',
           { class: 'gt-hint' },
           h('div', null, `기술·마법은 ${teacher}에게서 배웁니다. 조건(레벨·골드·재료·선수과목의 숙련도)을 모두 채우면 배울 수 있습니다.`),
-          h('div', null, '숙련도는 기술을 쓸 때마다 확률로 1씩 올라 최대 100 이 되고, 높을수록 위력과 상태 이상 확률이 커집니다.'),
+          h('div', null, `숙련도는 기술을 쓸 때마다 확률로 1씩 올라 최대 ${st.data.progression.proficiency.max} 이 되고, 높을수록 위력과 상태 이상 확률이 커집니다.`),
           h('div', { class: 'dim' }, '칸에 마우스를 올리면 조건을 보여 주고, 누르면 고정합니다. 오른쪽 아래 숫자는 숙련도, 선 위의 숫자는 필요 숙련도입니다.'),
         ),
       );

@@ -32,6 +32,7 @@ import {
   edgeGeometry,
   growthParts,
   layoutTree,
+  learnEntriesFor,
   nodeLook,
   otherBranch,
   profChanceLine,
@@ -46,7 +47,7 @@ import {
   treeTabs,
   type LearnSource,
 } from '../src/client/progression';
-import { learnContextOf } from '../src/server/systems/progression';
+import { learnContextOf, learnEntries } from '../src/server/systems/progression';
 import { GameData } from '../src/server/gamedata';
 import { emptyEquipment, normalizeCharacter } from '../src/server/storage';
 import { ROOT } from './helpers';
@@ -179,17 +180,24 @@ test('클라이언트 배우기 조건은 서버(learnContextOf)와 실제 트�
 });
 
 test('길드장 창 다시 판정: 골드가 줄면 배우기가 막히고, 이유가 없어지면 reason 도 지운다', () => {
-  const tree: SkillTreeConfig = { nodes: [node('b', 1, 0, { level: 12, gold: 800, requires: [{ ability: 'a', prof: 10 }] }), node('c', 2, 0, { level: 30, gold: 50 })] };
+  const tree: SkillTreeConfig = { nodes: [node('c', 2, 0, { level: 30, gold: 50 }), node('b', 1, 0, { level: 12, gold: 800, requires: [{ ability: 'a', prof: 10 }] })] };
   const before: LearnEntry[] = [
     { id: 'b', level: 12, abilityLevel: 0, price: 800, learned: false, learnable: true, reqs: [] },
     { id: 'c', level: 30, abilityLevel: 0, price: 50, learned: false, learnable: false, reason: '조건이 모자랍니다: 레벨 30 이상', reqs: [] },
+    // 설계에서 빠진 기술 (트리를 알면 목록에서 사라짐)
     { id: 'zz', level: 1, abilityLevel: 0, price: 0, learned: false, learnable: true, reqs: [] },
   ];
   const poor = refreshLearnEntries('warrior', before, tree, clientLearnContext(source({ gold: 100 })));
+  assert.deepEqual(
+    poor.map((e) => e.id),
+    ['b', 'c'],
+    '필요 레벨 순, 트리에 없는 기술은 뺌',
+  );
   assert.equal(poor[0]!.learnable, false);
   assert.match(poor[0]!.reason ?? '', /800 골드/);
   assert.equal(poor[1]!.learnable, false);
-  assert.equal(poor[2], before[2], '트리에 없는 기술은 서버 판정 그대로');
+  // 트리를 모르면 서버가 보낸 목록 그대로
+  assert.deepEqual(refreshLearnEntries('warrior', before, undefined, clientLearnContext(source())), before);
   const rich = refreshLearnEntries('warrior', poor, tree, clientLearnContext(source({ gold: 5000, self: { level: 30 } })));
   assert.equal(rich[0]!.learnable, true);
   assert.equal('reason' in rich[0]!, false, '배울 수 있으면 예전 이유가 남지 않음');
@@ -198,6 +206,32 @@ test('길드장 창 다시 판정: 골드가 줄면 배우기가 막히고, 이�
     rich[1]!.reqs.map((r) => r.label),
     ['레벨 30 이상', '50 골드'],
   );
+});
+
+test('길드장 창 목록은 서버의 learnEntries 와 실제 트리의 모든 직업에서 같다', () => {
+  const data = normalizeCharacter({
+    name: '시험2',
+    classId: 'wizard',
+    level: 45,
+    gold: 30000,
+    skills: [],
+    spells: ['z_fire1', 'z_fire2', 'z_sleep'],
+    prof: { z_fire1: 80, z_fire2: 49, z_sleep: 30 },
+    inventory: [{ item: 'mat_ecto', qty: 3 }],
+  });
+  const client = clientLearnContext({
+    self: { classId: data.classId, level: data.level, abilityLevel: data.abilityLevel, base: { ...data.stats }, beastType: data.beastType, prof: { ...data.prof } },
+    gold: data.gold,
+    skills: data.skills,
+    spells: data.spells,
+    inventory: data.inventory,
+    abilities: gd.abilities,
+    items: gd.items,
+    beastTypes: gd.progression.second.beastTypes,
+  });
+  for (const [cls, tree] of Object.entries(gd.skillTrees.trees) as [ClassId, SkillTreeConfig][]) {
+    assert.deepEqual(learnEntriesFor(cls, tree, client), learnEntries(data, gd, cls), cls);
+  }
 });
 
 test('조건 설명: 채우지 못한 조건에만 지금 값을 붙인다', () => {
@@ -246,6 +280,9 @@ test('스킬트리 탭: 지금 직업 → 2차 전직해 온 1차 직업 → 배
   // 전사로 전직했던 궁사: 전사 기술을 배워 두었음
   const learned = new Set(['warrior_1', 'archer_1']);
   assert.deepEqual(treeTabs('archer', (id) => learned.has(id), trees, from), ['archer', 'rogue', 'warrior', 'peasant']);
+  // 갈 수 있는 1차 직업이 여럿이면 (어디서 왔는지 모르므로) 배운 기술이 있는 직업만
+  const many = { archer: ['rogue', 'wizard'] as ClassId[] };
+  assert.deepEqual(treeTabs('archer', (id) => learned.has(id), trees, many), ['archer', 'warrior', 'peasant']);
   assert.deepEqual(treeTabs('wizard', () => false, trees, from), ['wizard', 'peasant']);
   assert.deepEqual(treeTabs('peasant', () => false, trees, from), ['peasant']);
   // 트리가 없는 직업은 넣지 않음
