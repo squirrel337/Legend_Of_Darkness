@@ -644,3 +644,73 @@ test('배우기: 길드장은 스킬트리 조건(선수과목 숙련도·재료
   }
   c.close();
 });
+
+// ───────────────────────── 운영자 도구 ─────────────────────────
+
+/** 운영자 명령을 보내고 그 답(시스템 또는 오류 채팅)을 기다립니다 */
+async function gmSays(line: string): Promise<Msg<'chat'>> {
+  const mark = gm.mark;
+  gm.send({ t: 'chat', text: line });
+  return gm.waitFor('chat', (m) => m.ch === 'system' || m.ch === 'error', mark);
+}
+
+test('운영자 도구: /어빌 /숙련도 /승급 /전직횟수 /계통 /정보, 만렙 세팅은 숙련도와 2차 직업의 어빌까지 최대로', async () => {
+  // 앞 시험에서 만든 캐릭터들 (접속을 끊었으므로 저장 파일을 바로 고침)
+  const archer = () => world().store.get('이차궁사')!;
+  let r = await gmSays('/어빌 @이차궁사 30');
+  assert.equal(r.ch, 'system', r.text);
+  assert.equal(archer().abilityLevel, 30);
+  assert.equal(archer().abilityExp, 0);
+  r = await gmSays('/어빌 @전직대기 5');
+  assert.equal(r.ch, 'error');
+  assert.match(r.text, /2차 직업이 아니라 어빌이 없습니다/);
+  r = await gmSays('/어빌 @이차궁사 100');
+  assert.equal(r.ch, 'error', '어빌 최대(99)를 넘을 수 없음');
+
+  r = await gmSays('/숙련도 @이차궁사 급소 찌르기 40');
+  assert.equal(r.ch, 'system', r.text);
+  assert.equal(archer().prof.r_stab, 40);
+  r = await gmSays('/숙련도 @이차궁사 강타 10');
+  assert.equal(r.ch, 'error');
+  assert.match(r.text, /배우지 않았습니다/);
+  r = await gmSays('/숙련도 @이차궁사 급소 찌르기 101');
+  assert.equal(r.ch, 'error');
+  r = await gmSays('/숙련도 @이차궁사 전부 0');
+  assert.ok(Object.values(archer().prof).every((v) => v === 0));
+  r = await gmSays('/숙련도 @이차궁사 전부');
+  assert.match(r.text, /숙련도를 100\(으\)로/);
+  assert.ok(Object.values(archer().prof).every((v) => v === 100));
+
+  r = await gmSays('/승급 @이차궁사 끄기');
+  assert.equal(archer().ascended, false);
+  r = await gmSays('/승급 @이차궁사');
+  assert.equal(archer().ascended, true, '켜기/끄기를 빼면 뒤집음');
+  assert.match(r.text, /마스터/);
+  r = await gmSays('/전직횟수 @이차궁사 3');
+  assert.equal(archer().rebirths, 3);
+
+  r = await gmSays('/계통 @이차수인 포유류');
+  assert.equal(r.ch, 'system', r.text);
+  assert.equal(world().store.get('이차수인')!.beastType, 'mammal');
+  r = await gmSays('/계통 @이차수인 없음');
+  assert.equal(world().store.get('이차수인')!.beastType, null);
+  r = await gmSays('/계통 @이차궁사 조류');
+  assert.equal(r.ch, 'error');
+
+  r = await gmSays('/정보 이차궁사');
+  assert.match(r.text, /궁사 99레벨 \(전직 3번 · 마스터 · 어빌 30\)/);
+
+  // 만렙 세팅: 2차 직업이면 어빌 99, 배운 기술·마법은 모두 숙련도 100
+  r = await gmSays('/만렙 @배움이');
+  assert.equal(r.ch, 'system', r.text);
+  const d = world().store.get('배움이')!;
+  assert.equal(d.classId, 'archer');
+  assert.equal(d.level, world().config.maxLevel);
+  assert.equal(d.abilityLevel, data().progression.ability.maxLevel);
+  assert.ok(d.skills.length > 5);
+  for (const id of [...d.skills, ...d.spells]) assert.equal(d.prof[id], 100, id);
+  // 산 체력·마나는 음수도 설정할 수 있음 (팔거나 바친 캐릭터를 고칠 때)
+  r = await gmSays('/보너스 @배움이 -150 0');
+  assert.equal(r.ch, 'system', r.text);
+  assert.equal(d.bonusHp, -150);
+});
