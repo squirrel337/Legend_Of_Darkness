@@ -384,6 +384,12 @@ export function newCharacter(world: World, name: string, passwordHash: string, g
     godMode: false,
     cooldowns: {},
     statusSave: [],
+    rebirths: 0,
+    ascended: false,
+    abilityLevel: 0,
+    abilityExp: 0,
+    beastType: null,
+    prof: {},
   };
   if (cfg.startLevel > 1) setLevelOnData(data, cfg, cfg.startLevel);
   for (const [id, qty] of STARTER_ITEMS) {

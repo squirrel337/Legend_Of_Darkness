@@ -42,11 +42,14 @@ const STAT_ALIASES: Record<string, StatKey | 'all'> = {
 /** 평민을 뺀 직업 이름 목록 (사용법 안내용) */
 const CLASS_LIST = CLASS_IDS.filter((c) => c !== 'peasant').map((c) => CLASS_FALLBACK_NAMES[c]);
 
+/** 예전 직업 이름 (궁사의 옛 이름 '궁수'도 받음) */
+const CLASS_ALIASES: Record<string, ClassId> = { 궁수: 'archer' };
+
 export function parseClass(s: string | undefined): ClassId | null {
   if (!s) return null;
   const v = s.trim().toLowerCase();
   for (const [id, name] of Object.entries(CLASS_FALLBACK_NAMES)) if (v === id || v === name) return id as ClassId;
-  return null;
+  return CLASS_ALIASES[v] ?? null;
 }
 
 function parseRole(s: string | undefined): Role | null {

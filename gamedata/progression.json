@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "rebirth": {
+    "level": 99,
+    "restartLevel": 1,
+    "allowAfterAscend": false,
+    "names": { "warrior": "전직", "rogue": "전직", "wizard": "전직", "priest": "전직", "monk": "환골탈태" },
+    "targets": {
+      "warrior": ["warrior", "rogue", "wizard", "priest"],
+      "rogue": ["warrior", "rogue", "wizard", "priest"],
+      "wizard": ["warrior", "rogue", "wizard", "priest"],
+      "priest": ["warrior", "rogue", "wizard", "priest"],
+      "monk": ["monk"]
+    },
+    "conditions": {
+      "warrior": [
+        { "type": "pureHp", "min": 14000 },
+        { "type": "pureMp", "min": 3500 },
+        { "type": "exp", "min": 100000000, "consume": true }
+      ],
+      "rogue": [
+        { "type": "pureHp", "min": 11000 },
+        { "type": "pureMp", "min": 6000 },
+        { "type": "exp", "min": 100000000, "consume": true }
+      ],
+      "wizard": [
+        { "type": "pureHp", "min": 10000 },
+        { "type": "pureMp", "min": 11000 },
+        { "type": "exp", "min": 100000000, "consume": true }
+      ],
+      "priest": [
+        { "type": "pureHp", "min": 11000 },
+        { "type": "pureMp", "min": 12000 },
+        { "type": "exp", "min": 100000000, "consume": true }
+      ],
+      "monk": [
+        { "type": "pureHp", "min": 14000 },
+        { "type": "pureMp", "min": 6000 },
+        { "type": "exp", "min": 100000000, "consume": true }
+      ]
+    }
+  },
+  "ascend": {
+    "level": 99,
+    "expTrade": { "exp": 500000, "hp": 100, "mp": 50 },
+    "hpToStat": { "hp": 150, "stat": 1 },
+    "title": "마스터",
+    "conditions": {
+      "warrior": [
+        { "type": "pureHp", "min": 17000 },
+        { "type": "pureMp", "min": 5000 },
+        { "type": "exp", "min": 250000000, "consume": true },
+        { "type": "skillProf", "ability": "w_ironwall", "min": 100 },
+        { "type": "skillProf", "ability": "w_crash", "min": 100 }
+      ],
+      "rogue": [
+        { "type": "pureHp", "min": 13000 },
+        { "type": "pureMp", "min": 7000 },
+        { "type": "exp", "min": 250000000, "consume": true },
+        { "type": "skillProf", "ability": "r_hide", "min": 100 },
+        { "type": "skillProf", "ability": "r_shadow", "min": 100 }
+      ],
+      "wizard": [
+        { "type": "pureHp", "min": 12000 },
+        { "type": "pureMp", "min": 13000 },
+        { "type": "exp", "min": 250000000, "consume": true },
+        { "type": "skillProf", "ability": "z_focus", "min": 100 },
+        { "type": "skillProf", "ability": "z_blink", "min": 100 }
+      ],
+      "priest": [
+        { "type": "pureHp", "min": 13000 },
+        { "type": "pureMp", "min": 14000 },
+        { "type": "exp", "min": 250000000, "consume": true },
+        { "type": "skillProf", "ability": "p_heal2", "min": 100 },
+        { "type": "skillProf", "ability": "p_revive", "min": 100 }
+      ],
+      "monk": [
+        { "type": "pureHp", "min": 16000 },
+        { "type": "pureMp", "min": 7000 },
+        { "type": "exp", "min": 250000000, "consume": true },
+        { "type": "skillProf", "ability": "m_meditate", "min": 100 },
+        { "type": "skillProf", "ability": "m_iron", "min": 100 }
+      ]
+    }
+  },
+  "second": {
+    "from": {
+      "gladiator": ["warrior"],
+      "archer": ["rogue"],
+      "summoner": ["wizard"],
+      "bard": ["priest"],
+      "beastkin": ["monk"]
+    },
+    "conditions": {
+      "gladiator": [
+        { "type": "ascended" },
+        { "type": "exp", "min": 1000000000, "consume": true },
+        { "type": "payHp", "amount": 500 },
+        { "type": "payMp", "amount": 500 }
+      ],
+      "archer": [
+        { "type": "ascended" },
+        { "type": "exp", "min": 1000000000, "consume": true },
+        { "type": "payHp", "amount": 500 },
+        { "type": "payMp", "amount": 500 }
+      ],
+      "summoner": [
+        { "type": "ascended" },
+        { "type": "exp", "min": 1000000000, "consume": true },
+        { "type": "payHp", "amount": 500 },
+        { "type": "payMp", "amount": 500 }
+      ],
+      "bard": [
+        { "type": "ascended" },
+        { "type": "exp", "min": 1000000000, "consume": true },
+        { "type": "payHp", "amount": 500 },
+        { "type": "payMp", "amount": 500 }
+      ],
+      "beastkin": [
+        { "type": "ascended" },
+        { "type": "exp", "min": 1000000000, "consume": true },
+        { "type": "payHp", "amount": 500 },
+        { "type": "payMp", "amount": 500 }
+      ]
+    },
+    "beastTypes": [
+      { "id": "mammal", "name": "포유류" },
+      { "id": "bird", "name": "조류" },
+      { "id": "reptile", "name": "파충류" }
+    ]
+  },
+  "ability": { "maxLevel": 99, "expRatio": 0.25, "hpPerLevel": 30, "mpPerLevel": 15 },
+  "proficiency": { "max": 100, "baseChance": 0.35, "slowdown": 0.8, "minChance": 0.03, "effectMin": 0.7, "effectMax": 1.15 }
+}

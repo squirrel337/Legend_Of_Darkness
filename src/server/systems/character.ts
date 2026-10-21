@@ -10,6 +10,7 @@ import {
   type StatKey,
 } from '../../shared/constants';
 import { autoAllocate, expToNext, START_STAT } from '../../shared/formulas';
+import { classTier } from '../../shared/progression';
 import type { AbilityDef, ItemDef } from '../../shared/types';
 import type { InvSlot } from '../../shared/protocol';
 import type { ServerConfig } from '../config';
@@ -193,11 +194,19 @@ export function abilityAllowedFor(def: AbilityDef, classId: ClassId): boolean {
   return def.classId === 'peasant' || def.classId === classId;
 }
 
-export function learnOnData(data: CharacterData, def: AbilityDef): boolean {
+/** 기술·마법을 배운 것으로 적습니다. 숙련도는 prof (원작처럼 배우면 0 부터) */
+export function learnOnData(data: CharacterData, def: AbilityDef, prof = 0): boolean {
   const list = def.kind === 'skill' ? data.skills : data.spells;
   if (list.includes(def.id) || list.length >= MAX_ABILITIES) return false;
   list.push(def.id);
+  data.prof[def.id] = prof;
   return true;
+}
+
+/** 배우지 않은 기술의 숙련도 항목을 지웁니다 (기술을 잊게 한 뒤에) */
+export function pruneProf(data: CharacterData): void {
+  const learned = new Set([...data.skills, ...data.spells]);
+  for (const id of Object.keys(data.prof)) if (!learned.has(id)) delete data.prof[id];
 }
 
 /** 장비를 벗겨 소지품(꽉 차면 창고)으로 옮깁니다 */
@@ -212,7 +221,11 @@ export function unequipToBag(data: CharacterData, gd: GameData, slot: EquipSlot)
   return true;
 }
 
-/** 직업 변경: 다른 직업의 기술/마법과 못 쓰는 장비를 정리합니다 */
+/**
+ * 직업 변경 (평민의 5레벨 직업 선택과 관리자 명령): 다른 직업의 기술/마법과 못 쓰는 장비를 정리합니다.
+ * 전직·2차 전직은 기술을 그대로 가지므로 이 함수를 쓰지 않습니다 (progression.ts).
+ * 2차 직업이 되면 어빌리티 레벨이 1 이상, 아니면 0 이 되고, 수인이 아니면 계통을 지웁니다.
+ */
 export function setClassOnData(data: CharacterData, gd: GameData, classId: ClassId): void {
   data.classId = classId;
   const keep = (id: string) => {
@@ -221,6 +234,13 @@ export function setClassOnData(data: CharacterData, gd: GameData, classId: Class
   };
   data.skills = data.skills.filter(keep);
   data.spells = data.spells.filter(keep);
+  pruneProf(data);
+  if (classTier(classId) === 2) data.abilityLevel = Math.max(1, data.abilityLevel);
+  else {
+    data.abilityLevel = 0;
+    data.abilityExp = 0;
+  }
+  if (classId !== 'beastkin') data.beastType = null;
   for (const s of EQUIP_SLOTS) {
     const id = data.equipment[s];
     const def = id ? gd.items.get(id) : undefined;

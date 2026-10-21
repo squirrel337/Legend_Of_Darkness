@@ -32,13 +32,14 @@ import {
   autoAllocateOnData,
   bestGearFor,
   learnOnData,
+  pruneProf,
   resetStatsOnData,
   setClassOnData,
   setLevelOnData,
   unequipToBag,
 } from '../systems/character';
 import { cleanseDebuffs, revivePlayer } from '../systems/combat';
-import { onLevelUp } from '../systems/progression';
+import { onLevelUp, vitalsBonus } from '../systems/progression';
 import { Monster } from '../world/Monster';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
@@ -204,6 +205,7 @@ export class AdminService {
       d.skills = d.skills.filter((s) => s !== abilityId);
       d.spells = d.spells.filter((s) => s !== abilityId);
       if (d.skills.length + d.spells.length === before) return fail('배우지 않은 기술입니다.');
+      pruneProf(d);
       return ok(`${d.name}의 기술 ${abilityId}을(를) 지웠습니다.`);
     });
   }
@@ -506,12 +508,13 @@ export class AdminService {
     const equipment = EQUIP_SLOTS.map((s) => (d.equipment[s] ? this.world.data.items.get(d.equipment[s]!) : undefined)).filter(
       (x): x is NonNullable<typeof x> => !!x,
     );
+    const bonus = vitalsBonus(d, this.world.data);
     return computeDerived({
       cls: this.world.data.classes.get(d.classId)!,
       level: d.level,
       stats: d.stats,
-      bonusHp: d.bonusHp,
-      bonusMp: d.bonusMp,
+      bonusHp: bonus.hp,
+      bonusMp: bonus.mp,
       equipment,
     });
   }

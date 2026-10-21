@@ -7,6 +7,7 @@ import {
   type StatusId,
 } from '../../shared/constants';
 import { computeDerived, expToNext, type DerivedStats } from '../../shared/formulas';
+import { abilityExpToNext, titleOf } from '../../shared/progression';
 import type { ClassDef, HumanLook, ItemDef } from '../../shared/types';
 import type { PlayerSnapshot, S2C, SelfState } from '../../shared/protocol';
 import { TokenBucket } from '../auth';
@@ -16,6 +17,7 @@ import type { World } from './World';
 import type { Npc } from './Npc';
 import type { Group } from '../systems/groups';
 import type { AutoRun } from '../systems/autohunt';
+import { vitalsBonus } from '../systems/progression';
 import type { Monster } from './Monster';
 
 /** 플레이어와 연결된 네트워크 세션 */
@@ -148,12 +150,14 @@ export class Player extends Creature {
     this.cls = this.world.data.classes.get(this.data.classId) ?? this.world.data.classes.get('peasant')!;
     const statuses: { id: StatusId; potency: number }[] = [];
     for (const s of this.statuses.values()) statuses.push({ id: s.id, potency: s.potency });
+    // 승급 장인에게 산 체력·마나 + 어빌리티 레벨 보너스
+    const bonus = vitalsBonus(this.data, this.world.data);
     this.derived = computeDerived({
       cls: this.cls,
       level: this.data.level,
       stats: this.data.stats,
-      bonusHp: this.data.bonusHp,
-      bonusMp: this.data.bonusMp,
+      bonusHp: bonus.hp,
+      bonusMp: bonus.mp,
       equipment: this.equippedDefs(),
       statuses,
     });
@@ -209,6 +213,7 @@ export class Player extends Creature {
     const d = this.derived;
     const now = Date.now();
     const maxLevel = this.world.config.maxLevel;
+    const prog = this.world.data.progression;
     return {
       id: this.id,
       name: this.name,
@@ -249,6 +254,14 @@ export class Player extends Creature {
       mapId: this.map?.id ?? this.data.mapId,
       kills: this.data.kills,
       deaths: this.data.deaths,
+      rebirths: this.data.rebirths,
+      ascended: this.data.ascended,
+      title: titleOf(this.data.ascended, prog),
+      abilityLevel: this.data.abilityLevel,
+      abilityExp: Math.floor(this.data.abilityExp),
+      abilityExpNext: abilityExpToNext(this.data.abilityLevel, prog.ability),
+      beastType: this.data.beastType,
+      prof: { ...this.data.prof },
     };
   }
 

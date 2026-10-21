@@ -14,7 +14,7 @@ const LINEUP: { name: string; look: HumanLook; flip?: boolean }[] = [
   { name: '소환사', look: { gender: 'f', hairStyle: 2, hairColor: '#d0d0d0', body: '#3a2a6a', body2: '#ffd070', outfit: 'summoner', weapon: 'book', weaponColor: '#c07aff' }, flip: true },
   { name: '바드', look: { gender: 'm', hairStyle: 4, hairColor: '#c99a4b', body: '#2f6a5a', body2: '#e8c35a', outfit: 'bard', weapon: 'lute', weaponColor: '#ffd070' }, flip: true },
   { name: '수인', look: { gender: 'f', hairStyle: 5, hairColor: '#d0532a', body: '#6a4a32', body2: '#e8b04a', outfit: 'beastkin', weapon: 'gauntlet', weaponColor: '#ff9a5a' }, flip: true },
-  { name: '궁수', look: { gender: 'm', hairStyle: 0, hairColor: '#3e7d3a', body: '#4a6a3a', body2: '#9fe07a', outfit: 'archer', weapon: 'bow', weaponColor: '#7fe0a0' }, flip: true },
+  { name: '궁사', look: { gender: 'm', hairStyle: 0, hairColor: '#3e7d3a', body: '#4a6a3a', body2: '#9fe07a', outfit: 'archer', weapon: 'bow', weaponColor: '#7fe0a0' }, flip: true },
   { name: '검투사', look: { gender: 'm', hairStyle: 1, hairColor: '#1a1a1a', body: '#8a3a2a', body2: '#e0b84a', outfit: 'gladiator', weapon: 'dualsword', weaponColor: '#ff7b6b' }, flip: true },
 ];
 

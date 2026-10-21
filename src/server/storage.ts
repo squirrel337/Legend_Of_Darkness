@@ -9,6 +9,7 @@ import {
   isDir,
   isRole,
   isStatusId,
+  MAX_BONUS,
   NAME_REGEX,
   type ClassId,
   type Dir,
@@ -16,6 +17,7 @@ import {
   type Role,
   type StatusId,
 } from '../shared/constants';
+import { classTier, PROF_MIGRATED } from '../shared/progression';
 import type { InvSlot } from '../shared/protocol';
 import type { StatBlock } from '../shared/types';
 import { log } from './log';
@@ -41,6 +43,7 @@ export interface CharacterData {
   exp: number;
   stats: StatBlock;
   statPoints: number;
+  /** 승급 장인에게 산 최대 체력·마나. 체력을 팔거나(능력치 교환) 바치면(2차 전직) 줄어 음수가 될 수 있습니다 */
   bonusHp: number;
   bonusMp: number;
   hp: number;
@@ -65,6 +68,19 @@ export interface CharacterData {
   cooldowns: Record<string, number>;
   /** 남아 있는 버프/디버프 (다시 접속해도 유지) */
   statusSave: SavedStatus[];
+  // ── 성장 체계 (docs/progression.md) ──
+  /** 전직(환골탈태) 횟수 */
+  rebirths: number;
+  /** 승급했는지 (칭호, 2차 전직 조건) */
+  ascended: boolean;
+  /** 어빌리티 레벨: 0 = 2차 직업이 아님, 2차 직업은 1부터 (2차 직업이면 늘 1 이상) */
+  abilityLevel: number;
+  /** 지금 어빌 레벨에서 쌓인 어빌 경험치 */
+  abilityExp: number;
+  /** 수인 계통 id (progression.json 의 second.beastTypes). 수인이 아니거나 아직 고르지 않았으면 null */
+  beastType: string | null;
+  /** 배운 기술·마법의 숙련도 (기술 id → 0 ~ 숙련도 최대). 배운 것마다 항목이 있습니다 */
+  prof: Record<string, number>;
 }
 
 export interface SavedStatus {
@@ -90,6 +106,8 @@ const num = (v: unknown, def: number, min = -Infinity, max = Infinity): number =
 };
 const int = (v: unknown, def: number, min = -Infinity, max = Infinity) => Math.round(num(v, def, min, max));
 const str = (v: unknown, def: string) => (typeof v === 'string' ? v : def);
+/** 숙련도 저장값의 한계 (progression.json 의 숙련도 최대는 이보다 작음, 게임은 그 최대로 다시 자름) */
+const PROF_LIMIT = 1000;
 
 /** 저장 파일을 읽어 빠진 값을 채우고 형식을 바로잡습니다 (구버전 호환) */
 export function normalizeCharacter(raw: unknown, knownItem?: (id: string) => boolean): CharacterData {
@@ -119,6 +137,11 @@ export function normalizeCharacter(raw: unknown, knownItem?: (id: string) => boo
   const storage = storageRaw.map(slot).filter((s): s is InvSlot => s !== null).slice(0, STORAGE_SLOTS);
   const strList = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
   const dir = r.dir;
+  const classId: ClassId = isClassId(r.classId) ? r.classId : 'peasant';
+  const skills = strList(r.skills);
+  const spells = strList(r.spells);
+  // 2차 직업이면 어빌리티 레벨이 늘 1 이상 (이 체계 전에 2차 직업을 고른 캐릭터는 1부터), 아니면 0
+  const second = classTier(classId) === 2;
   return {
     version: 1,
     name,
@@ -132,7 +155,7 @@ export function normalizeCharacter(raw: unknown, knownItem?: (id: string) => boo
     gender: r.gender === 'f' ? 'f' : 'm',
     hairStyle: int(r.hairStyle, 0, 0, 99),
     hairColor: int(r.hairColor, 0, 0, 99),
-    classId: isClassId(r.classId) ? r.classId : 'peasant',
+    classId,
     level: int(r.level, 1, 1, 9999),
     exp: num(r.exp, 0, 0),
     stats: {
@@ -143,8 +166,8 @@ export function normalizeCharacter(raw: unknown, knownItem?: (id: string) => boo
       dex: int(statsRaw.dex, 3, 1),
     },
     statPoints: int(r.statPoints, 0, 0),
-    bonusHp: int(r.bonusHp, 0, 0),
-    bonusMp: int(r.bonusMp, 0, 0),
+    bonusHp: int(r.bonusHp, 0, -MAX_BONUS, MAX_BONUS),
+    bonusMp: int(r.bonusMp, 0, -MAX_BONUS, MAX_BONUS),
     hp: int(r.hp, 1, 0),
     mp: int(r.mp, 0, 0),
     gold: int(r.gold, 0, 0, Number.MAX_SAFE_INTEGER),
@@ -155,8 +178,8 @@ export function normalizeCharacter(raw: unknown, knownItem?: (id: string) => boo
     ghost: r.ghost === true,
     inventory,
     equipment,
-    skills: strList(r.skills),
-    spells: strList(r.spells),
+    skills,
+    spells,
     storage,
     storageGold: int(r.storageGold, 0, 0, Number.MAX_SAFE_INTEGER),
     kills: int(r.kills, 0, 0),
@@ -165,7 +188,27 @@ export function normalizeCharacter(raw: unknown, knownItem?: (id: string) => boo
     godMode: r.godMode === true,
     cooldowns: parseCooldowns(r.cooldowns),
     statusSave: parseStatuses(r.statusSave),
+    rebirths: int(r.rebirths, 0, 0, 1_000_000),
+    ascended: r.ascended === true,
+    abilityLevel: second ? int(r.abilityLevel, 1, 1, 999) : 0,
+    abilityExp: second ? num(r.abilityExp, 0, 0) : 0,
+    beastType: classId === 'beastkin' && typeof r.beastType === 'string' && r.beastType ? r.beastType.slice(0, 32) : null,
+    prof: parseProf(r.prof, [...skills, ...spells]),
   };
+}
+
+/**
+ * 배운 기술·마법마다 숙련도 하나. 저장된 값이 없는 기술(이 체계 전에 배운 기술)은 숙련도 최대(100)로 옮겨
+ * 지금의 위력을 그대로 유지합니다. 배우지 않은 기술의 항목은 버립니다.
+ */
+function parseProf(v: unknown, learned: string[]): Record<string, number> {
+  const raw = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const out: Record<string, number> = {};
+  for (const id of learned) {
+    const n = raw[id];
+    out[id] = typeof n === 'number' && Number.isFinite(n) ? Math.round(Math.min(PROF_LIMIT, Math.max(0, n))) : PROF_MIGRATED;
+  }
+  return out;
 }
 
 function parseCooldowns(v: unknown): Record<string, number> {

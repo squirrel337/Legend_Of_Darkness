@@ -261,10 +261,3 @@ export function autoAllocate(weights: Partial<Record<StatKey, number>>, points: 
 export function statusPotency(id: StatusId, potency?: number): number {
   return potency ?? STATUS_INFO[id].potency;
 }
-
-/** 승급(만렙 이후 경험치로 체력/마나 구매) 설정 */
-export const ASCEND = {
-  exp: 500_000,
-  hp: 100,
-  mp: 50,
-} as const;

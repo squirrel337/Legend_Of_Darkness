@@ -301,10 +301,18 @@ export interface HumanLook {
 export type NpcService =
   | { type: 'shop'; label?: string; items: string[] }
   | { type: 'buy'; label?: string }
+  /**
+   * 길드장. 1차 직업이면 평민에게 5레벨 직업 선택과, 99레벨 1차 직업에게 이 직업으로 전직(무도가는 환골탈태)을 내놓고,
+   * 이 직업인 사람에게 이 직업 트리의 기술을 가르칩니다. 2차 직업 길드장(스승)은 직업 선택 없이 2차 직업 기술만 가르칩니다.
+   * classId 가 peasant 면 누구에게나 평민 트리(기본 기술)를 가르칩니다.
+   */
   | { type: 'class'; classId: ClassId }
   | { type: 'revive' }
   | { type: 'heal'; price?: number }
+  /** 승급 장인: 경험치 → 최대 체력·마나, 최대 체력 → 능력치, 승급 (progression.json 의 ascend) */
   | { type: 'ascend' }
+  /** 2차 직업 인도자: 승급한 1차 직업의 2차 전직 (수인은 계통을 고름, progression.json 의 second) */
+  | { type: 'secondJob' }
   | {
       type: 'teleport';
       label?: string;

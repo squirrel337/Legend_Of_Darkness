@@ -6,7 +6,7 @@ import {
   formatNumber,
   type Dir,
 } from '../../shared/constants';
-import { ASCEND } from '../../shared/formulas';
+import { isFirstClass } from '../../shared/progression';
 import type { NpcService } from '../../shared/types';
 import type { DialogOption } from '../../shared/protocol';
 import type { Npc } from '../world/Npc';
@@ -26,6 +26,7 @@ import {
   unequipToBag,
 } from './character';
 import { cleanseDebuffs, revivePlayer } from './combat';
+import { learnEntries } from './progression';
 
 /** 유령은 대화와 부활만, 잠들거나 마비된 상태에서는 아무 서비스도 쓸 수 없습니다 */
 const GHOST_KEYS = new Set(['close', 'back', 'talk', 'about', 'revive']);
@@ -68,8 +69,10 @@ function mainOptions(world: World, p: Player, npc: Npc): DialogOption[] {
         opts.push({ key: 'sell', label: s.label ?? '물건 팔기' });
         break;
       case 'class':
+        // 5레벨 직업 선택은 1차 직업 길드장만 (2차 직업 스승은 그 직업이 된 사람에게 기술만 가르침)
         if (s.classId === 'peasant') opts.push({ key: 'learn:peasant', label: '기본 기술 배우기' });
-        else if (p.data.classId === 'peasant') opts.push({ key: `class:${s.classId}`, label: `${className(world, s.classId)}의 길 걷기 (전직)` });
+        else if (p.data.classId === 'peasant' && isFirstClass(s.classId))
+          opts.push({ key: `class:${s.classId}`, label: `${className(world, s.classId)}의 길 걷기 (전직)` });
         else if (p.data.classId === s.classId) opts.push({ key: `learn:${s.classId}`, label: '기술/마법 배우기' });
         opts.push({ key: `about:${s.classId}`, label: `${className(world, s.classId)}에 대해 듣기` });
         break;
@@ -165,7 +168,8 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
     }
     case 'class': {
       const s = npc.def.services.find((x) => x.type === 'class' && x.classId === arg);
-      if (!s || s.type !== 'class' || s.classId === 'peasant') return;
+      // 2차 직업은 승급 뒤 2차 전직으로만 (5레벨에 고를 수 있는 것은 1차 직업뿐)
+      if (!s || s.type !== 'class' || !isFirstClass(s.classId)) return;
       const cls = world.data.classes.get(s.classId)!;
       if (p.data.classId !== 'peasant') return sendDialog(p, npc, '이미 다른 길을 걷고 있군. 한 번 정한 길은 되돌릴 수 없다네.', [back]);
       const need = world.config.classLevel;
@@ -204,18 +208,10 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
     case 'learn': {
       const classId = arg ?? '';
       const s = npc.def.services.find((x) => x.type === 'class' && x.classId === classId);
-      if (!s) return;
+      if (!s || s.type !== 'class') return;
       if (classId !== 'peasant' && p.data.classId !== classId && !p.isGm) return sendDialog(p, npc, '그대는 우리 길드의 사람이 아니군.', [back]);
-      const list = [...world.data.abilities.values()]
-        .filter((a) => a.classId === classId)
-        .sort((a, b) => a.level - b.level)
-        .map((a) => ({
-          id: a.id,
-          level: a.level,
-          price: a.price,
-          learned: p.data.skills.includes(a.id) || p.data.spells.includes(a.id),
-        }));
-      p.send({ t: 'learn', npc: npc.id, name: npc.def.name, list });
+      // 이 직업 스킬트리의 기술과 배우는 조건의 상태 (gamedata/skilltrees.json)
+      p.send({ t: 'learn', npc: npc.id, name: npc.def.name, classId: s.classId, list: learnEntries(p.data, world.data, s.classId) });
       return;
     }
     case 'revive': {
@@ -245,22 +241,25 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
     }
     case 'ascend': {
       if (!service(npc, 'ascend')) return;
-      const max = world.config.maxLevel;
+      // 교환 비율은 gamedata/progression.json 의 ascend (승급·체력→능력치 교환은 엔진 트랙이 붙임)
+      const asc = world.data.progression.ascend;
+      const trade = asc.expTrade;
+      const max = Math.min(asc.level, world.config.maxLevel);
       if (p.level < max) return sendDialog(p, npc, `승급은 ${max}레벨이 된 자만 할 수 있다. 더 수련하고 오게.`, [back]);
-      const cost = ASCEND.exp;
-      const text = `쌓인 경험치: ${formatNumber(p.data.exp)}\n경험치 ${formatNumber(cost)}을(를) 바쳐 최대 체력 +${ASCEND.hp} 또는 최대 마나 +${ASCEND.mp}를 얻을 수 있다.\n(현재 승급 보너스: 체력 +${formatNumber(p.data.bonusHp)}, 마나 +${formatNumber(p.data.bonusMp)})`;
+      const cost = trade.exp;
+      const text = `쌓인 경험치: ${formatNumber(p.data.exp)}\n경험치 ${formatNumber(cost)}을(를) 바쳐 최대 체력 +${trade.hp} 또는 최대 마나 +${trade.mp}를 얻을 수 있다.\n(현재 승급 보너스: 체력 +${formatNumber(p.data.bonusHp)}, 마나 +${formatNumber(p.data.bonusMp)})`;
       if (arg === 'hp' || arg === 'mp') {
         if (p.data.exp < cost) return sendDialog(p, npc, `경험치가 부족하다.\n\n${text}`, [back]);
         p.data.exp -= cost;
-        if (arg === 'hp') p.data.bonusHp += ASCEND.hp;
-        else p.data.bonusMp += ASCEND.mp;
+        if (arg === 'hp') p.data.bonusHp += trade.hp;
+        else p.data.bonusMp += trade.mp;
         p.recompute();
         p.map?.broadcast({ t: 'fx', fx: 'levelup', id: p.id });
-        p.notice(arg === 'hp' ? `최대 체력 +${ASCEND.hp}!` : `최대 마나 +${ASCEND.mp}!`, 'good');
+        p.notice(arg === 'hp' ? `최대 체력 +${trade.hp}!` : `최대 마나 +${trade.mp}!`, 'good');
       }
       return sendDialog(p, npc, text, [
-        { key: 'ascend:hp', label: `체력 +${ASCEND.hp}` },
-        { key: 'ascend:mp', label: `마나 +${ASCEND.mp}` },
+        { key: 'ascend:hp', label: `체력 +${trade.hp}` },
+        { key: 'ascend:mp', label: `마나 +${trade.mp}` },
         back,
       ]);
     }

@@ -235,7 +235,7 @@ export const CLASS_FALLBACK_NAMES: Record<ClassId, string> = {
   summoner: '소환사',
   bard: '바드',
   beastkin: '수인',
-  archer: '궁수',
+  archer: '궁사',
   gladiator: '검투사',
 };
 

@@ -25,6 +25,10 @@ export async function startServer(cfg: ServerConfig): Promise<RunningServer> {
   log.info(
     `게임 데이터: 맵 ${data.maps.size}, 아이템 ${data.items.size}, 기술/마법 ${data.abilities.size}, 몬스터 ${data.monsters.size}, NPC ${data.npcs.size}`,
   );
+  if (data.designWarnings.length > 0) {
+    const shown = data.designWarnings.slice(0, 5).map((i) => `${i.where}: ${i.msg}`);
+    log.warn(`성장 체계 설계 경고 ${data.designWarnings.length}개 — ${shown.join(' / ')}${data.designWarnings.length > 5 ? ' …' : ''}`);
+  }
   const store = new CharacterStore(cfg.dataDir);
   store.load((id) => data.items.has(id));
   const audit = new AuditLog(cfg.dataDir);

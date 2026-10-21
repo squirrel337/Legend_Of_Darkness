@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "trees": {
+    "peasant": {
+      "nodes": [
+        {"ability":"first_aid","row":0,"col":0,"level":1,"gold":0,"items":[],"requires":[]},
+        {"ability":"rest","row":1,"col":0,"level":3,"gold":50,"items":[],"requires":[]}
+      ]
+    },
+    "warrior": {
+      "nodes": [
+        {"ability":"w_strike","row":0,"col":0,"level":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"w_whirl","row":1,"col":0,"level":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"w_shout","row":2,"col":0,"level":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"w_charge","row":3,"col":0,"level":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"w_cleave","row":4,"col":0,"level":35,"gold":12000,"items":[],"requires":[]},
+        {"ability":"w_ironwall","row":5,"col":0,"level":45,"gold":20000,"items":[],"requires":[]},
+        {"ability":"w_crash","row":6,"col":0,"level":60,"gold":40000,"items":[],"requires":[]},
+        {"ability":"w_rampage","row":7,"col":0,"level":72,"gold":70000,"items":[],"requires":[]},
+        {"ability":"w_quake","row":8,"col":0,"level":88,"gold":120000,"items":[],"requires":[]}
+      ]
+    },
+    "rogue": {
+      "nodes": [
+        {"ability":"r_stab","row":0,"col":0,"level":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"r_double","row":1,"col":0,"level":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"r_hide","row":2,"col":0,"level":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"r_poison","row":3,"col":0,"level":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"r_shadow","row":4,"col":0,"level":35,"gold":12000,"items":[],"requires":[]},
+        {"ability":"r_throw","row":5,"col":0,"level":45,"gold":20000,"items":[],"requires":[]},
+        {"ability":"r_flurry","row":6,"col":0,"level":60,"gold":40000,"items":[],"requires":[]},
+        {"ability":"r_shadowstep","row":7,"col":0,"level":72,"gold":70000,"items":[],"requires":[]},
+        {"ability":"r_assassin","row":8,"col":0,"level":88,"gold":120000,"items":[],"requires":[]}
+      ]
+    },
+    "wizard": {
+      "nodes": [
+        {"ability":"z_fire1","row":0,"col":0,"level":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"z_water1","row":0,"col":1,"level":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"z_wind1","row":0,"col":2,"level":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"z_earth1","row":0,"col":3,"level":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"z_sleep","row":1,"col":0,"level":12,"gold":1000,"items":[],"requires":[]},
+        {"ability":"z_fire2","row":2,"col":0,"level":20,"gold":3000,"items":[],"requires":[]},
+        {"ability":"z_water2","row":2,"col":1,"level":20,"gold":3000,"items":[],"requires":[]},
+        {"ability":"z_wind2","row":2,"col":2,"level":20,"gold":3000,"items":[],"requires":[]},
+        {"ability":"z_earth2","row":2,"col":3,"level":20,"gold":3000,"items":[],"requires":[]},
+        {"ability":"z_focus","row":3,"col":0,"level":30,"gold":8000,"items":[],"requires":[]},
+        {"ability":"z_blink","row":4,"col":0,"level":38,"gold":15000,"items":[],"requires":[]},
+        {"ability":"z_fire3","row":5,"col":0,"level":45,"gold":25000,"items":[],"requires":[]},
+        {"ability":"z_water3","row":5,"col":1,"level":45,"gold":25000,"items":[],"requires":[]},
+        {"ability":"z_wind3","row":5,"col":2,"level":45,"gold":25000,"items":[],"requires":[]},
+        {"ability":"z_earth3","row":5,"col":3,"level":45,"gold":25000,"items":[],"requires":[]},
+        {"ability":"z_fire4","row":6,"col":0,"level":70,"gold":80000,"items":[],"requires":[]},
+        {"ability":"z_water4","row":6,"col":1,"level":70,"gold":80000,"items":[],"requires":[]},
+        {"ability":"z_wind4","row":6,"col":2,"level":70,"gold":80000,"items":[],"requires":[]},
+        {"ability":"z_earth4","row":6,"col":3,"level":70,"gold":80000,"items":[],"requires":[]}
+      ]
+    },
+    "priest": {
+      "nodes": [
+        {"ability":"p_heal","row":0,"col":0,"level":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"p_armor","row":1,"col":0,"level":8,"gold":300,"items":[],"requires":[]},
+        {"ability":"p_light","row":2,"col":0,"level":10,"gold":600,"items":[],"requires":[]},
+        {"ability":"p_cure","row":3,"col":0,"level":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"p_curse","row":4,"col":0,"level":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"p_revive","row":5,"col":0,"level":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"p_heal2","row":6,"col":0,"level":30,"gold":8000,"items":[],"requires":[]},
+        {"ability":"p_regen","row":7,"col":0,"level":38,"gold":15000,"items":[],"requires":[]},
+        {"ability":"p_paralyze","row":8,"col":0,"level":42,"gold":20000,"items":[],"requires":[]},
+        {"ability":"p_judgment","row":9,"col":0,"level":50,"gold":30000,"items":[],"requires":[]},
+        {"ability":"p_armor2","row":10,"col":0,"level":58,"gold":45000,"items":[],"requires":[]},
+        {"ability":"p_heal3","row":11,"col":0,"level":65,"gold":60000,"items":[],"requires":[]},
+        {"ability":"p_heaven","row":12,"col":0,"level":85,"gold":120000,"items":[],"requires":[]}
+      ]
+    },
+    "monk": {
+      "nodes": [
+        {"ability":"m_punch","row":0,"col":0,"level":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"m_kick","row":1,"col":0,"level":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"m_ki","row":2,"col":0,"level":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"m_meditate","row":3,"col":0,"level":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"m_iron","row":4,"col":0,"level":35,"gold":12000,"items":[],"requires":[]},
+        {"ability":"m_combo","row":5,"col":0,"level":45,"gold":20000,"items":[],"requires":[]},
+        {"ability":"m_recover","row":6,"col":0,"level":55,"gold":35000,"items":[],"requires":[]},
+        {"ability":"m_wave","row":7,"col":0,"level":68,"gold":60000,"items":[],"requires":[]},
+        {"ability":"m_ultimate","row":8,"col":0,"level":85,"gold":120000,"items":[],"requires":[]}
+      ]
+    },
+    "summoner": {
+      "nodes": [
+        {"ability":"s_fox","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"s_bolt","row":0,"col":1,"abilityLevel":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"s_wolf","row":1,"col":0,"abilityLevel":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"s_mend","row":2,"col":0,"abilityLevel":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"s_fire","row":3,"col":0,"abilityLevel":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"s_bond","row":4,"col":0,"abilityLevel":30,"gold":8000,"items":[],"requires":[]},
+        {"ability":"s_guardian","row":5,"col":0,"abilityLevel":35,"gold":12000,"items":[],"requires":[]},
+        {"ability":"s_wrath","row":6,"col":0,"abilityLevel":45,"gold":20000,"items":[],"requires":[]},
+        {"ability":"s_thunder","row":7,"col":0,"abilityLevel":55,"gold":35000,"items":[],"requires":[]},
+        {"ability":"s_storm","row":8,"col":0,"abilityLevel":68,"gold":60000,"items":[],"requires":[]},
+        {"ability":"s_ancient","row":9,"col":0,"abilityLevel":80,"gold":100000,"items":[],"requires":[]},
+        {"ability":"s_king","row":10,"col":0,"abilityLevel":88,"gold":120000,"items":[],"requires":[]}
+      ]
+    },
+    "bard": {
+      "nodes": [
+        {"ability":"b_valor","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"b_note","row":0,"col":1,"abilityLevel":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"b_lullaby","row":1,"col":0,"abilityLevel":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"b_rest","row":2,"col":0,"abilityLevel":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"b_swift","row":3,"col":0,"abilityLevel":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"b_guard","row":4,"col":0,"abilityLevel":30,"gold":8000,"items":[],"requires":[]},
+        {"ability":"b_discord","row":5,"col":0,"abilityLevel":35,"gold":12000,"items":[],"requires":[]},
+        {"ability":"b_purify","row":6,"col":0,"abilityLevel":40,"gold":16000,"items":[],"requires":[]},
+        {"ability":"b_melody","row":7,"col":0,"abilityLevel":45,"gold":20000,"items":[],"requires":[]},
+        {"ability":"b_gale","row":8,"col":0,"abilityLevel":55,"gold":35000,"items":[],"requires":[]},
+        {"ability":"b_anthem","row":9,"col":0,"abilityLevel":68,"gold":60000,"items":[],"requires":[]},
+        {"ability":"b_finale","row":10,"col":0,"abilityLevel":88,"gold":120000,"items":[],"requires":[]}
+      ]
+    },
+    "beastkin": {
+      "nodes": [
+        {"ability":"k_rend","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"k_bite","row":1,"col":0,"abilityLevel":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"k_beast","row":2,"col":0,"abilityLevel":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"k_pounce","row":3,"col":0,"abilityLevel":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"k_swipe","row":4,"col":0,"abilityLevel":30,"gold":8000,"items":[],"requires":[]},
+        {"ability":"k_howl","row":5,"col":0,"abilityLevel":35,"gold":12000,"items":[],"requires":[]},
+        {"ability":"k_frenzy","row":6,"col":0,"abilityLevel":45,"gold":20000,"items":[],"requires":[]},
+        {"ability":"k_recover","row":7,"col":0,"abilityLevel":55,"gold":35000,"items":[],"requires":[]},
+        {"ability":"k_storm","row":8,"col":0,"abilityLevel":68,"gold":60000,"items":[],"requires":[]},
+        {"ability":"k_maul","row":9,"col":0,"abilityLevel":75,"gold":80000,"items":[],"requires":[]},
+        {"ability":"k_king","row":10,"col":0,"abilityLevel":88,"gold":120000,"items":[],"requires":[]}
+      ]
+    },
+    "archer": {
+      "nodes": [
+        {"ability":"a_aimed","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"a_double","row":1,"col":0,"abilityLevel":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"a_mark","row":2,"col":0,"abilityLevel":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"a_pierce","row":3,"col":0,"abilityLevel":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"a_evade","row":4,"col":0,"abilityLevel":30,"gold":8000,"items":[],"requires":[]},
+        {"ability":"a_poison","row":5,"col":0,"abilityLevel":35,"gold":12000,"items":[],"requires":[]},
+        {"ability":"a_pin","row":6,"col":0,"abilityLevel":40,"gold":16000,"items":[],"requires":[]},
+        {"ability":"a_rain","row":7,"col":0,"abilityLevel":45,"gold":20000,"items":[],"requires":[]},
+        {"ability":"a_swift","row":8,"col":0,"abilityLevel":55,"gold":35000,"items":[],"requires":[]},
+        {"ability":"a_snipe","row":9,"col":0,"abilityLevel":68,"gold":60000,"items":[],"requires":[]},
+        {"ability":"a_storm","row":10,"col":0,"abilityLevel":88,"gold":120000,"items":[],"requires":[]}
+      ]
+    },
+    "gladiator": {
+      "nodes": [
+        {"ability":"g_twin","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[]},
+        {"ability":"g_whirl","row":1,"col":0,"abilityLevel":12,"gold":800,"items":[],"requires":[]},
+        {"ability":"g_parry","row":2,"col":0,"abilityLevel":18,"gold":2000,"items":[],"requires":[]},
+        {"ability":"g_bleed","row":3,"col":0,"abilityLevel":25,"gold":5000,"items":[],"requires":[]},
+        {"ability":"g_charge","row":4,"col":0,"abilityLevel":30,"gold":8000,"items":[],"requires":[]},
+        {"ability":"g_dance","row":5,"col":0,"abilityLevel":35,"gold":12000,"items":[],"requires":[]},
+        {"ability":"g_warcry","row":6,"col":0,"abilityLevel":45,"gold":20000,"items":[],"requires":[]},
+        {"ability":"g_flurry","row":7,"col":0,"abilityLevel":55,"gold":35000,"items":[],"requires":[]},
+        {"ability":"g_execute","row":8,"col":0,"abilityLevel":68,"gold":60000,"items":[],"requires":[]},
+        {"ability":"g_bladestorm","row":9,"col":0,"abilityLevel":80,"gold":100000,"items":[],"requires":[]},
+        {"ability":"g_arena","row":10,"col":0,"abilityLevel":88,"gold":120000,"items":[],"requires":[]}
+      ]
+    }
+  }
+}

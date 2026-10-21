@@ -5,6 +5,7 @@ import { AdminSessions, clientIp, RateLimiter, safeEqual } from '../auth';
 import { log } from '../log';
 import type { World } from '../world/World';
 import type { AdminResult } from './AdminService';
+import { DesignApi } from './design';
 
 const MAX_BODY = 64 * 1024;
 
@@ -27,7 +28,7 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
   res.end(json);
 }
 
-async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+export async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
@@ -67,8 +68,11 @@ export class AdminApi {
   readonly sessions = new AdminSessions();
   private readonly loginLimiter = new RateLimiter(10, 60_000);
   private readonly actions: Record<string, Action>;
+  /** "직업·스킬트리" 탭 (/design...) */
+  private readonly design: DesignApi;
 
   constructor(private readonly world: World) {
+    this.design = new DesignApi(world);
     const a = world.admin;
     this.actions = {
       setLevel: (b, actor, name) => a.setLevel(actor, name, int(b.level)),
@@ -158,6 +162,8 @@ export class AdminApi {
     if (path === '/announce' && method === 'POST') return sendJson(res, 200, admin.announce(actor, str((await readBody(req)).text)));
     if (path === '/save' && method === 'POST') return sendJson(res, 200, admin.saveAll(actor));
     if (path === '/audit' && method === 'GET') return sendJson(res, 200, { ok: true, entries: this.world.audit.list(200) });
+    const designReply = await this.design.handle(method, path, () => readBody(req), actor);
+    if (designReply) return sendJson(res, designReply.status, designReply.body);
 
     const url = new URL(req.url ?? '/', 'http://x');
     if (path === '/characters' && method === 'GET') {
