@@ -100,6 +100,7 @@ export async function startServer(cfg: ServerConfig): Promise<RunningServer> {
         world.leaveGame(p);
       }
       await store.flush();
+      await audit.flush();
       for (const c of wss.clients) c.terminate();
       await new Promise<void>((r) => wss.close(() => r()));
       await new Promise<void>((r) => server.close(() => r()));

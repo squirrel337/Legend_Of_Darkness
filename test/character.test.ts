@@ -7,7 +7,7 @@ import { INVENTORY_SIZE } from '../src/shared/constants';
 import { expToNext } from '../src/shared/formulas';
 import { loadConfig } from '../src/server/config';
 import { GameData } from '../src/server/gamedata';
-import { CharacterStore, emptyEquipment, normalizeCharacter, STORAGE_SLOTS, type CharacterData } from '../src/server/storage';
+import { AuditLog, CharacterStore, emptyEquipment, normalizeCharacter, STORAGE_SLOTS, type CharacterData } from '../src/server/storage';
 import {
   addExpToData,
   addItem,
@@ -154,4 +154,21 @@ test('저장소: 저장 후 다시 읽으면 같은 데이터, 모르는 아이�
   assert.ok(await again.delete('alice'));
   assert.equal(fs.readdirSync(path.join(dir, 'characters')).filter((f) => f.endsWith('.json')).length, 0);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('감사 기록: 순서대로 덧붙이고, flush 가 끝나면 모두 파일에 있다 (서버를 닫은 뒤 파일이 늦게 생기지 않게)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-audit-'));
+  try {
+    const audit = new AuditLog(dir);
+    for (let i = 0; i < 20; i++) audit.write('시험', `일${i}`);
+    await audit.flush();
+    const lines = fs.readFileSync(path.join(dir, 'admin-audit.log'), 'utf8').trim().split('\n');
+    assert.deepEqual(
+      lines.map((l) => (JSON.parse(l) as { action: string }).action),
+      Array.from({ length: 20 }, (_, i) => `일${i}`),
+    );
+    assert.equal(audit.list(1)[0]!.action, '일19');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

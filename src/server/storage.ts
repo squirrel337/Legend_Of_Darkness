@@ -353,6 +353,8 @@ export class CharacterStore {
 export class AuditLog {
   private readonly file: string;
   private recent: { at: number; actor: string; action: string; target?: string; detail?: string }[] = [];
+  /** 쓰는 중인 기록 (순서대로 이어 씀) */
+  private pending: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string) {
     this.file = path.join(dataDir, 'admin-audit.log');
@@ -377,9 +379,16 @@ export class AuditLog {
     const entry = { at: Date.now(), actor, action, ...(target ? { target } : {}), ...(detail ? { detail } : {}) };
     this.recent.push(entry);
     if (this.recent.length > 200) this.recent.shift();
-    fs.appendFile(this.file, JSON.stringify(entry) + '\n', (e) => {
-      if (e) log.error('감사 로그 기록 실패:', e.message);
-    });
+    // 순서대로 덧붙이고, 서버를 닫을 때 flush 로 끝까지 기다림
+    const line = JSON.stringify(entry) + '\n';
+    this.pending = this.pending
+      .then(() => fs.promises.appendFile(this.file, line))
+      .catch((e: Error) => log.error('감사 로그 기록 실패:', e.message));
+  }
+
+  /** 아직 쓰는 중인 기록을 기다립니다 (서버를 닫을 때: 닫은 뒤에 파일이 늦게 생기지 않게) */
+  flush(): Promise<void> {
+    return this.pending;
   }
 
   list(limit = 100): typeof this.recent {

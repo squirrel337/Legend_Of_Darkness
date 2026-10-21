@@ -12,9 +12,6 @@ import { startServer, type RunningServer } from '../src/server/app';
 import { formatSkillTrees, GameData } from '../src/server/gamedata';
 import { ADMIN_PW, Client, create, ROOT, testConfig } from './helpers';
 
-/** 임시 폴더 지우기: 서버를 닫은 직후에도 감사 기록(비동기 덧붙이기)이 늦게 써질 수 있어 잠깐 다시 시도 */
-const RM_TMP = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
-
 let dataDir = '';
 let gdDir = '';
 let srv: RunningServer;
@@ -72,8 +69,8 @@ before(async () => {
 after(async () => {
   watcher?.close();
   await srv.close();
-  fs.rmSync(dataDir, RM_TMP);
-  fs.rmSync(gdDir, RM_TMP);
+  fs.rmSync(dataDir, { recursive: true, force: true });
+  fs.rmSync(gdDir, { recursive: true, force: true });
 });
 
 test('편집기 API 는 관리자 로그인 뒤에만 열리고, 지금 설계와 고를 거리(기술·아이템·직업)를 판 표시와 함께 준다', async () => {
@@ -415,8 +412,8 @@ test('손으로 고쳐 트리와 어긋난 기술의 레벨은, 바꾼 곳이 �
     assert.match((JSON.parse(fs.readFileSync(path.join(dir, 'design-history', hist[0]!), 'utf8')) as { summary: string }).summary, /레벨·가격을 스킬트리에 맞춤/);
   } finally {
     await s2.close();
-    fs.rmSync(dir, RM_TMP);
-    fs.rmSync(gd2, RM_TMP);
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(gd2, { recursive: true, force: true });
   }
 });
 
@@ -456,8 +453,8 @@ test('서버가 켜진 뒤 누가 gamedata 파일을 직접 고쳤으면, 그 �
     assert.match(fs.readFileSync(path.join(gd2, 'progression.json'), 'utf8'), /"title": "대가"/);
   } finally {
     await s2.close();
-    fs.rmSync(dir, RM_TMP);
-    fs.rmSync(gd2, RM_TMP);
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(gd2, { recursive: true, force: true });
   }
 });
 
