@@ -42,6 +42,7 @@ import {
   reqDetail,
   reqText,
   teacherOf,
+  treeNote,
   treeTabs,
   type LearnSource,
 } from '../src/client/progression';
@@ -387,6 +388,29 @@ test('성장 글씨: 칭호·전직 횟수(무도가와 수인은 환골탈태)�
   assert.deepEqual(growthParts(self({ classId: 'beastkin', rebirths: 3, title: '마스터', abilityLevel: 12 }), PROG), ['마스터', '환골탈태 3회', '어빌 12']);
   assert.deepEqual(growthParts(self({ classId: 'archer', rebirths: 1, title: '마스터', abilityLevel: 1 }), PROG), ['마스터', '전직 1회', '어빌 1']);
   assert.equal(rebirthWord('peasant', PROG), '전직');
+});
+
+test('스킬트리 안내: 지금 직업이 아닌 트리는 전직·2차 전직으로 배울 수 있게 되는지 알려 준다', () => {
+  const names: Record<string, string> = { warrior: '전사', rogue: '도적', monk: '무도가', gladiator: '검투사', beastkin: '수인', archer: '궁사' };
+  const cn = (c: ClassId) => names[c] ?? c;
+  const plain: SkillTreeConfig = { nodes: [node('x', 0, 0)] };
+  const beasty: SkillTreeConfig = { nodes: [node('k', 0, 0, { beastType: 'bird' })] };
+  const me = (classId: ClassId, ascended = false, beastType: string | null = null) => ({ classId, ascended, beastType });
+  assert.equal(treeNote('peasant', me('warrior'), PROG, plain, cn), '평민 기술은 누구나 수련장 관리인에게서 배웁니다.');
+  assert.equal(treeNote('warrior', me('warrior'), PROG, plain, cn), '', '지금 직업의 트리');
+  assert.match(treeNote('rogue', me('warrior'), PROG, plain, cn), /도적\(으\)로 전직하면 배울 수 있습니다/);
+  // 무도가는 환골탈태로 무도가만, 다른 직업은 무도가가 될 수 없음
+  assert.doesNotMatch(treeNote('monk', me('warrior'), PROG, plain, cn), /배울 수 있습니다\./);
+  assert.doesNotMatch(treeNote('warrior', me('monk'), PROG, plain, cn), /전직하면/);
+  // 승급한 뒤에는 전직할 수 없음 (설정 allowAfterAscend: false), 2차 전직은 승급 뒤
+  assert.doesNotMatch(treeNote('rogue', me('warrior', true), PROG, plain, cn), /전직하면/);
+  assert.match(treeNote('gladiator', me('warrior'), PROG, plain, cn), /승급한 뒤 검투사\(으\)로 2차 전직하면 배울 수 있습니다/);
+  assert.match(treeNote('gladiator', me('warrior', true), PROG, plain, cn), /^지금 직업의 기술이 아니라 배울 수 없습니다\. 검투사\(으\)로 2차 전직하면/);
+  assert.doesNotMatch(treeNote('archer', me('warrior', true), PROG, plain, cn), /2차 전직하면/);
+  // 수인 계통
+  assert.match(treeNote('beastkin', me('monk'), PROG, beasty, cn), /포유류·조류·파충류 중 한 계통을 고릅니다/);
+  assert.match(treeNote('beastkin', me('beastkin'), PROG, beasty, cn), /^아직 수인 계통을 고르지 않았습니다/);
+  assert.equal(treeNote('beastkin', me('beastkin', true, 'bird'), PROG, beasty, cn), '조류 계통입니다. 다른 계통의 기술은 배울 수 없습니다.');
 });
 
 test('수인 이름에는 계통을 붙인다', () => {

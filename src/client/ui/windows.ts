@@ -2,7 +2,7 @@
 import type { ClassId } from '../../shared/constants';
 import type { DialogOption, InvSlot, LearnEntry } from '../../shared/protocol';
 import type { Game } from '../game';
-import { profInfo, refreshLearnEntries, reqText, teacherOf } from '../progression';
+import { profInfo, refreshLearnEntries, reqText } from '../progression';
 import { portraitUrl } from '../render/chibi';
 import { abilityIconUrl, iconUrl } from '../render/icons';
 import { fmt, h, makeDraggable } from './dom';
@@ -248,7 +248,6 @@ export class Windows {
       const def = st.abilities.get(a.id);
       if (!def || (this.hideLearned && a.learned)) return null;
       const need = a.abilityLevel > 0 ? `어빌 ${a.abilityLevel}` : `Lv.${a.level}`;
-      const reqs = a.reqs.filter((r) => !a.learned || r.kind !== 'slots');
       let side: HTMLElement;
       if (a.learned) {
         const p = profInfo(st.prof(a.id), prof);
@@ -281,8 +280,9 @@ export class Windows {
         h('img', { src: abilityIconUrl(def.icon, 30), alt: '' }),
         h('div', { class: 'learn-name' }, def.name, h('small', null, ` ${def.kind === 'skill' ? '기술' : '마법'} · ${need}`)),
         side,
-        !a.learned && reqs.length
-          ? h('div', { class: 'learn-reqs' }, ...reqs.map((r) => h('span', { class: `req ${r.met ? 'met' : 'unmet'}` }, `${r.met ? '✓' : '✗'} ${reqText(r)}`)))
+        // 배운 기술은 조건 대신 숙련도만
+        !a.learned && a.reqs.length
+          ? h('div', { class: 'learn-reqs' }, ...a.reqs.map((r) => h('span', { class: `req ${r.met ? 'met' : 'unmet'}` }, `${r.met ? '✓' : '✗'} ${reqText(r)}`)))
           : null,
       );
       // 조건은 줄에 이미 보이므로 툴팁에는 설명과 숙련도만
@@ -324,7 +324,7 @@ export class Windows {
         'div',
         { class: 'hint' },
         `조건을 모두 채우면 배울 수 있습니다. 재료는 배울 때 사라집니다. ${second ? '2차 직업 기술은 필요 레벨 대신 필요 어빌을 봅니다. ' : ''}`,
-        h('span', { class: 'dim' }, `K: 스킬트리 (${teacherOf(d.classId, className)})`),
+        h('span', { class: 'dim' }, 'K 키: 스킬트리에서 선수과목 연결 보기'),
       ),
     );
     listEl.scrollTop = scroll;

@@ -16,6 +16,7 @@ import {
   profInfo,
   reqText,
   teacherOf,
+  treeNote,
   treeTabs,
   type TreeCell,
   type TreeLayout,
@@ -191,7 +192,7 @@ export class SkillTreeWindow {
     );
     pick.addEventListener('keydown', (e) => e.stopPropagation());
     const summary = [`Lv.${s.level}`, ...(s.abilityLevel > 0 ? [`어빌 ${s.abilityLevel}`] : []), `금화 ${fmt(st.gold)}`, `기술 ${learnedN}/${MAX_ABILITIES}`, `마법 ${spellN}/${MAX_ABILITIES}`];
-    const note = this.note(cls, current, tree);
+    const note = treeNote(cls, s, prog, tree, (c) => st.className(c));
     this.win.show(
       `${current ? classLabel(className, s, prog.second.beastTypes) : className} 기술 트리`,
       h('div', { class: 'gt-head' }, h('div', { class: 'gt-tabs' }, ...tabEls), others.length ? pick : null),
@@ -220,20 +221,6 @@ export class SkillTreeWindow {
     }
     this.renderInfo();
     this.highlight();
-  }
-
-  /** 트리 위의 안내 한 줄 (지금 직업이 아닌 트리, 수인 계통) */
-  private note(cls: ClassId, current: boolean, tree: SkillTreeConfig): string {
-    const st = this.game.state;
-    const s = st.self!;
-    const prog = st.data.progression;
-    const hasBeast = tree.nodes.some((n) => n.beastType !== undefined);
-    const names = prog.second.beastTypes.map((b) => b.name).join('·');
-    if (cls === 'peasant') return '평민 기술은 누구나 수련장 관리인에게서 배웁니다.';
-    if (!current) return `지금 직업의 기술이 아니라 배울 수 없습니다. 이미 배운 기술은 그대로 쓸 수 있습니다.${hasBeast ? ` 수인은 2차 전직 때 ${names} 중 한 계통을 고릅니다.` : ''}`;
-    if (hasBeast && s.beastType === null) return `아직 수인 계통을 고르지 않았습니다. 2차 직업 인도자에게서 ${names} 중 하나를 고르면 그 계통의 기술을 배울 수 있습니다.`;
-    if (hasBeast && s.beastType) return `${beastTypeName(s.beastType, prog.second.beastTypes)} 계통입니다. 다른 계통의 기술은 배울 수 없습니다.`;
-    return '';
   }
 
   /** 선수과목 선 (같은 트리 안): 채웠으면 금색, 아니면 어둡게 */
@@ -363,7 +350,6 @@ export class SkillTreeWindow {
       );
     } else if (look === 'learnable') state = h('div', { class: 'gt-state learnable' }, h('b', null, '지금 배울 수 있습니다'), ` — ${teacher}에게 가세요.`);
     else state = h('div', { class: 'gt-state locked' }, h('b', null, '잠김'), ` — ${status.reason ?? ''}`);
-    const reqs = status.reqs.filter((r) => look !== 'learned' || r.kind !== 'slots');
     el.replaceChildren(
       def ? h('img', { class: 'gt-info-icon', src: abilityIconUrl(def.icon, 40), alt: '', draggable: false }) : h('span', { class: 'gt-info-icon' }),
       h(
@@ -371,7 +357,7 @@ export class SkillTreeWindow {
         { class: 'gt-info-main' },
         h('div', { class: 'gt-info-title' }, def?.name ?? id, h('small', null, `  ${head}`)),
         state,
-        reqs.length ? h('div', { class: 'gt-reqs' }, ...reqs.map((r) => h('span', { class: `req ${r.met ? 'met' : 'unmet'}` }, `${r.met ? '✓' : '✗'} ${reqText(r)}`))) : null,
+        status.reqs.length ? h('div', { class: 'gt-reqs' }, ...status.reqs.map((r) => h('span', { class: `req ${r.met ? 'met' : 'unmet'}` }, `${r.met ? '✓' : '✗'} ${reqText(r)}`))) : null,
         def
           ? h(
               'div',

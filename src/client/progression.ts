@@ -181,6 +181,37 @@ export function treeTabs(
   return out;
 }
 
+/**
+ * 스킬트리 창 위의 안내 한 줄: 평민 트리, 지금 직업이 아닌 트리(전직·2차 전직으로 배울 수 있게 되는지), 수인 계통.
+ * 안내할 것이 없으면 빈 문자열.
+ */
+export function treeNote(
+  viewed: ClassId,
+  self: Pick<SelfState, 'classId' | 'beastType' | 'ascended'>,
+  prog: Pick<PublicProgression, 'rebirth' | 'second'>,
+  tree: SkillTreeConfig,
+  className: (c: ClassId) => string,
+): string {
+  const hasBeast = tree.nodes.some((n) => n.beastType !== undefined);
+  const names = prog.second.beastTypes.map((b) => b.name).join('·');
+  const cur = self.classId;
+  if (viewed === 'peasant') return '평민 기술은 누구나 수련장 관리인에게서 배웁니다.';
+  if (viewed !== cur) {
+    let how = '';
+    // 전직(무도가는 환골탈태)으로 그 직업이 될 수 있으면, 승급한 1차 직업이 2차 전직으로 갈 수 있으면 그 길을 알려 줌
+    const canRebirth = !self.ascended || prog.rebirth.allowAfterAscend;
+    if (isFirstClass(cur) && isFirstClass(viewed) && canRebirth && prog.rebirth.targets[cur].includes(viewed))
+      how = ` ${className(viewed)}(으)로 ${prog.rebirth.names[cur]}하면 배울 수 있습니다.`;
+    else if (isFirstClass(cur) && isSecondClass(viewed) && prog.second.from[viewed].includes(cur))
+      how = ` ${self.ascended ? '' : '승급한 뒤 '}${className(viewed)}(으)로 2차 전직하면 배울 수 있습니다.`;
+    const beast = hasBeast ? ` 수인은 2차 전직 때 ${names} 중 한 계통을 고릅니다.` : '';
+    return `지금 직업의 기술이 아니라 배울 수 없습니다.${how} 이미 배운 기술은 그대로 쓸 수 있습니다.${beast}`;
+  }
+  if (hasBeast && self.beastType === null) return `아직 수인 계통을 고르지 않았습니다. 2차 직업 인도자에게서 ${names} 중 하나를 고르면 그 계통의 기술을 배울 수 있습니다.`;
+  if (hasBeast && self.beastType) return `${beastTypeName(self.beastType, prog.second.beastTypes)} 계통입니다. 다른 계통의 기술은 배울 수 없습니다.`;
+  return '';
+}
+
 /** 칸 크기 (px). 창의 CSS(.gt-node 등)와 같아야 합니다 */
 export const TREE_NODE = 44;
 export const TREE_COL_W = 96;
