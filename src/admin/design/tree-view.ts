@@ -402,7 +402,7 @@ function onPointerDown(ctx: Ctx, e: PointerEvent, wrap: HTMLElement): void {
         drag.line = svg('path', { class: 'dz-tmp' });
         svgEl.append(drag.line);
       }
-      drag.line.setAttribute('d', `M ${pos.x + NW / 2} ${pos.y + NH} L ${pt.x} ${pt.y}`);
+      drag.line.setAttribute('d', `M ${pos.x + NW / 2} ${pos.y + NH + 8} L ${pt.x} ${pt.y}`);
       for (const o of board.querySelectorAll('.dz-node.target')) o.classList.remove('target');
       const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('.dz-node');
       if (under && under !== nodeEl) under.classList.add('target');

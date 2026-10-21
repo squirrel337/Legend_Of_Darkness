@@ -207,7 +207,7 @@ export class DesignApi {
   /** PUT /design: 편집기가 바꾼 곳을 한 번에 */
   private saveAll(body: Record<string, unknown>, actor: string): DesignReply {
     const rev = this.rev();
-    const bad = onlyKeys(body, ['rev', 'skillTrees', 'progression', 'abilities', 'dryRun']) ?? dryRunError(body);
+    const bad = onlyKeys(body, ['rev', 'skillTrees', 'progression', 'abilities', 'dryRun']) ?? dryRunError(body) ?? textError(body);
     if (bad) return failed(400, bad.msg, rev, [bad]);
     const dryRun = body.dryRun === true;
     if (!dryRun && !validRev(body.rev)) return failed(400, 'rev(판 표시)가 필요합니다.', rev, [bodyIssue('rev 는 GET /api/admin/design 에서 받은 판 표시여야 합니다.')]);
@@ -233,7 +233,7 @@ export class DesignApi {
   /** PUT /design/skilltree/:classId: 직업 하나의 트리 (+ 그 직업 기술의 값) */
   private saveTree(classId: ClassId, body: Record<string, unknown>, actor: string): DesignReply {
     const rev = this.rev();
-    const bad = onlyKeys(body, ['rev', 'tree', 'abilities', 'dryRun']) ?? dryRunError(body);
+    const bad = onlyKeys(body, ['rev', 'tree', 'abilities', 'dryRun']) ?? dryRunError(body) ?? textError(body);
     if (bad) return failed(400, bad.msg, rev, [bad]);
     if (!validRev(body.rev)) return failed(400, 'rev(판 표시)가 필요합니다.', rev, [bodyIssue('rev 는 GET /api/admin/design 에서 받은 판 표시여야 합니다.')]);
     if (!isObj(body.tree)) return failed(400, 'tree 는 { "nodes": [...] } 모양의 객체여야 합니다.', rev, [bodyIssue('tree 가 필요합니다.')]);
@@ -254,7 +254,7 @@ export class DesignApi {
   /** PUT /design/progression: 성장 규칙 통째로 */
   private saveProgression(body: Record<string, unknown>, actor: string): DesignReply {
     const rev = this.rev();
-    const bad = onlyKeys(body, ['rev', 'progression', 'dryRun']) ?? dryRunError(body);
+    const bad = onlyKeys(body, ['rev', 'progression', 'dryRun']) ?? dryRunError(body) ?? textError(body);
     if (bad) return failed(400, bad.msg, rev, [bad]);
     if (!validRev(body.rev)) return failed(400, 'rev(판 표시)가 필요합니다.', rev, [bodyIssue('rev 는 GET /api/admin/design 에서 받은 판 표시여야 합니다.')]);
     if (body.progression === undefined) return failed(400, 'progression 이 필요합니다.', rev, [bodyIssue('progression 이 필요합니다.')]);
@@ -559,6 +559,31 @@ export class DesignApi {
 }
 
 // ───────────────────────── 도우미 ─────────────────────────
+
+/**
+ * 본문의 모든 글자(항목 이름 포함)에 줄바꿈·제어 문자가 없는지, 너무 깊게 겹치지 않았는지.
+ * 기술 이름·설명·칭호·계통 이름·열 제목은 게임 화면과 서버 기록에 그대로 나가므로 한 줄 글자만 받습니다.
+ * 재귀하지 않고 쌓아 가며 봅니다 (일부러 깊게 겹친 본문에도 안전).
+ */
+function textError(body: unknown): DesignIssue | null {
+  const bad = /[\u0000-\u001f\u007f]/;
+  const stack: [unknown, number][] = [[body, 0]];
+  while (stack.length) {
+    const [v, depth] = stack.pop()!;
+    if (depth > 12) return bodyIssue('본문이 너무 깊게 겹쳐 있습니다.');
+    if (typeof v === 'string') {
+      if (bad.test(v)) return bodyIssue(`글자에 줄바꿈이나 제어 문자를 쓸 수 없습니다. ('${v.replace(/[\u0000-\u001f\u007f]/g, '?').slice(0, 30)}')`);
+    } else if (Array.isArray(v)) {
+      for (const x of v) stack.push([x, depth + 1]);
+    } else if (isObj(v)) {
+      for (const [k, x] of Object.entries(v)) {
+        if (bad.test(k)) return bodyIssue('항목 이름에 제어 문자를 쓸 수 없습니다.');
+        stack.push([x, depth + 1]);
+      }
+    }
+  }
+  return null;
+}
 
 /** 정해진 항목 말고 다른 것이 있으면 문제 하나 */
 function onlyKeys(body: Record<string, unknown>, keys: readonly string[]): DesignIssue | null {

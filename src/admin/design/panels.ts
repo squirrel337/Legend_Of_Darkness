@@ -276,8 +276,10 @@ function abilitySection(ctx: Ctx, id: string, ed: AbilityEdit | undefined, updAb
       '이름',
       textInput('ab.name', ed.name, (v) => {
         const t = v.trim();
-        if (!t) return err('이름을 비울 수 없습니다.');
-        if (t.length > 20) return err('이름은 20자까지입니다.');
+        if (!t || t.length > 20) {
+          err(t ? '이름은 20자까지입니다.' : '이름을 비울 수 없습니다.');
+          return ctx.render();
+        }
         updAb((x) => (x.name = t));
       }, { maxLength: 20 }),
     ),

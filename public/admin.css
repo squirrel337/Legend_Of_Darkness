@@ -920,7 +920,6 @@ button.dz-issue {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--grid);
-  touch-action: none;
 }
 
 .dz-board {

@@ -290,7 +290,19 @@ export function renderLineage(ctx: Ctx): HTMLElement {
     h(
       'div',
       { class: 'dz-line', 'data-path': `second.beastTypes[${i}]` },
-      textInput(`sc.b.${i}.id`, b.id, (v) => setP((x) => (x.second.beastTypes[i]!.id = v.trim())), { maxLength: 24, width: '96px', placeholder: 'id (영문)' }),
+      textInput(
+        `sc.b.${i}.id`,
+        b.id,
+        (v) =>
+          s.mutate((d) => {
+            // 계통 id 를 바꾸면 수인 트리의 계통 전용 기술도 함께 (이미 고른 캐릭터의 저장값은 그대로이므로 되도록 바꾸지 않기)
+            const old = d.progression.second.beastTypes[i]!.id;
+            const next = v.trim();
+            d.progression.second.beastTypes[i]!.id = next;
+            for (const n of d.trees.beastkin.nodes) if (n.beastType === old) n.beastType = next;
+          }),
+        { maxLength: 24, width: '96px', placeholder: 'id (영문)' },
+      ),
       textInput(`sc.b.${i}.name`, b.name, (v) => setP((x) => (x.second.beastTypes[i]!.name = v.trim())), { maxLength: 12, width: '96px', placeholder: '이름' }),
       used(b.id) ? h('small', { class: 'dz-hint' }, `기술 ${used(b.id)}개`) : null,
       h(
@@ -400,7 +412,11 @@ export function renderLineage(ctx: Ctx): HTMLElement {
       ),
       card(
         '수인 계통',
-        h('p', { class: 'dz-hint' }, '수인으로 2차 전직할 때 하나 고르고 바꿀 수 없습니다. id 는 스킬트리 노드의 계통과 캐릭터 저장에 쓰는 영문 소문자입니다.'),
+        h(
+          'p',
+          { class: 'dz-hint' },
+          '수인으로 2차 전직할 때 하나 고르고 바꿀 수 없습니다. id 는 스킬트리 노드의 계통과 캐릭터 저장에 쓰는 영문 소문자라, 바꾸면 수인 트리의 계통 전용 기술도 함께 바뀌지만 이미 고른 캐릭터의 저장값은 그대로입니다 (이름만 바꾸기를 권함).',
+        ),
         h('div', { 'data-path': 'second.beastTypes' }, issueSlot(ctx, atPath('second.beastTypes')), ...beasts),
         h(
           'button',

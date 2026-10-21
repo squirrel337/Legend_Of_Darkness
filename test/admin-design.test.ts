@@ -21,6 +21,8 @@ let watcher: Client;
 const original = new Map<string, string>();
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+/** 처음 gamedata 의 회오리 베기 (트리 데이터가 바뀌어도 시험이 맞도록 처음 값과 비교) */
+let whirl0: { level: number; requires: { ability: string; prof: number }[] };
 const historyDir = () => path.join(dataDir, 'design-history');
 const historyFiles = () => (fs.existsSync(historyDir()) ? fs.readdirSync(historyDir()).sort() : []);
 const gdText = (f: string) => fs.readFileSync(path.join(gdDir, f), 'utf8');
@@ -51,6 +53,8 @@ before(async () => {
   fs.cpSync(path.join(ROOT, 'gamedata'), gdDir, { recursive: true });
   for (const f of fs.readdirSync(gdDir)) if (f.endsWith('.json')) original.set(f, gdText(f));
   srv = await startServer(testConfig(dataDir, { GAMEDATA_DIR: gdDir }));
+  const w = srv.world.data.nodeOf('w_whirl')!.node;
+  whirl0 = { level: w.level!, requires: clone(w.requires) };
   watcher = await Client.connect(srv.port);
   create(watcher, '구경꾼');
   await watcher.waitFor('welcome');
@@ -94,13 +98,13 @@ test('편집기 API 는 관리자 로그인 뒤에만 열리고, 지금 설계�
 test('검사만(dryRun): 고친 트리를 검사해 문제의 자리를 알려 주고, 아무것도 바꾸지 않는다', async () => {
   const b = await bundle();
   const tree = clone(b.skillTrees.trees.warrior);
-  tree.nodes.find((n) => n.ability === 'w_whirl')!.requires.push({ ability: 'w_strike', prof: 30 });
+  tree.nodes.find((n) => n.ability === 'w_whirl')!.requires = [{ ability: 'w_strike', prof: 30 }];
   const ok = await save('/design/skilltree/warrior', { rev: b.rev, tree, dryRun: true });
   assert.equal(ok.status, 200, JSON.stringify(ok.json));
   assert.equal(ok.json.ok, true);
   assert.deepEqual(ok.json.issues, []);
   // 순환은 오류: 400 과 함께 어느 트리의 어느 기술인지
-  tree.nodes.find((n) => n.ability === 'w_strike')!.requires.push({ ability: 'w_whirl', prof: 0 });
+  tree.nodes.find((n) => n.ability === 'w_strike')!.requires = [{ ability: 'w_whirl', prof: 0 }];
   const bad = await save('/design/skilltree/warrior', { rev: b.rev, tree, dryRun: true });
   assert.equal(bad.status, 400);
   assert.equal(bad.json.ok, false);
@@ -122,7 +126,7 @@ test('검사만(dryRun): 고친 트리를 검사해 문제의 자리를 알려 �
   // 아무것도 바뀌지 않음
   for (const [f, t] of original) assert.equal(gdText(f), t, f);
   assert.deepEqual(historyFiles(), []);
-  assert.equal(srv.world.data.nodeOf('w_whirl')!.node.requires.length, 0);
+  assert.deepEqual(srv.world.data.nodeOf('w_whirl')!.node.requires, whirl0.requires);
   assert.equal((await bundle()).rev, b.rev);
 });
 
@@ -130,7 +134,7 @@ test('트리 저장: 파일에는 바꾼 줄만 쓰고, 이전 판을 남기고,
   const b = await bundle();
   const tree = clone(b.skillTrees.trees.warrior);
   const whirl = tree.nodes.find((n) => n.ability === 'w_whirl')!;
-  whirl.level = 15;
+  whirl.level = whirl0.level + 3;
   whirl.gold = 900;
   whirl.items = [{ item: 'mat_wolf_pelt', qty: 3 }];
   whirl.requires = [{ ability: 'w_strike', prof: 30 }];
@@ -150,7 +154,7 @@ test('트리 저장: 파일에는 바꾼 줄만 쓰고, 이전 판을 남기고,
   const def = gd.abilities.get('w_whirl')!;
   assert.equal(def.name, '큰 회오리');
   assert.equal(def.mp, 9);
-  assert.equal(def.level, 15);
+  assert.equal(def.level, whirl0.level + 3);
   assert.equal(def.price, 900);
   assert.deepEqual(gd.designWarnings, []);
 
@@ -159,7 +163,7 @@ test('트리 저장: 파일에는 바꾼 줄만 쓰고, 이전 판을 남기고,
   assert.equal(gdText('skilltrees.json'), formatSkillTrees(gd.skillTrees));
   const abLines = changedLines(original.get('abilities.json')!, gdText('abilities.json'));
   assert.equal(abLines.length, 1);
-  assert.match(gdText('abilities.json').split('\n')[abLines[0]!]!, /"id":"w_whirl".*"name":"큰 회오리".*"level":15.*"price":900/);
+  assert.match(gdText('abilities.json').split('\n')[abLines[0]!]!, new RegExp(`"id":"w_whirl".*"name":"큰 회오리".*"level":${whirl0.level + 3}.*"price":900`));
   for (const [f, t] of original) if (f !== 'skilltrees.json' && f !== 'abilities.json') assert.equal(gdText(f), t, f);
   assert.deepEqual(fs.readdirSync(gdDir).sort(), [...original.keys(), 'maps'].sort());
   // 서버를 다시 켜도 같은 설계 (세 파일이 서로 맞음)
@@ -177,11 +181,11 @@ test('트리 저장: 파일에는 바꾼 줄만 쓰고, 이전 판을 남기고,
     design: { skillTrees: SkillTreesConfig; abilities: { id: string; name: string; level: number }[] };
   };
   assert.match(hist.actor, /^web\(/);
-  assert.match(hist.summary, /전사 트리: 큰 회오리 조건 \(레벨 12→15.*이름 회오리 베기→큰 회오리/);
-  assert.equal(hist.design.skillTrees.trees.warrior.nodes.find((n) => n.ability === 'w_whirl')!.level, 12);
+  assert.match(hist.summary, new RegExp(`전사 트리: 큰 회오리 조건 \\(레벨 ${whirl0.level}→${whirl0.level + 3}.*이름 회오리 베기→큰 회오리`));
+  assert.equal(hist.design.skillTrees.trees.warrior.nodes.find((n) => n.ability === 'w_whirl')!.level, whirl0.level);
   const oldWhirl = hist.design.abilities.find((a) => a.id === 'w_whirl')!;
   assert.equal(oldWhirl.name, '회오리 베기');
-  assert.equal(oldWhirl.level, 12);
+  assert.equal(oldWhirl.level, whirl0.level);
 
   // 접속자에게 새 설계
   const msg = await watcher.waitFor('design', () => true, mark);
@@ -231,7 +235,7 @@ test('여러 곳을 한 번에 저장(PUT /design): 트리 둘과 성장 규칙�
   const gd = srv.world.data;
   assert.equal(gd.progression.ascend.title, '대가');
   assert.equal(gd.nodeOf('k_bite')!.node.beastType, 'insect');
-  assert.deepEqual(gd.nodeOf('g_whirl')!.node.requires, [{ ability: 'w_strike', prof: 50 }]);
+  assert.ok(gd.nodeOf('g_whirl')!.node.requires.some((r) => r.ability === 'w_strike' && r.prof === 50));
   // 성장 규칙 파일: 칭호와 새 계통이 들어 있고, 서버를 다시 켜도 같은 설계
   assert.match(gdText('progression.json'), /"title": "대가"/);
   assert.match(gdText('progression.json'), /\{ "id": "insect", "name": "곤충" \}/);
@@ -259,7 +263,7 @@ test('판 기록: 목록은 새것부터, 판 하나를 볼 수 있고, 되돌�
   const detail = await call<DesignHistoryDetail>('GET', `/design/history/${first.id}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.json.entry.id, first.id);
-  assert.equal(detail.json.design.skillTrees.trees.warrior.nodes.find((n) => n.ability === 'w_whirl')!.level, 12);
+  assert.equal(detail.json.design.skillTrees.trees.warrior.nodes.find((n) => n.ability === 'w_whirl')!.level, whirl0.level);
   assert.equal(detail.json.design.progression.ascend.title, '마스터');
 
   const b = await bundle();
@@ -271,7 +275,7 @@ test('판 기록: 목록은 새것부터, 판 하나를 볼 수 있고, 되돌�
   for (const f of ['skilltrees.json', 'progression.json', 'abilities.json']) assert.equal(gdText(f), original.get(f), f);
   const gd = srv.world.data;
   assert.equal(gd.abilities.get('w_whirl')!.name, '회오리 베기');
-  assert.equal(gd.abilities.get('w_whirl')!.level, 12);
+  assert.equal(gd.abilities.get('w_whirl')!.level, whirl0.level);
   assert.equal(gd.progression.ascend.title, '마스터');
   assert.deepEqual(gd.designWarnings, []);
   await watcher.waitFor('design', (m) => m.progression.ascend.title === '마스터', mark);
@@ -304,6 +308,9 @@ test('요청 검사: 모르는 항목·잘못된 모양·다른 직업의 기술
     ['PUT', '/design/skilltree/warrior', { rev: b.rev, tree, abilities: [{ id: 'w_strike', name: 'x'.repeat(21) }] }, 400, /이름은 1~20자/],
     ['PUT', '/design/skilltree/warrior', { rev: b.rev, tree: { nodes: [{ ability: 'w_strike', row: 0, col: 0, level: 5, gold: 0, __proto__x: 1 }] } }, 400, /__proto__x/],
     ['PUT', '/design', { rev: b.rev, abilities: [{ id: 'mon_poison', name: '독' }] }, 400, /몬스터 전용/],
+    ['PUT', '/design', { rev: b.rev, abilities: [{ id: 'w_strike', name: '강타\n[관리자] 가짜 기록' }] }, 400, /줄바꿈이나 제어 문자/],
+    ['PUT', '/design/progression', { rev: b.rev, progression: { ...b.progression, ascend: { ...b.progression.ascend, title: '마\u0007스터' } } }, 400, /제어 문자/],
+    ['PUT', '/design', { rev: b.rev, dryRun: true, skillTrees: JSON.parse('{"warrior":' + '['.repeat(40) + ']'.repeat(40) + '}') }, 400, /깊게/],
     ['PUT', '/design', { rev: b.rev, skillTrees: { pirate: tree } }, 400, /pirate/],
     ['PUT', '/design', { rev: b.rev, skillTrees: { warrior: { ...tree, nodes: [...tree.nodes, { ...tree.nodes[0]!, row: 39 }] } } }, 400, /두 번/],
     ['PUT', '/design/progression', { rev: b.rev, progression: { ...b.progression, version: 2 } }, 400, /version/],
@@ -382,7 +389,9 @@ test('손으로 고쳐 트리와 어긋난 기술의 레벨은, 바꾼 곳이 �
   fs.cpSync(path.join(ROOT, 'gamedata'), gd2, { recursive: true });
   const file = path.join(gd2, 'abilities.json');
   const orig = fs.readFileSync(file, 'utf8');
-  fs.writeFileSync(file, orig.replace(/("id":"w_whirl"[^\n]*?"level":)12,/, (_m, head: string) => `${head}13,`));
+  const edited = orig.replace(/("id":"w_whirl"[^\n]*?"level":)(\d+),/, (_m, head: string, lv: string) => `${head}${Number(lv) + 1},`);
+  assert.notEqual(edited, orig);
+  fs.writeFileSync(file, edited);
   const s2 = await startServer(testConfig(dir, { GAMEDATA_DIR: gd2 }));
   try {
     assert.ok(s2.world.data.designWarnings.some((w) => w.where === 'skilltrees.json(warrior/w_whirl)'), '불러올 때 경고');
@@ -394,7 +403,7 @@ test('손으로 고쳐 트리와 어긋난 기술의 레벨은, 바꾼 곳이 �
     const json = (await res.json()) as DesignSaveResult;
     assert.equal(res.status, 200, JSON.stringify(json));
     assert.match(json.msg, /저장했습니다/);
-    assert.equal(fs.readFileSync(file, 'utf8'), orig, '트리의 레벨(12)로 맞춰 처음 파일 그대로');
+    assert.equal(fs.readFileSync(file, 'utf8'), orig, '트리의 레벨로 맞춰 처음 파일 그대로');
     assert.deepEqual(s2.world.data.designWarnings, []);
     const hist = fs.readdirSync(path.join(dir, 'design-history'));
     assert.equal(hist.length, 1);

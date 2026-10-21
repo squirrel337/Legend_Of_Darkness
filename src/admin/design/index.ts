@@ -3,6 +3,7 @@
 // 편집 중인 상태는 탭을 옮겨도 남아 있습니다 (새로 고침·창 닫기 전에는 묻습니다).
 import { h } from '../../client/ui/dom';
 import { CLASS_IDS } from '../../shared/constants';
+import { stableJson } from '../../shared/design-edit';
 import { issueRow, type Ctx } from './ctx';
 import { showChanges, showConflict, showHistory } from './dialogs';
 import { renderAscend, renderGrowth, renderLineage } from './prog-view';
@@ -156,7 +157,7 @@ function sectionDirty(ctx: Ctx, prefixes: string[]): boolean {
   const s = ctx.store;
   const a = s.base.progression as unknown as Record<string, unknown>;
   const b = s.doc.progression as unknown as Record<string, unknown>;
-  return prefixes.some((p) => JSON.stringify(a[p]) !== JSON.stringify(b[p]));
+  return prefixes.some((p) => stableJson(a[p]) !== stableJson(b[p]));
 }
 
 /** 그사이 다른 저장, 어느 칸에도 속하지 않는 문제 */
