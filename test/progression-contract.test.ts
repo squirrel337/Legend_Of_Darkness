@@ -485,7 +485,7 @@ test('5레벨 직업 선택은 1차 직업 길드장만 내놓고, 길드장의 
   c.close();
 });
 
-test('관리자 편집기 API 경로는 로그인 뒤에만 열리고, 아직은 준비 중(501)이라고 답한다', async () => {
+test('관리자 편집기 API 경로는 로그인 뒤에만 열린다 (저장·되돌리기의 자세한 동작은 admin-design.test.ts)', async () => {
   assert.equal((await httpJson(srv.port, '/api/admin/design')).status, 401);
   const login = await httpJson(srv.port, '/api/admin/login', { password: ADMIN_PW });
   const token = String(login.json.token);
@@ -497,10 +497,11 @@ test('관리자 편집기 API 경로는 로그인 뒤에만 열리고, 아직은
     });
     return res.status;
   };
-  assert.equal(await call('GET', '/design'), 501);
-  assert.equal(await call('PUT', '/design/skilltree/warrior'), 501);
+  // 이 서버는 저장소의 gamedata 를 쓰므로 저장이 되지 않는 요청(판 표시가 없는 본문)만 보냄
+  assert.equal(await call('GET', '/design'), 200);
+  assert.equal(await call('PUT', '/design/skilltree/warrior'), 400);
   assert.equal(await call('PUT', '/design/skilltree/pirate'), 404);
-  assert.equal(await call('PUT', '/design/progression'), 501);
-  assert.equal(await call('GET', '/design/history'), 501);
-  assert.equal(await call('POST', '/design/restore'), 501);
+  assert.equal(await call('PUT', '/design/progression'), 400);
+  assert.equal(await call('GET', '/design/history'), 200);
+  assert.equal(await call('POST', '/design/restore'), 400);
 });

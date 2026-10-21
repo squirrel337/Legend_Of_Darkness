@@ -1,6 +1,8 @@
 // 웹 관리자 페이지 (/admin)
 import { CLASS_FALLBACK_NAMES, EQUIP_SLOT_NAMES, ROLE_NAMES, STAT_NAMES, type EquipSlot, type Role, type StatKey } from '../shared/constants';
 import { clear, fmt, h } from '../client/ui/dom';
+import { designDirty, renderDesign } from './design';
+import type { ApiReply } from './design/state';
 
 interface CharSummary {
   name: string;
@@ -40,10 +42,19 @@ interface CharDetail extends CharSummary {
   banReason: string;
   lastIp: string;
   derived: { maxHp: number; maxMp: number; ac: number; str: number; int: number; wis: number; con: number; dex: number } | null;
+  // 성장 체계 (docs/progression.md)
+  rebirths?: number;
+  ascended?: boolean;
+  abilityLevel?: number;
+  abilityExp?: number;
+  beastType?: string | null;
+  prof?: Record<string, number>;
 }
 
 interface GameDataResp {
   classes: { id: string; name: string }[];
+  /** 수인 계통 (직업·스킬트리 탭에서 고침) */
+  beastTypes?: { id: string; name: string }[];
   items: { id: string; name: string; type: string; slot: string | null; level: number }[];
   abilities: { id: string; name: string; kind: string; classId: string; level: number }[];
   maps: { id: string; name: string; spawn: { x: number; y: number }; levelRange: [number, number] | null }[];
@@ -64,7 +75,8 @@ interface Status {
   statCap: number;
 }
 
-type View = 'dash' | 'chars' | 'char' | 'settings' | 'audit';
+type View = 'dash' | 'chars' | 'char' | 'design' | 'settings' | 'audit';
+const VIEWS: readonly View[] = ['dash', 'chars', 'design', 'settings', 'audit'];
 
 const app = document.getElementById('app')!;
 const TOKEN_KEY = 'lod-admin-token';
@@ -74,7 +86,8 @@ try {
 } catch {
   token = null;
 }
-let view: View = 'dash';
+/** 주소의 #design 같은 꼬리로 처음 볼 화면을 정함 (새로 고쳐도 같은 탭) */
+let view: View = VIEWS.find((v) => location.hash === `#${v}`) ?? 'dash';
 let currentChar = '';
 let charQuery = '';
 let gd: GameDataResp | null = null;
@@ -91,11 +104,14 @@ function saveToken(t: string | null): void {
   }
 }
 
-class AuthError extends Error {}
+class AuthError extends Error {
+  override name = 'AuthError';
+}
 
-async function api<T = Record<string, unknown>>(path: string, body?: unknown): Promise<T & { ok: boolean; msg?: string }> {
+/** 관리자 API 호출 (HTTP 상태와 함께). 로그인이 풀렸으면 로그인 화면으로 */
+async function request<T = Record<string, unknown>>(method: string, path: string, body?: unknown): Promise<ApiReply<T>> {
   const res = await fetch('/api/admin' + path, {
-    method: body === undefined ? 'GET' : 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -105,7 +121,11 @@ async function api<T = Record<string, unknown>>(path: string, body?: unknown): P
     render();
     throw new AuthError(json.msg ?? '로그인이 필요합니다.');
   }
-  return json;
+  return { status: res.status, json };
+}
+
+async function api<T = Record<string, unknown>>(path: string, body?: unknown): Promise<T & { ok: boolean; msg?: string }> {
+  return (await request<T>(body === undefined ? 'GET' : 'POST', path, body)).json;
 }
 
 let toastTimer = 0;
@@ -122,6 +142,7 @@ const itemName = (id: string) => gd?.items.find((i) => i.id === id)?.name ?? id;
 const abilityName = (id: string) => gd?.abilities.find((a) => a.id === id)?.name ?? id;
 const mapName = (id: string) => gd?.maps.find((m) => m.id === id)?.name ?? id;
 const when = (ms: number) => (ms ? new Date(ms).toLocaleString('ko-KR') : '-');
+const beastName = (id: string) => gd?.beastTypes?.find((b) => b.id === id)?.name ?? id;
 const dur = (sec: number) => {
   const d = Math.floor(sec / 86400);
   const hh = Math.floor((sec % 86400) / 3600);
@@ -164,7 +185,13 @@ function render(): void {
       {
         class: view === id || (id === 'chars' && view === 'char') ? 'active' : '',
         onclick: () => {
+          if (view === 'design' && id !== 'design' && designDirty()) toast('직업·스킬트리에 저장하지 않은 바뀐 곳이 있습니다. 탭으로 돌아오면 그대로 있습니다.', false);
           view = id;
+          try {
+            history.replaceState(null, '', id === 'dash' ? location.pathname : `#${id}`);
+          } catch {
+            /* 주소를 바꿀 수 없는 환경 */
+          }
           render();
         },
       },
@@ -190,7 +217,7 @@ function render(): void {
         '로그아웃',
       ),
     ),
-    h('nav', { class: 'nav' }, navBtn('dash', '대시보드'), navBtn('chars', '캐릭터'), navBtn('settings', '서버 설정'), navBtn('audit', '작업 기록')),
+    h('nav', { class: 'nav' }, navBtn('dash', '대시보드'), navBtn('chars', '캐릭터'), navBtn('design', '직업·스킬트리'), navBtn('settings', '서버 설정'), navBtn('audit', '작업 기록')),
     main,
   );
   void loadTop(stats);
@@ -215,12 +242,20 @@ async function loadTop(el: HTMLElement): Promise<void> {
 
 async function loadView(): Promise<void> {
   clear(main);
+  main.className = view === 'design' ? 'wide' : '';
   main.append(h('div', { class: 'muted' }, '불러오는 중...'));
   try {
     if (!gd) gd = (await api<GameDataResp>('/gamedata')) as GameDataResp;
     if (view === 'dash') await renderDash();
     else if (view === 'chars') await renderChars();
     else if (view === 'char') await renderChar(currentChar);
+    else if (view === 'design')
+      await renderDesign(main, {
+        request,
+        toast,
+        // 기술 이름·수인 계통이 바뀌었을 수 있으니 다른 탭이 쓰는 게임 데이터 목록을 다음에 새로 받음
+        saved: () => (gd = null),
+      });
     else if (view === 'settings') await renderSettings();
     else await renderAudit();
   } catch (e) {
@@ -489,6 +524,11 @@ function drawChar(c: CharDetail): void {
         kv('마지막 접속', when(c.lastLoginAt)),
         kv('마지막 IP', c.lastIp || '-'),
         kv('만든 날', when(c.createdAt)),
+        // 성장 체계: 전직 횟수, 승급, 2차 직업의 어빌, 수인 계통
+        kv('전직 횟수', `${c.rebirths ?? 0}번`),
+        kv('승급', c.ascended ? '함' : '아직'),
+        c.abilityLevel ? kv('어빌 (어빌 경험치)', `${c.abilityLevel} (${fmt(c.abilityExp ?? 0)})`) : null,
+        c.classId === 'beastkin' ? kv('수인 계통', c.beastType ? beastName(c.beastType) : '아직 고르지 않음') : null,
       ),
     ),
     h(
@@ -544,13 +584,21 @@ function drawChar(c: CharDetail): void {
       h(
         'div',
         { class: 'box' },
-        h('h2', null, `기술 ${c.skills.length} · 마법 ${c.spells.length}`),
+        h('h2', null, `기술 ${c.skills.length} · 마법 ${c.spells.length}`, h('small', { class: 'muted', style: 'font-weight:400' }, ' (옆의 수는 숙련도)')),
         h('datalist', { id: 'admin-abilities' }, ...data.abilities.map((a) => h('option', { value: a.name }, `${className(a.classId)} · Lv.${a.level}`))),
         h('div', { class: 'row' }, learnInput, btn('배우게 하기', () => act(name, 'learnAbility', { query: learnInput.value }))),
         h(
           'div',
           { class: 'chips' },
-          ...[...c.skills, ...c.spells].map((id) => h('span', { class: 'chip' }, abilityName(id), h('button', { title: '잊게 하기', onclick: () => act(name, 'forgetAbility', { id }) }, '×'))),
+          ...[...c.skills, ...c.spells].map((id) =>
+            h(
+              'span',
+              { class: 'chip', title: c.prof?.[id] !== undefined ? `숙련도 ${c.prof[id]}` : '' },
+              abilityName(id),
+              c.prof?.[id] !== undefined ? h('small', { class: 'muted' }, ` ${c.prof[id]}`) : null,
+              h('button', { title: '잊게 하기', onclick: () => act(name, 'forgetAbility', { id }) }, '×'),
+            ),
+          ),
         ),
         h('h2', { style: 'margin-top:14px' }, '상태'),
         h('div', { class: 'row' }, btn('완전 회복', () => act(name, 'heal')), btn('부활', () => act(name, 'revive')), btn(c.godMode ? '무적 끄기' : '무적 켜기', () => act(name, 'setGod', { on: !c.godMode }))),

@@ -1,6 +1,7 @@
 // 웹 관리자 페이지용 REST API (/api/admin/...)
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { CLASS_IDS, EQUIP_SLOTS, STAT_KEYS } from '../../shared/constants';
+import { DESIGN_LIMITS } from '../../shared/design-edit';
 import { AdminSessions, clientIp, RateLimiter, safeEqual } from '../auth';
 import { log } from '../log';
 import type { World } from '../world/World';
@@ -28,20 +29,27 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
   res.end(json);
 }
 
-export async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+/** 본문 JSON 객체를 읽습니다. limit 바이트를 넘으면 413 */
+export async function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let tooBig = false;
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => {
+      if (tooBig) return;
       size += c.length;
-      if (size > MAX_BODY) {
+      if (size > limit) {
+        // 바로 끊으면 413 응답을 보낼 수 없으므로, 남은 본문은 읽어 버리고 응답 뒤 연결을 닫습니다 (계속 보내면 잠시 뒤 끊음)
+        tooBig = true;
+        chunks.length = 0;
         reject(new HttpError(413, '요청이 너무 큽니다.'));
-        req.destroy();
+        setTimeout(() => req.destroy(), 2000).unref();
         return;
       }
       chunks.push(c);
     });
     req.on('end', () => {
+      if (tooBig) return;
       if (chunks.length === 0) return resolve({});
       try {
         const v: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -119,8 +127,10 @@ export class AdminApi {
     try {
       await this.route(req, res, pathname.slice('/api/admin'.length) || '/');
     } catch (e) {
-      if (e instanceof HttpError) sendJson(res, e.status, { ok: false, msg: e.message });
-      else {
+      if (e instanceof HttpError) {
+        if (e.status === 413) res.setHeader('Connection', 'close');
+        sendJson(res, e.status, { ok: false, msg: e.message });
+      } else {
         log.error('관리자 API 오류:', e);
         sendJson(res, 500, { ok: false, msg: '서버 오류가 발생했습니다.' });
       }
@@ -162,7 +172,8 @@ export class AdminApi {
     if (path === '/announce' && method === 'POST') return sendJson(res, 200, admin.announce(actor, str((await readBody(req)).text)));
     if (path === '/save' && method === 'POST') return sendJson(res, 200, admin.saveAll(actor));
     if (path === '/audit' && method === 'GET') return sendJson(res, 200, { ok: true, entries: this.world.audit.list(200) });
-    const designReply = await this.design.handle(method, path, () => readBody(req), actor);
+    // 직업·스킬트리 편집기: 모든 직업의 트리를 한 번에 보낼 수 있도록 본문 한계가 조금 더 큼
+    const designReply = await this.design.handle(method, path, () => readBody(req, DESIGN_LIMITS.body), actor);
     if (designReply) return sendJson(res, designReply.status, designReply.body);
 
     const url = new URL(req.url ?? '/', 'http://x');
@@ -210,6 +221,7 @@ export class AdminApi {
         .map((a) => ({ id: a.id, name: a.name, kind: a.kind, classId: a.classId, level: a.level })),
       maps: [...d.maps.values()].map((m) => ({ id: m.id, name: m.name, spawn: m.spawn, levelRange: m.levelRange ?? null })),
       monsters: [...d.monsters.values()].map((m) => ({ id: m.id, name: m.name, level: m.level })),
+      beastTypes: d.progression.second.beastTypes,
       maxLevel: this.world.config.maxLevel,
       statCap: this.world.config.statCap,
     };
