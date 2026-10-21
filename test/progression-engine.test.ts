@@ -550,6 +550,59 @@ test('능력치 초기화(오그마): 건강으로 늘어난 체력을 팔았으
   assert.equal(p.data.gold, 40_000);
 });
 
+test('배우기: 그 트리를 가르치는 길드장에게서만 (다른 길드장·수련장 관리인에게 보내면 배우지 않고 아무것도 내지 않음), 트리에서 빠진 기술은 알리고 목록을 다시 보냄', async () => {
+  const { c, p } = fighter;
+  // 재료 없이 배우는 전사 기술 하나와 그 선수과목 (조건은 모두 채우고, 그 기술은 아직 배우지 않은 상태로)
+  const target = data().treeOf('warrior').nodes.find((n) => n.items.length === 0 && n.requires.length > 0)!;
+  become(p, 'warrior', 99, Object.fromEntries(target.requires.map((r) => [r.ability, r.prof])));
+  p.data.skills = p.data.skills.filter((id) => id !== target.ability);
+  p.data.spells = p.data.spells.filter((id) => id !== target.ability);
+  p.data.gold = 50_000;
+  const learned = () => p.data.skills.includes(target.ability) || p.data.spells.includes(target.ability);
+  for (const id of ['wizard_master', 'trainer', 'gladiator_master']) {
+    const npc = npcEntity(id);
+    near(p, npc);
+    const mark = c.mark;
+    c.send({ t: 'learnAbility', npc: npc.id, id: target.ability });
+    await c.waitFor('chat', (m) => m.ch === 'error' && m.text.includes('그 기술을 가르치지 않습니다'), mark);
+    assert.equal(learned(), false, id);
+    assert.equal(p.data.gold, 50_000, `${id}: 아무것도 내지 않음`);
+  }
+  const master = npcEntity('warrior_master');
+  near(p, master);
+  let mark = c.mark;
+  c.send({ t: 'learnAbility', npc: master.id, id: target.ability });
+  await c.waitFor('learn', () => true, mark);
+  assert.equal(learned(), true);
+  assert.equal(p.data.gold, 50_000 - target.gold);
+
+  // 길드장 창을 연 사이 관리자가 트리에서 뺀 기술 (다른 기술의 선수과목이 아니고 성장 조건에도 없는 것)
+  const before = structuredClone(data().skillTrees);
+  const required = new Set(Object.values(before.trees).flatMap((t) => t.nodes.flatMap((n) => n.requires.map((r) => r.ability))));
+  const prog = data().progression;
+  const inConditions = new Set(
+    [...Object.values(prog.rebirth.conditions), ...Object.values(prog.ascend.conditions), ...Object.values(prog.second.conditions)]
+      .flat()
+      .flatMap((x) => (x.type === 'skillProf' ? [x.ability] : [])),
+  );
+  const leaf = before.trees.warrior.nodes.find((n) => !required.has(n.ability) && !inConditions.has(n.ability) && n.ability !== target.ability)!;
+  assert.ok(leaf, '트리에서 빼도 되는 전사 기술');
+  const trees = structuredClone(before);
+  trees.trees.warrior.nodes = trees.trees.warrior.nodes.filter((n) => n.ability !== leaf.ability);
+  assert.deepEqual(data().applyDesign({ skillTrees: trees }).filter((i) => i.level === 'error'), []);
+  try {
+    mark = c.mark;
+    c.send({ t: 'learnAbility', npc: master.id, id: leaf.ability });
+    await c.waitFor('chat', (m) => m.ch === 'error' && m.text.includes('그 기술은 지금 배울 수 없습니다'), mark);
+    const list = await c.waitFor('learn', () => true, mark);
+    assert.equal(list.classId, 'warrior');
+    assert.ok(!list.list.some((e) => e.id === leaf.ability), '새 목록에는 뺀 기술이 없음');
+    assert.equal(p.data.gold, 50_000 - target.gold);
+  } finally {
+    assert.deepEqual(data().applyDesign({ skillTrees: before }).filter((i) => i.level === 'error'), []);
+  }
+});
+
 /** 2차 직업 인도자 (데이터에 아직 없을 수 있으므로 시험용으로 마을에 세움) */
 let guide: Npc | null = null;
 function secondJobGuide(): Npc {

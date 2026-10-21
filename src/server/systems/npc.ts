@@ -722,9 +722,15 @@ export function learn(world: World, p: Player, npcId: unknown, abilityId: unknow
   if (!npc || typeof abilityId !== 'string') return;
   const def = world.data.abilities.get(abilityId);
   const at = world.data.nodeOf(abilityId);
-  if (!def || !at) return;
+  if (!def || !at) {
+    // 그사이 관리자가 트리에서 뺀 기술 등: 알리고, 열려 있던 이 길드장의 목록을 새로 보냄
+    p.err('그 기술은 지금 배울 수 없습니다.');
+    const own = npc.def.services.find((s) => s.type === 'class' && (s.classId === 'peasant' || s.classId === p.data.classId));
+    if (own && own.type === 'class') pickOption(world, p, npcId, `learn:${own.classId}`);
+    return;
+  }
   // 길드장은 자기 직업의 트리를, 수련장 관리인은 평민 트리를 가르칩니다
-  if (!npc.def.services.some((s) => s.type === 'class' && s.classId === at.classId)) return;
+  if (!npc.def.services.some((s) => s.type === 'class' && s.classId === at.classId)) return p.err(`${npc.def.name}은(는) 그 기술을 가르치지 않습니다.`);
   const r = learnFromTree(p.data, world.data, def.id, { free: p.isGm });
   if (!r.ok) return p.err(r.msg);
   p.markAbilities();
