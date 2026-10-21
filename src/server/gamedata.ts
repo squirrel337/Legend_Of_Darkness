@@ -184,11 +184,23 @@ export class GameData {
     const abilities = new Map(this.abilities);
     for (const p of patches) abilities.set(p.id, { ...abilities.get(p.id)!, ...pickPatch(p) });
     const design = { progression: next.progression ?? this.progression, skillTrees: next.skillTrees ?? this.skillTrees };
-    issues.push(...checkDesign(design, { classes: this.classes, items: this.items, abilities }));
+    const refs = { classes: this.classes, items: this.items, abilities };
+    let found = checkDesign(design, refs);
+    // 관리자 저장: 노드의 필요 레벨(어빌)·골드를 abilities.json 의 level·price 에도 맞춘 뒤 다시 검사 (맞추고 나면 사라질 경고를 남기지 않음)
+    const defaults = next.syncAbilityDefaults && !found.some(isError) ? treeAbilityDefaults(normalizeSkillTrees(design.skillTrees)) : null;
+    if (defaults) {
+      for (const [id, v] of defaults) {
+        const a = abilities.get(id);
+        if (a && (a.level !== v.level || a.price !== v.price)) abilities.set(id, { ...a, ...v });
+      }
+      found = checkDesign(design, refs);
+    }
+    issues.push(...found);
     return {
       issues,
       apply: () => {
         for (const p of patches) Object.assign(this.abilities.get(p.id)!, pickPatch(p));
+        if (defaults) for (const [id, v] of defaults) Object.assign(this.abilities.get(id) ?? {}, v);
         this.setDesign(design.progression as ProgressionConfig, normalizeSkillTrees(design.skillTrees), issues);
       },
     };
@@ -457,6 +469,24 @@ export interface DesignUpdate {
   skillTrees?: unknown;
   /** 기술의 이름·설명·마나·재사용 대기 수정 */
   abilities?: AbilityPatch[];
+  /**
+   * (관리자 저장) 트리 노드의 필요 레벨(2차 직업은 필요 어빌)·골드를 abilities.json 의 level·price 에도 맞춥니다.
+   * 두 값이 다르면 검사가 경고하므로, 편집기 저장·되돌리기는 늘 켜서 함께 맞춥니다. 트리에 없는 기술은 그대로 둡니다.
+   */
+  syncAbilityDefaults?: boolean;
+}
+
+/** 트리에 놓인 기술마다 abilities.json 에 맞춰 쓸 level(2차 직업은 필요 어빌)·price(골드) */
+export function treeAbilityDefaults(trees: SkillTreesConfig): Map<string, { level: number; price: number }> {
+  const out = new Map<string, { level: number; price: number }>();
+  for (const classId of CLASS_IDS) {
+    const second = classTier(classId) === 2;
+    for (const n of trees.trees[classId].nodes) {
+      const level = second ? n.abilityLevel : n.level;
+      if (level !== undefined) out.set(n.ability, { level, price: n.gold });
+    }
+  }
+  return out;
 }
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
