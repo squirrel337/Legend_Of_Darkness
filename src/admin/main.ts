@@ -549,7 +549,7 @@ function drawChar(c: CharDetail): void {
         { class: 'box' },
         h('h2', null, '빠른 성장'),
         h('div', { class: 'row' }, btn('만렙 세팅', () => act(name, 'maxOut', maxCls.value ? { classId: maxCls.value } : {}), 'primary'), maxCls),
-        h('p', { class: 'hint' }, `레벨 ${data.maxLevel} + 모든 능력치 ${data.statCap} + 모든 기술/마법 + 레벨에 맞는 최고 장비 + 완전 회복`),
+        h('p', { class: 'hint' }, `레벨 ${data.maxLevel} + 모든 능력치 ${data.statCap} + 모든 기술/마법(숙련도 최대) + 레벨에 맞는 최고 장비 + 완전 회복, 2차 직업은 어빌도 최대`),
         h('div', { class: 'row' }, btn('레벨 +1', () => act(name, 'addLevels', { n: 1 })), btn('레벨 +10', () => act(name, 'addLevels', { n: 10 })), lv, btn('레벨 설정', () => act(name, 'setLevel', { level: parse(lv) }))),
         h('div', { class: 'row' }, exp, btn('경험치 지급', () => act(name, 'addExp', { amount: parse(exp) })), h('span', { class: 'hint' }, '예: 100만, 1억')),
         h('div', { class: 'row' }, btn('모든 능력치 최대', () => act(name, 'maxStats')), btn('남은 포인트 자동 분배', () => act(name, 'autoStats')), btn('능력치 초기화', () => act(name, 'resetStats'))),
