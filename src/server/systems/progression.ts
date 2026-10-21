@@ -476,6 +476,23 @@ export function tradeHpForStatOnData(data: CharacterData, gd: GameData, times: n
   return ok(`최대 체력 ${formatNumber(cost)}을(를) 바쳐 능력치 포인트 ${formatNumber(pts)}을(를) 얻었습니다. (G 키: 능력치 창)`);
 }
 
+/**
+ * 능력치 초기화(NPC)를 막을 이유. 건강·지혜로 늘어난 체력·마나도 팔거나(체력 → 능력치) 바칠(2차 전직) 수 있어서,
+ * 그 뒤에 건강·지혜를 처음으로 되돌리면 순수 최대 체력·마나가 직업 기본 아래로 내려갑니다 (산 값이 음수인 만큼).
+ * 그렇게 되면 바닥을 지키려고 초기화를 막고, 체력·마나를 얼마나 다시 사야 하는지 알려 줍니다. 문제가 없으면 null
+ */
+export function resetStatsBlocked(data: CharacterData, gd: GameData): string | null {
+  const reset: CharacterData = { ...data, stats: { ...data.stats } };
+  for (const k of STAT_KEYS) reset.stats[k] = START_STAT;
+  const pure = pureVitals(reset, gd);
+  const base = classBaseVitals(reset, gd);
+  const short: string[] = [];
+  if (pure.hp < base.hp) short.push(`체력 ${formatNumber(base.hp - pure.hp)}`);
+  if (pure.mp < base.mp) short.push(`마나 ${formatNumber(base.mp - pure.mp)}`);
+  if (short.length === 0) return null;
+  return `건강·지혜로 늘어난 체력·마나를 팔거나 바쳐서, 지금 능력치를 되돌리면 순수 체력·마력이 직업 기본 아래로 내려간다. 승급 장인에게서 최대 ${short.join(', ')} 이상을 다시 산 뒤에 오게.`;
+}
+
 // ───────────────────────── 2차 전직 (엔진 트랙) ─────────────────────────
 
 /** 이 수인 계통 id 가 지금 설정에 있는지 */

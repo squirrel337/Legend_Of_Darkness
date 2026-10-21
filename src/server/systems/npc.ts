@@ -25,6 +25,7 @@ import type { World } from '../world/World';
 import {
   addItem,
   addToStorage,
+  allocatedPoints,
   canFit,
   equipError,
   resetStatsOnData,
@@ -48,6 +49,7 @@ import {
   pureVitals,
   rebirthOffered,
   rebirthOnData,
+  resetStatsBlocked,
   secondJobOnData,
   tradeExpOnData,
   tradeHpForStatOnData,
@@ -318,6 +320,9 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
       const idx = Number(arg);
       const s = service(npc, 'resetStats', idx);
       if (!s) return;
+      // 되돌릴 것이 없으면 골드만 내지 않게, 되돌리면 순수 체력·마력이 직업 기본 아래로 내려가면(건강·지혜 몫을 팔거나 바침) 막음
+      const why = allocatedPoints(p.data) === 0 ? '아직 분배한 능력치가 없어 되돌릴 것이 없다.' : resetStatsBlocked(p.data, world.data);
+      if (why) return sendDialog(p, npc, why, [back]);
       if (arg2 !== 'yes') {
         return sendDialog(p, npc, `분배한 능력치를 모두 되돌려 다시 분배할 수 있게 해 주겠다. 비용은 ${formatNumber(s.price)} 골드다.`, [
           { key: `reset:${idx}:yes`, label: '초기화하기' },

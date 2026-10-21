@@ -28,6 +28,7 @@ import {
   pureVitals,
   rebirthOnData,
   rebirthTargets,
+  resetStatsBlocked,
   rollProficiencyOnData,
   secondJobOnData,
   tradeExpOnData,
@@ -492,6 +493,24 @@ test('교환: 최대 체력 150 → 능력치 1, 순수 체력이 직업 기본 
   assert.equal(pureVitals(con, gd).hp, 3980 + 1000 - 900);
   // 승급 전에도 99레벨이면 됨, 98레벨은 안 됨
   assert.equal(tradeHpForStatOnData(readyWarrior({ level: 98 }), gd, 1).ok, false);
+});
+
+test('능력치 초기화: 건강·지혜로 늘어난 체력·마나를 팔거나 바쳤으면, 되돌려 순수 체력·마력이 직업 기본 아래로 내려가지 않게 막는다', () => {
+  // 건강 255, 산 체력 0 인 99레벨 전사: 순수 체력 6,530 → 150 × 17 = 2,550 을 팔아 능력치 17
+  const d = readyWarrior({ stats: stats(3, 3, 3, 255, 3), bonusHp: 0, statPoints: 0 });
+  assert.equal(resetStatsBlocked(d, gd), null, '아직 팔지 않았으면 막지 않음');
+  assert.equal(tradeHpForStatOnData(d, gd, 17).ok, true);
+  assert.equal(d.bonusHp, -2550);
+  // 건강을 3 으로 되돌리면 순수 체력 = 3,980 + 30 − 2,550 = 1,460 (직업 기본 3,980 보다 2,520 모자람)
+  const why = resetStatsBlocked(d, gd);
+  assert.match(why ?? '', /최대 체력 2,520 이상을 다시 산 뒤에/);
+  // 그만큼 다시 사면 막지 않음
+  d.bonusHp += 2520;
+  assert.equal(resetStatsBlocked(d, gd), null);
+  // 마나도 같음 (2차 전직에서 바친 마나: 지혜 200 의 마법사가 산 마나 −500)
+  const w = char({ classId: 'wizard', level: 99, stats: stats(3, 200, 200, 3, 3), bonusMp: -500 });
+  assert.match(resetStatsBlocked(w, gd) ?? '', /마나 [\d,]+ 이상/);
+  assert.ok(pureVitals(w, gd).mp >= classBaseVitals(w, gd).mp, '초기화 전에는 바닥 위');
 });
 
 // ───────────────────────── 2차 전직 ─────────────────────────

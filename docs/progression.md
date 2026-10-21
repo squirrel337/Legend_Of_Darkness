@@ -180,7 +180,7 @@ payConditions(data, gd, conds): void                    // checkConditions 가 o
 rebirthTargets(data, gd) · rebirthOffered(data, gd, target)
 checkRebirth(data, gd, target) · rebirthOnData(data, gd, cfg, target)
 checkAscend(data, gd) · ascendOnData(data, gd)
-tradeLimits(data, gd) · tradeExpOnData(data, gd, 'hp' | 'mp', times) · tradeHpForStatOnData(data, gd, times)
+tradeLimits(data, gd) · tradeExpOnData(data, gd, 'hp' | 'mp', times) · tradeHpForStatOnData(data, gd, times) · resetStatsBlocked(data, gd)
 checkSecondJob(data, gd, target, beastType | null) · secondJobOnData(data, gd, target, beastType | null) · chooseBeastTypeOnData(data, gd, beastType)
 abilityExpShare(data, gd, amount) · addAbilityExpToData(data, gd, amount) · gainAbilityExp(p, amount)   // 처치 경험치는 gainExp(p, exp, { fromKill: true })
 rollProficiencyOnData(data, gd, abilityId, roll) · gainProficiency(p, abilityId) · proficiencyMultiplier(p, abilityId)
@@ -210,7 +210,7 @@ learnFromTree(data, gd, abilityId, { free? })
 ### 8.6 세부 규칙
 
 - **순수 체력·마력** = `pureVitals`: 장비·상태 효과를 뺀 최대치 (직업 기본 + 레벨 + 건강/지혜 + 산 값 + 어빌 보너스).
-- **직업 기본 체력·마나** = `classBaseVitals`: 직업 기본 + 레벨 몫. 체력→능력치 교환과 `payHp`/`payMp` 는 순수 최대치가 이 아래로 내려가게 할 수 없고, `bonusHp`/`bonusMp` 에서 뺍니다 (음수 가능).
+- **직업 기본 체력·마나** = `classBaseVitals`: 직업 기본 + 레벨 몫. 체력→능력치 교환과 `payHp`/`payMp` 는 순수 최대치가 이 아래로 내려가게 할 수 없고, `bonusHp`/`bonusMp` 에서 뺍니다 (음수 가능). 건강·지혜로 늘어난 몫까지 팔거나 바친 캐릭터가 능력치를 초기화하면 이 바닥이 깨지므로, 되돌린 뒤의 순수 최대치가 직업 기본 아래면 NPC 의 능력치 초기화를 막고 다시 사야 할 양을 알려 줍니다 (`resetStatsBlocked`). 분배한 능력치가 없으면 초기화 골드도 받지 않습니다.
 - **전직**: 지금 1차 직업, 레벨 ≥ `rebirth.level`, 승급했으면 `allowAfterAscend` 일 때만, 대상 ∈ `targets[지금 직업]`, 조건 → 레벨 `restartLevel`, 경험치 0, 능력치 모두 3(`START_STAT`), 포인트 (restartLevel − 1) × 레벨당 포인트, 기술·마법·숙련도·장비·소지품·골드·창고는 그대로, `bonusHp/bonusMp` 는 음수면 0으로, 새 직업·레벨로 못 입는(직업 제한, 레벨 제한 — `equipError` 와 같은 규칙) 장비는 소지품(가득하면 창고)으로, `rebirths + 1`, 체력·마나 가득. 새 직업 길드장에게서, 이름은 `rebirth.names` (무도가는 환골탈태).
 - **승급**: 1차 직업, 레벨 ≥ `ascend.level`, 아직 승급 전, 조건 → `ascended = true`. 교환(`expTrade`·`hpToStat`)은 레벨만 되면 승급 전후·2차 직업 누구나.
 - **2차 전직**: 지금 1차 직업 ∈ `second.from[대상]`, 조건(승급 포함) → 직업 = 대상, 어빌 1, 어빌 경험치 0, 수인만 계통, 레벨·능력치·기술·숙련도는 그대로, 못 입는 장비는 소지품으로. 2차 직업 인도자에게서. 계통이 없는 옛 수인은 인도자에게서 한 번 고릅니다.

@@ -519,6 +519,37 @@ test('승급 장인: 경험치로 체력·마나를 사고, 체력으로 능력�
   c.close();
 });
 
+test('능력치 초기화(오그마): 건강으로 늘어난 체력을 팔았으면 직업 기본 체력 아래로 내려가게 되돌리지 않고, 되돌릴 것이 없으면 골드를 받지 않는다', async () => {
+  const { c, p } = fighter;
+  become(p, 'warrior', 99);
+  // 건강 255, 산 체력 0 에서 체력 2,550 을 팔아 능력치 17 을 산 상태 (순수 체력 6,530 − 2,550 = 직업 기본 3,980)
+  p.data.stats = { str: 3, int: 3, wis: 3, con: 255, dex: 3 };
+  Object.assign(p.data, { bonusHp: -2550, statPoints: 17, gold: 50_000 });
+  p.recompute();
+  const smith = npcEntity('ascension');
+  near(p, smith);
+  const reset = (await talk(c, smith)).options.find((o) => o.key.startsWith('reset:'))!;
+  assert.ok(reset, '오그마는 능력치 초기화를 함');
+  let d = await pick(c, smith, reset.key);
+  assert.match(d.text, /직업 기본 아래로 내려간다.*최대 체력 2,520 이상을 다시 산 뒤에/);
+  assert.ok(!keys(d).includes(`${reset.key}:yes`));
+  d = await pick(c, smith, `${reset.key}:yes`);
+  assert.equal(p.data.stats.con, 255, '억지로 골라도 되돌리지 않음');
+  assert.equal(p.data.gold, 50_000);
+  // 체력을 다시 사서 산 체력이 바닥 위면 됨
+  p.data.bonusHp = 0;
+  d = await pick(c, smith, reset.key);
+  assert.ok(keys(d).includes(`${reset.key}:yes`), d.text);
+  d = await pick(c, smith, `${reset.key}:yes`);
+  assert.equal(p.data.stats.con, 3);
+  assert.equal(p.data.statPoints, 17 + 252);
+  assert.equal(p.data.gold, 40_000);
+  // 되돌릴 것이 없으면 골드를 받지 않음 (같은 선택이 두 번 와도 한 번만 냄)
+  d = await pick(c, smith, `${reset.key}:yes`);
+  assert.match(d.text, /되돌릴 것이 없다/);
+  assert.equal(p.data.gold, 40_000);
+});
+
 /** 2차 직업 인도자 (데이터에 아직 없을 수 있으므로 시험용으로 마을에 세움) */
 let guide: Npc | null = null;
 function secondJobGuide(): Npc {
