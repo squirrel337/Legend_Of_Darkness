@@ -96,6 +96,12 @@ export class AdminApi {
       learnAll: (_b, actor, name) => a.learnAll(actor, name),
       learnAbility: (b, actor, name) => a.learnAbility(actor, name, str(b.query)),
       forgetAbility: (b, actor, name) => a.forgetAbility(actor, name, str(b.id)),
+      // 성장 체계 (게임 안의 /전직횟수 /승급 /어빌 /숙련도 /계통 과 같음)
+      setRebirths: (b, actor, name) => a.setRebirths(actor, name, int(b.n)),
+      setAscended: (b, actor, name) => a.setAscended(actor, name, typeof b.on === 'boolean' ? b.on : null),
+      setAbilityLevel: (b, actor, name) => a.setAbilityLevel(actor, name, int(b.level)),
+      setProficiency: (b, actor, name) => a.setProficiency(actor, name, str(b.query) || 'all', optInt(b.value)),
+      setBeastType: (b, actor, name) => a.setBeastType(actor, name, b.type === null ? null : str(b.type)),
       giveGear: (_b, actor, name) => a.giveGear(actor, name),
       maxOut: (b, actor, name) => a.maxOut(actor, name, str(b.classId) || undefined),
       giveItem: (b, actor, name) => a.giveItem(actor, name, str(b.item), int(b.qty ?? 1)),

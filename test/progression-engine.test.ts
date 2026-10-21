@@ -17,7 +17,7 @@ import type { MapInstance } from '../src/server/world/MapInstance';
 import { Monster } from '../src/server/world/Monster';
 import { Npc } from '../src/server/world/Npc';
 import type { Player } from '../src/server/world/Player';
-import { Client, create, sleep, testConfig, until, type Msg } from './helpers';
+import { ADMIN_PW, Client, create, httpJson, sleep, testConfig, until, type Msg } from './helpers';
 
 let dataDir = '';
 let srv: RunningServer;
@@ -714,4 +714,36 @@ test('운영자 도구: /어빌 /숙련도 /승급 /전직횟수 /계통 /정보
   r = await gmSays('/보너스 @배움이 -150 0');
   assert.equal(r.ch, 'system', r.text);
   assert.equal(d.bonusHp, -150);
+});
+
+test('관리자 웹 API: 캐릭터의 전직 횟수·승급·어빌·숙련도·수인 계통 (게임 안 운영자 명령과 같은 기능)', async () => {
+  const login = await httpJson(srv.port, '/api/admin/login', { password: ADMIN_PW });
+  const token = String(login.json.token);
+  const call = (name: string, action: string, body: unknown) =>
+    httpJson(srv.port, `/api/admin/characters/${encodeURIComponent(name)}/${action}`, body, token);
+  const archer = () => world().store.get('이차궁사')!;
+  let r = await call('이차궁사', 'setAbilityLevel', { level: 42 });
+  assert.equal(r.status, 200, String(r.json.msg));
+  assert.equal(archer().abilityLevel, 42);
+  assert.equal((r.json.character as { abilityLevel: number }).abilityLevel, 42, '응답의 캐릭터 정보도 새 값');
+  r = await call('이차궁사', 'setAbilityLevel', { level: 0 });
+  assert.equal(r.status, 400);
+  r = await call('이차궁사', 'setProficiency', { value: 7 });
+  assert.equal(r.status, 200, String(r.json.msg));
+  assert.ok(Object.values(archer().prof).every((v) => v === 7));
+  r = await call('이차궁사', 'setProficiency', { query: '급소 찌르기', value: 55 });
+  assert.equal(archer().prof.r_stab, 55);
+  r = await call('이차궁사', 'setRebirths', { n: 4 });
+  assert.equal(archer().rebirths, 4);
+  r = await call('이차궁사', 'setAscended', { on: false });
+  assert.equal(archer().ascended, false);
+  r = await call('이차궁사', 'setAscended', {});
+  assert.equal(archer().ascended, true, 'on 을 빼면 뒤집음');
+  r = await call('이차수인', 'setBeastType', { type: 'reptile' });
+  assert.equal(r.status, 200, String(r.json.msg));
+  assert.equal(world().store.get('이차수인')!.beastType, 'reptile');
+  r = await call('이차수인', 'setBeastType', { type: null });
+  assert.equal(world().store.get('이차수인')!.beastType, null);
+  r = await call('이차궁사', 'setBeastType', { type: 'bird' });
+  assert.equal(r.status, 400, '수인이 아니면 거절');
 });

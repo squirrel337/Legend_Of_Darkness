@@ -471,6 +471,16 @@ function drawChar(c: CharDetail): void {
   const bonusHp = num(c.bonusHp);
   const bonusMp = num(c.bonusMp);
   const cls = classSel(false);
+  // 성장 체계: 전직 횟수·어빌·숙련도·수인 계통
+  const rebirthsIn = num(c.rebirths ?? 0);
+  const abilityIn = num(c.abilityLevel || 1);
+  const profIn = num(100);
+  const beastSel = h(
+    'select',
+    null,
+    h('option', { value: '' }, '계통 없음 (인도자에게서 다시 고름)'),
+    ...(data.beastTypes ?? []).map((b) => h('option', { value: b.id, selected: b.id === c.beastType }, b.name)),
+  );
   const gold = num('100만');
   const itemInput = h('input', { type: 'text', list: 'admin-items', placeholder: '아이템 이름 또는 ID', class: 'input-wide' });
   const itemQty = num(1);
@@ -546,6 +556,19 @@ function drawChar(c: CharDetail): void {
         h('div', { class: 'row' }, pts, btn('능력치 포인트 지급', () => act(name, 'addStatPoints', { n: parse(pts) }))),
         h('div', { class: 'row' }, btn('모든 기술/마법 배우기', () => act(name, 'learnAll')), btn('레벨에 맞는 최고 장비', () => act(name, 'giveGear'))),
         h('div', { class: 'row' }, cls, btn('직업 변경', () => act(name, 'setClass', { classId: cls.value }))),
+        h('h2', { style: 'margin-top:14px' }, '성장 체계'),
+        h(
+          'div',
+          { class: 'row' },
+          rebirthsIn,
+          btn('전직 횟수 설정', () => act(name, 'setRebirths', { n: parse(rebirthsIn) })),
+          btn(c.ascended ? '승급 취소' : '승급한 것으로', () => act(name, 'setAscended', { on: !c.ascended })),
+        ),
+        c.abilityLevel
+          ? h('div', { class: 'row' }, abilityIn, btn('어빌 설정', () => act(name, 'setAbilityLevel', { level: parse(abilityIn) })), h('span', { class: 'hint' }, '2차 직업의 어빌리티 레벨'))
+          : null,
+        h('div', { class: 'row' }, profIn, btn('배운 기술·마법의 숙련도 모두 설정', () => act(name, 'setProficiency', { value: parse(profIn) }))),
+        c.classId === 'beastkin' ? h('div', { class: 'row' }, beastSel, btn('수인 계통 바꾸기', () => act(name, 'setBeastType', { type: beastSel.value || null }))) : null,
       ),
       h(
         'div',
