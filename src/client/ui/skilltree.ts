@@ -179,7 +179,10 @@ export class SkillTreeWindow {
         class: 'gt-other',
         title: '다른 직업의 트리 보기',
         onchange: (e: Event) => {
-          const v = (e.target as HTMLSelectElement).value as ClassId;
+          const sel = e.target as HTMLSelectElement;
+          const v = sel.value as ClassId;
+          // 고른 뒤에는 초점을 풀어 K·Esc 가 다시 게임으로 가게
+          sel.blur();
           if (v) this.showTree(v);
         },
       },

@@ -311,7 +311,7 @@ export class Windows {
       ...(shown.length ? shown : [h('div', { class: 'hint center' }, list.length ? '모두 배웠습니다.' : '이 길드에서 배울 기술이 없습니다.')]),
     );
     this.learn.show(
-      `${d.name} — ${className} 기술·마법 배우기`,
+      `${d.name} — ${d.classId === 'peasant' ? '기본' : className} 기술·마법 배우기`,
       h(
         'div',
         { class: 'learn-head' },

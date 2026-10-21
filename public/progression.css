@@ -176,6 +176,13 @@
   flex: 1;
 }
 
+/* 좁은 화면: 칸이 작아지면 2차 직업의 어빌 줄이 들어가도록 캐릭터 창 단추(C 키와 같음)를 숨김 */
+@media (max-width: 900px) {
+  .stats-col.has-abil .btn {
+    display: none;
+  }
+}
+
 /* ───────── NPC 대화: 전직·승급·2차 전직의 조건 줄 ───────── */
 
 .dialog-text p.cond-ok,
@@ -840,6 +847,21 @@
 
 .gt-hint {
   color: var(--g-ink);
+}
+
+/* 낮은 화면: 트리 칸이 보이도록 위아래 안내를 줄임 */
+@media (max-height: 720px) {
+  .win-tree .win-body {
+    gap: 5px;
+  }
+  .gt-sum,
+  .gt-note {
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  .gt-info {
+    height: 78px;
+  }
 }
 
 @media (max-width: 720px) {

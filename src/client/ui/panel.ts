@@ -298,7 +298,7 @@ export class Panel {
         { class: 'stats-cols' },
         h(
           'div',
-          { class: 'stats-col' },
+          { class: `stats-col${ab !== null ? ' has-abil' : ''}` },
           h(
             'div',
             { class: 'char-name' },
