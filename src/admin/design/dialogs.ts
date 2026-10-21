@@ -123,7 +123,7 @@ export async function showHistory(ctx: Ctx): Promise<void> {
       'button',
       { class: 'dz-hrow', type: 'button' },
       h('span', { class: 'dz-htime' }, new Date(e.at).toLocaleString('ko-KR')),
-      h('span', { class: `dz-hkind ${e.kind}` }, e.classId ? `${s.className(e.classId)} 트리` : KIND[e.kind]),
+      h('span', { class: `dz-hkind ${e.kind}` }, e.classId ? `${s.className(e.classId)} 트리` : e.kind === 'skilltree' ? '여러 곳' : KIND[e.kind]),
       h('span', { class: 'dz-hsum' }, e.summary || '-'),
       h('small', null, e.actor),
     );

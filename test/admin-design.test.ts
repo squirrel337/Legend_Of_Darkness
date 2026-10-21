@@ -308,6 +308,8 @@ test('요청 검사: 모르는 항목·잘못된 모양·다른 직업의 기술
     ['PUT', '/design/skilltree/warrior', { rev: b.rev, tree, abilities: [{ id: 'w_strike', name: 'x'.repeat(21) }] }, 400, /이름은 1~20자/],
     ['PUT', '/design/skilltree/warrior', { rev: b.rev, tree: { nodes: [{ ability: 'w_strike', row: 0, col: 0, level: 5, gold: 0, __proto__x: 1 }] } }, 400, /__proto__x/],
     ['PUT', '/design', { rev: b.rev, abilities: [{ id: 'mon_poison', name: '독' }] }, 400, /몬스터 전용/],
+    ['PUT', '/design/skilltree/warrior', { rev: b.rev, tree, abilities: [null] }, 400, /기술 수정은/],
+    ['PUT', '/design', { rev: b.rev, abilities: ['w_strike'] }, 400, /기술 수정은/],
     ['PUT', '/design', { rev: b.rev, abilities: [{ id: 'w_strike', name: '강타\n[관리자] 가짜 기록' }] }, 400, /줄바꿈이나 제어 문자/],
     ['PUT', '/design/progression', { rev: b.rev, progression: { ...b.progression, ascend: { ...b.progression.ascend, title: '마\u0007스터' } } }, 400, /제어 문자/],
     ['PUT', '/design', { rev: b.rev, dryRun: true, skillTrees: JSON.parse('{"warrior":' + '['.repeat(40) + ']'.repeat(40) + '}') }, 400, /깊게/],
@@ -408,6 +410,47 @@ test('손으로 고쳐 트리와 어긋난 기술의 레벨은, 바꾼 곳이 �
     const hist = fs.readdirSync(path.join(dir, 'design-history'));
     assert.equal(hist.length, 1);
     assert.match((JSON.parse(fs.readFileSync(path.join(dir, 'design-history', hist[0]!), 'utf8')) as { summary: string }).summary, /레벨·가격을 스킬트리에 맞춤/);
+  } finally {
+    await s2.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(gd2, { recursive: true, force: true });
+  }
+});
+
+test('서버가 켜진 뒤 누가 gamedata 파일을 직접 고쳤으면, 그 파일을 덮어쓰게 되는 저장은 거절하고(412) 다른 파일만 쓰는 저장은 받는다', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-design-disk-'));
+  const gd2 = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-design-disk-gd-'));
+  fs.cpSync(path.join(ROOT, 'gamedata'), gd2, { recursive: true });
+  const s2 = await startServer(testConfig(dir, { GAMEDATA_DIR: gd2 }));
+  try {
+    const base = `http://127.0.0.1:${s2.port}/api/admin`;
+    const login = await fetch(`${base}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ADMIN_PW }) });
+    const auth = { Authorization: `Bearer ${String(((await login.json()) as { token: string }).token)}` };
+    const get = async () => (await (await fetch(`${base}/design`, { headers: auth })).json()) as DesignBundle;
+    const put = async (p: string, body: unknown) => {
+      const res = await fetch(`${base}${p}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...auth }, body: JSON.stringify(body) });
+      return { status: res.status, json: (await res.json()) as DesignSaveResult };
+    };
+    // 서버가 켜진 뒤 abilities.json 에 손으로 새 기술을 더함 (설명을 고친 것으로 흉내)
+    const file = path.join(gd2, 'abilities.json');
+    const hand = fs.readFileSync(file, 'utf8').replace('"name":"강타"', '"name":"강타 (손으로 고침)"');
+    fs.writeFileSync(file, hand);
+    const b = await get();
+    assert.ok(b.warnings.some((w) => w.where === 'gamedata' && /abilities\.json/.test(w.msg)), JSON.stringify(b.warnings));
+    // 기술 값을 고치는 저장은 abilities.json 을 쓰게 되므로 거절
+    const r = await put('/design', { rev: b.rev, abilities: [{ id: 'w_strike', mp: 7 }] });
+    assert.equal(r.status, 412, JSON.stringify(r.json));
+    assert.match(r.json.msg, /서버 밖에서 바뀌어/);
+    assert.equal(fs.readFileSync(file, 'utf8'), hand, '손으로 고친 내용 그대로');
+    assert.notEqual(s2.world.data.abilities.get('w_strike')!.mp, 7, '게임에도 반영하지 않음');
+    assert.equal(fs.existsSync(path.join(dir, 'design-history')) ? fs.readdirSync(path.join(dir, 'design-history')).length : 0, 0);
+    // 성장 규칙만 바꾸는 저장은 abilities.json 을 쓰지 않으므로 받음
+    const prog = clone(b.progression);
+    prog.ascend.title = '대가';
+    const ok = await put('/design/progression', { rev: b.rev, progression: prog });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.equal(fs.readFileSync(file, 'utf8'), hand);
+    assert.match(fs.readFileSync(path.join(gd2, 'progression.json'), 'utf8'), /"title": "대가"/);
   } finally {
     await s2.close();
     fs.rmSync(dir, { recursive: true, force: true });

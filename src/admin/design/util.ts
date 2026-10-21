@@ -174,13 +174,18 @@ export function textInput(key: string, value: string, onCommit: (v: string) => v
     ...(o.width ? { style: `width:${o.width}` } : {}),
   });
   el.addEventListener('change', () => {
-    if (el.value !== value) onCommit(el.value);
+    const v = oneLine(el.value);
+    if (v !== value) onCommit(v);
+    else el.value = value;
   });
   el.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') el.blur();
   });
   return el;
 }
+
+/** 줄바꿈·제어 문자를 빈칸으로 (게임 화면과 서버 기록에 나가는 글자는 한 줄) */
+export const oneLine = (v: string) => v.replace(/\s*[\r\n]+\s*/g, ' ').replace(/[\u0000-\u001f\u007f]/g, ' ');
 
 /** 고르는 칸 */
 export function selectInput(key: string, value: string, options: { value: string; label: string; group?: string; disabled?: boolean }[], onCommit: (v: string) => void, title?: string): HTMLSelectElement {

@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CLASS_IDS, formatNumber, isClassId, type ClassId } from '../../shared/constants';
 import {
+  abilityPatch,
   DESIGN_LIMITS,
   diffDesign,
   HISTORY_ID,
@@ -91,10 +92,16 @@ export class DesignApi {
   /** 판 기록 머리 (파일은 한 번 쓰면 바뀌지 않으므로 읽은 것을 기억) */
   private readonly historyCache = new Map<string, DesignHistoryEntry>();
   private lastAt = 0;
+  /**
+   * 서버가 마지막으로 읽었거나(켜질 때) 쓴 세 파일 내용의 해시. 서버가 켜져 있는 동안 누가 파일을 직접 고쳤으면
+   * (예: abilities.json 에 새 기술을 더함) 그 파일에 쓰게 되는 저장을 거절해, 손으로 고친 내용을 덮어쓰지 않습니다.
+   */
+  private readonly diskBase = new Map<DesignFile, string>();
 
   constructor(private readonly world: World) {
     this.historyDir = path.join(world.config.dataDir, 'design-history');
     this.gamedataDir = path.resolve(world.config.gamedataDir);
+    for (const f of DESIGN_FILES) this.diskBase.set(f, this.diskHash(f));
   }
 
   /**
@@ -154,8 +161,26 @@ export class DesignApi {
       }),
       maxLevel: cfg.maxLevel,
       statCap: cfg.statCap,
-      warnings: [...gd.designWarnings, ...this.serverIssues(gd.skillTrees, gd.progression)],
+      warnings: [...gd.designWarnings, ...this.serverIssues(gd.skillTrees, gd.progression), ...this.diskIssues()],
     };
+  }
+
+  private diskHash(f: DesignFile): string {
+    const text = readOrNull(path.join(this.gamedataDir, f));
+    return text === null ? '' : sha256(text);
+  }
+
+  /** 서버가 켜진(또는 마지막으로 저장한) 뒤 서버 밖에서 바뀐 파일 */
+  private changedOutside(files: readonly DesignFile[] = DESIGN_FILES): DesignFile[] {
+    return files.filter((f) => this.diskHash(f) !== this.diskBase.get(f));
+  }
+
+  private diskIssues(): DesignIssue[] {
+    return this.changedOutside().map((f) => ({
+      level: 'warn' as const,
+      where: 'gamedata',
+      msg: `gamedata/${f} 이(가) 서버가 켜진 뒤 서버 밖에서 바뀌었습니다. 그 내용을 덮어쓰지 않도록 이 파일에 쓰게 되는 저장은 거절합니다. 서버를 다시 켜서 불러온 뒤 고쳐 주세요.`,
+    }));
   }
 
   private abilitySnapshots(): AbilitySnapshot[] {
@@ -227,7 +252,7 @@ export class DesignApi {
       if (typeof p === 'string') return failed(400, p, rev, [bodyIssue(p)]);
       update.abilities = p;
     }
-    return this.commit({ update, rev: dryRun ? null : (body.rev as string), dryRun, actor, softCheck: dryRun });
+    return this.commit({ update, rev: dryRun ? null : (body.rev as string), dryRun, actor, softCheck: dryRun }, rev);
   }
 
   /** PUT /design/skilltree/:classId: 직업 하나의 트리 (+ 그 직업 기술의 값) */
@@ -248,7 +273,7 @@ export class DesignApi {
       }
       update.abilities = p;
     }
-    return this.commit({ update, rev: body.rev as string, dryRun: body.dryRun === true, kind: 'skilltree', classId, actor });
+    return this.commit({ update, rev: body.rev as string, dryRun: body.dryRun === true, kind: 'skilltree', classId, actor }, rev);
   }
 
   /** PUT /design/progression: 성장 규칙 통째로 */
@@ -258,13 +283,16 @@ export class DesignApi {
     if (bad) return failed(400, bad.msg, rev, [bad]);
     if (!validRev(body.rev)) return failed(400, 'rev(판 표시)가 필요합니다.', rev, [bodyIssue('rev 는 GET /api/admin/design 에서 받은 판 표시여야 합니다.')]);
     if (body.progression === undefined) return failed(400, 'progression 이 필요합니다.', rev, [bodyIssue('progression 이 필요합니다.')]);
-    return this.commit({
-      update: { progression: body.progression, syncAbilityDefaults: true },
-      rev: body.rev as string,
-      dryRun: body.dryRun === true,
-      kind: 'progression',
-      actor,
-    });
+    return this.commit(
+      {
+        update: { progression: body.progression, syncAbilityDefaults: true },
+        rev: body.rev as string,
+        dryRun: body.dryRun === true,
+        kind: 'progression',
+        actor,
+      },
+      rev,
+    );
   }
 
   /** POST /design/restore: 판 기록 하나의 설계로 되돌림 (지금 판도 기록에 남김) */
@@ -282,22 +310,20 @@ export class DesignApi {
     const patches: AbilityPatch[] = [];
     for (const s of design.abilities) {
       const a = gd.abilities.get(s.id);
-      if (!a || a.classId === 'monster') continue;
-      const p: AbilityPatch = { id: s.id };
-      if (s.name !== a.name) p.name = s.name;
-      if (s.desc !== a.desc) p.desc = s.desc;
-      if (s.mp !== a.mp) p.mp = s.mp;
-      if (s.cooldownMs !== a.cooldownMs) p.cooldownMs = s.cooldownMs;
-      if (Object.keys(p).length > 1) patches.push(p);
+      const p = a && a.classId !== 'monster' ? abilityPatch(s.id, a, s) : null;
+      if (p) patches.push(p);
     }
-    return this.commit({
-      update: { progression: design.progression, skillTrees: design.skillTrees, abilities: patches, syncAbilityDefaults: true },
-      rev: body.rev,
-      dryRun: false,
-      kind: 'restore',
-      actor,
-      prefix: `${new Date(entry.at).toLocaleString('ko-KR')} 판으로 되돌림`,
-    });
+    return this.commit(
+      {
+        update: { progression: design.progression, skillTrees: design.skillTrees, abilities: patches, syncAbilityDefaults: true },
+        rev: body.rev,
+        dryRun: false,
+        kind: 'restore',
+        actor,
+        prefix: `${new Date(entry.at).toLocaleString('ko-KR')} 판으로 되돌림`,
+      },
+      rev,
+    );
   }
 
   private stale(rev: string): DesignReply {
@@ -306,27 +332,25 @@ export class DesignApi {
 
   // ───────────────────────── 저장 (검사 → 반영 → 판 기록 → 파일 → 알림) ─────────────────────────
 
-  private commit(o: CommitOptions): DesignReply {
+  /** rev 는 요청을 받을 때 계산한 지금 판 표시 */
+  private commit(o: CommitOptions, rev: string): DesignReply {
     const gd = this.world.data;
-    const rev = this.rev();
     if (o.rev !== null && o.rev !== rev) return this.stale(rev);
-    const issues = gd.checkUpdate(o.update);
-    if (issues.some(isError)) {
-      const n = issues.filter(isError).length;
-      return failed(o.dryRun && o.softCheck ? 200 : 400, `검사에서 오류 ${n}개가 나와 ${o.dryRun ? '저장할 수 없습니다' : '저장하지 않았습니다'}.`, rev, issues);
-    }
+    const invalid = (issues: DesignIssue[]) =>
+      failed(o.dryRun && o.softCheck ? 200 : 400, `검사에서 오류 ${issues.filter(isError).length}개가 나와 ${o.dryRun ? '저장할 수 없습니다' : '저장하지 않았습니다'}.`, rev, issues);
     if (o.dryRun) {
-      const after = {
-        trees: o.update.skillTrees ? normalizeSkillTrees(o.update.skillTrees) : gd.skillTrees,
-        prog: (o.update.progression as ProgressionConfig | undefined) ?? gd.progression,
-      };
-      return reply(200, { ok: true, msg: '검사를 통과했습니다.', issues: [...issues, ...this.serverIssues(after.trees, after.prog)], rev } satisfies DesignSaveResult);
+      const issues = gd.checkUpdate(o.update);
+      if (issues.some(isError)) return invalid(issues);
+      const trees = o.update.skillTrees ? normalizeSkillTrees(o.update.skillTrees) : gd.skillTrees;
+      const prog = (o.update.progression as ProgressionConfig | undefined) ?? gd.progression;
+      return reply(200, { ok: true, msg: '검사를 통과했습니다.', issues: [...issues, ...this.serverIssues(trees, prog), ...this.diskIssues()], rev } satisfies DesignSaveResult);
     }
 
+    // 검사와 반영을 한 번에 (오류가 하나라도 있으면 아무것도 바꾸지 않음)
     const before = this.snapshot();
     const oldTexts = this.texts();
     const applied = gd.applyDesign(o.update);
-    if (applied.some(isError)) return failed(400, '검사에서 오류가 나와 저장하지 않았습니다.', rev, applied);
+    if (applied.some(isError)) return invalid(applied);
     const after = this.snapshot();
     const names = {
       className: (id: ClassId) => gd.classes.get(id)?.name ?? id,
@@ -346,12 +370,18 @@ export class DesignApi {
     // 손으로 고친 파일 때문에 기술의 레벨·가격만 트리와 달랐던 경우에도 맞춘 파일은 남김
     const base = changes.length ? summarizeChanges(changes, o.prefix ? 3 : 4) : '기술 파일의 레벨·가격을 스킬트리에 맞춤';
     const summary = o.prefix ? `${o.prefix}: ${base}` : base;
+    // 트리·기술 값이 바뀐 직업이 하나뿐이고 성장 규칙은 그대로면 그 직업의 트리 저장으로 남김
+    const classes = new Set(changes.flatMap((c) => (c.classId ? [c.classId] : [])));
+    const progChanged = changes.some((c) => c.area === 'progression');
     if (!o.kind) {
-      // 트리·기술 값이 바뀐 직업이 하나뿐이고 성장 규칙은 그대로면 그 직업의 트리 저장으로 남김
-      const classes = new Set(changes.flatMap((c) => (c.classId ? [c.classId] : [])));
-      const prog = changes.some((c) => c.area === 'progression');
-      o.kind = !prog || classes.size > 0 ? 'skilltree' : 'progression';
-      if (classes.size === 1 && !prog) o.classId = [...classes][0];
+      o.kind = !progChanged || classes.size > 0 ? 'skilltree' : 'progression';
+      if (classes.size === 1 && !progChanged) o.classId = [...classes][0];
+    }
+    const outside = this.changedOutside(changedFiles);
+    if (outside.length) {
+      this.rollback(before);
+      const msg = `gamedata/${outside.join('·')} 이(가) 서버가 켜진 뒤 서버 밖에서 바뀌어, 그 내용을 덮어쓰지 않도록 저장하지 않았습니다. 서버를 다시 켜서 바뀐 파일을 불러온 뒤 다시 저장해 주세요.`;
+      return failed(412, msg, rev, [{ level: 'error', where: 'gamedata', msg }]);
     }
 
     let entry: DesignHistoryEntry;
@@ -364,6 +394,7 @@ export class DesignApi {
     }
     try {
       this.writeFiles(changedFiles.map((f) => [f, newTexts[f]]));
+      for (const f of changedFiles) this.diskBase.set(f, sha256(newTexts[f]));
     } catch (e) {
       log.error('설계 파일을 쓰지 못했습니다:', (e as Error).message);
       this.rollback(before);
@@ -372,7 +403,19 @@ export class DesignApi {
     }
     this.pruneHistory();
     this.publish();
-    const target = o.kind === 'progression' ? '성장 규칙' : o.classId ? `${names.className(o.classId)} 트리` : o.kind === 'restore' ? '설계 전체' : '직업·스킬트리';
+    const trees = [...classes].map((c) => names.className(c)).join('·');
+    const target =
+      o.kind === 'restore'
+        ? '설계 전체'
+        : o.classId
+          ? `${names.className(o.classId)} 트리`
+          : progChanged && classes.size
+            ? `${trees} 트리·성장 규칙`
+            : progChanged
+              ? '성장 규칙'
+              : classes.size
+                ? `${trees} 트리`
+                : '기술 파일';
     this.world.audit.write(o.actor, o.kind === 'restore' ? 'restoreDesign' : 'saveDesign', target, summary);
     log.info(`[관리자] ${o.actor} 직업·스킬트리 ${o.kind === 'restore' ? '되돌리기' : '저장'}: ${summary} (파일: ${changedFiles.join(', ') || '없음'})`);
     const msg = `${o.kind === 'restore' ? '되돌렸습니다' : '저장했습니다'}. 게임에 바로 반영했습니다.${changes.length ? ` (${changes.length}곳)` : ''}`;
@@ -603,6 +646,7 @@ function validRev(v: unknown): v is string {
 function patchList(v: unknown): AbilityPatch[] | string {
   if (!Array.isArray(v)) return 'abilities 는 기술 수정의 배열이어야 합니다.';
   if (v.length > DESIGN_LIMITS.patches) return `기술 수정은 한 번에 ${formatNumber(DESIGN_LIMITS.patches)}개까지입니다.`;
+  if (!v.every((x) => isObj(x) && typeof x.id === 'string')) return '기술 수정은 { "id": 기술 id, ... } 모양의 객체여야 합니다.';
   return v as AbilityPatch[];
 }
 
@@ -618,6 +662,8 @@ function isAbilitySnapshot(v: unknown): v is AbilitySnapshot {
     typeof v.price === 'number'
   );
 }
+
+const sha256 = (text: string) => crypto.createHash('sha256').update(text).digest('hex');
 
 function readOrNull(file: string): string | null {
   try {

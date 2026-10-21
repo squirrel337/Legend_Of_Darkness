@@ -6,7 +6,7 @@ import { bigNumber, classTier, TREE_MAX_COLS, type SkillTreeNode } from '../../s
 import type { AbilityEffect } from '../../shared/types';
 import { issueSlot, type Ctx } from './ctx';
 import type { AbilityEdit } from './state';
-import { clamp, field, fmtNum, josa, numInput, selectInput, textInput } from './util';
+import { clamp, field, fmtNum, josa, numInput, oneLine, selectInput, textInput } from './util';
 
 const ITEM_GROUPS: Record<string, string> = { material: '재료', consumable: '소모품', equip: '장비' };
 
@@ -252,8 +252,19 @@ function abilitySection(ctx: Ctx, id: string, ed: AbilityEdit | undefined, updAb
   const s = ctx.store;
   const def = s.def(id);
   if (!ed || !def) return h('section', { class: 'dz-sec' }, h('p', { class: 'dz-hint' }, 'abilities.json 에 없는 기술입니다.'));
+  // 설명은 툴팁 한 단락: 칸 안에서는 줄을 바꿔 보이지만 Enter 는 입력을 마치고, 줄바꿈은 빈칸으로
   const desc = h('textarea', { 'data-k': 'ab.desc', maxLength: 300, rows: 3 }, ed.desc);
-  desc.addEventListener('change', () => updAb((x) => (x.desc = desc.value)));
+  desc.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      desc.blur();
+    }
+  });
+  desc.addEventListener('change', () => {
+    const v = oneLine(desc.value).trim();
+    if (v !== ed.desc) updAb((x) => (x.desc = v));
+    else desc.value = ed.desc;
+  });
   const cd = h('input', { type: 'text', inputmode: 'decimal', class: 'dz-num', value: String(ed.cooldownMs / 1000), 'data-k': 'ab.cd', autocomplete: 'off' });
   cd.addEventListener('change', () => {
     const v = Number(cd.value.replace(/[초s\s]/g, ''));

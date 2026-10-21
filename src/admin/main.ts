@@ -53,6 +53,8 @@ interface CharDetail extends CharSummary {
 
 interface GameDataResp {
   classes: { id: string; name: string }[];
+  /** 수인 계통 (직업·스킬트리 탭에서 고침) */
+  beastTypes?: { id: string; name: string }[];
   items: { id: string; name: string; type: string; slot: string | null; level: number }[];
   abilities: { id: string; name: string; kind: string; classId: string; level: number }[];
   maps: { id: string; name: string; spawn: { x: number; y: number }; levelRange: [number, number] | null }[];
@@ -140,8 +142,7 @@ const itemName = (id: string) => gd?.items.find((i) => i.id === id)?.name ?? id;
 const abilityName = (id: string) => gd?.abilities.find((a) => a.id === id)?.name ?? id;
 const mapName = (id: string) => gd?.maps.find((m) => m.id === id)?.name ?? id;
 const when = (ms: number) => (ms ? new Date(ms).toLocaleString('ko-KR') : '-');
-/** 수인 계통 이름 (기본 계통; 직업·스킬트리 탭에서 바꾼 이름은 그 탭에서 봄) */
-const BEAST_NAMES: Record<string, string> = { mammal: '포유류', bird: '조류', reptile: '파충류' };
+const beastName = (id: string) => gd?.beastTypes?.find((b) => b.id === id)?.name ?? id;
 const dur = (sec: number) => {
   const d = Math.floor(sec / 86400);
   const hh = Math.floor((sec % 86400) / 3600);
@@ -248,7 +249,13 @@ async function loadView(): Promise<void> {
     if (view === 'dash') await renderDash();
     else if (view === 'chars') await renderChars();
     else if (view === 'char') await renderChar(currentChar);
-    else if (view === 'design') await renderDesign(main, { request, toast });
+    else if (view === 'design')
+      await renderDesign(main, {
+        request,
+        toast,
+        // 기술 이름·수인 계통이 바뀌었을 수 있으니 다른 탭이 쓰는 게임 데이터 목록을 다음에 새로 받음
+        saved: () => (gd = null),
+      });
     else if (view === 'settings') await renderSettings();
     else await renderAudit();
   } catch (e) {
@@ -521,7 +528,7 @@ function drawChar(c: CharDetail): void {
         kv('전직 횟수', `${c.rebirths ?? 0}번`),
         kv('승급', c.ascended ? '함' : '아직'),
         c.abilityLevel ? kv('어빌 (어빌 경험치)', `${c.abilityLevel} (${fmt(c.abilityExp ?? 0)})`) : null,
-        c.classId === 'beastkin' ? kv('수인 계통', c.beastType ? (BEAST_NAMES[c.beastType] ?? c.beastType) : '아직 고르지 않음') : null,
+        c.classId === 'beastkin' ? kv('수인 계통', c.beastType ? beastName(c.beastType) : '아직 고르지 않음') : null,
       ),
     ),
     h(

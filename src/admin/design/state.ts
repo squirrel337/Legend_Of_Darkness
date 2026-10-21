@@ -1,7 +1,7 @@
 // 직업·스킬트리 편집기의 상태: 편집 중인 설계(doc), 서버에 저장된 설계(base), 되돌리기·다시 하기, 서버 검사 결과, 저장·되돌리기 요청.
 // 화면은 이 상태만 보고 그리며, 값을 바꿀 때는 늘 mutate() 를 거칩니다 (되돌리기 기록 + 실시간 검사 예약).
 import { CLASS_IDS, isClassId, type ClassId } from '../../shared/constants';
-import { diffDesign, stableJson, type DesignChange, type DesignHistoryDetail, type DesignLike, type DesignSaveBody } from '../../shared/design-edit';
+import { abilityPatch, diffDesign, stableJson, type DesignChange, type DesignHistoryDetail, type DesignLike, type DesignSaveBody } from '../../shared/design-edit';
 import {
   classTier,
   type AbilityPatch,
@@ -73,6 +73,8 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 /** 오래 걸리는 저장 같은 것을 알리는 화면 쪽 도우미 */
 export interface StoreHooks {
   toast(msg: string, ok?: boolean): void;
+  /** 저장·되돌리기가 서버에 반영된 뒤 */
+  saved?(): void;
 }
 
 export class DesignStore {
@@ -289,13 +291,8 @@ export class DesignStore {
     const out: AbilityPatch[] = [];
     for (const [id, a] of Object.entries(this.doc.abilities)) {
       const b = this.base.abilities[id];
-      if (!b) continue;
-      const p: AbilityPatch = { id };
-      if (a.name !== b.name) p.name = a.name;
-      if (a.desc !== b.desc) p.desc = a.desc;
-      if (a.mp !== b.mp) p.mp = a.mp;
-      if (a.cooldownMs !== b.cooldownMs) p.cooldownMs = a.cooldownMs;
-      if (Object.keys(p).length > 1) out.push(p);
+      const p = b ? abilityPatch(id, b, a) : null;
+      if (p) out.push(p);
     }
     return out;
   }
@@ -388,7 +385,7 @@ export class DesignStore {
 
   /** 바뀐 곳을 저장합니다. 결과: 'ok' | 'invalid'(검사 오류) | 'conflict'(그사이 다른 저장) | 'error' */
   async save(force = false): Promise<'ok' | 'invalid' | 'conflict' | 'error' | 'none'> {
-    if (!this.dirty) return 'none';
+    if (!this.dirty || this.saving) return 'none';
     window.clearTimeout(this.checkTimer);
     this.checking = false;
     this.saving = true;
@@ -412,6 +409,11 @@ export class DesignStore {
         this.hooks.toast(r.json.msg ?? '검사 오류로 저장하지 않았습니다.', false);
         return 'invalid';
       }
+      if (r.status === 412) {
+        // gamedata 파일을 서버 밖에서 고쳐 덮어쓰지 않으려고 거절함 (문제 목록의 맨 위에 이유)
+        this.hooks.toast(r.json.msg ?? '파일이 서버 밖에서 바뀌어 저장하지 않았습니다.', false);
+        return 'error';
+      }
       if (!r.json.ok) {
         this.hooks.toast(r.json.msg ?? `저장하지 못했습니다. (${r.status})`, false);
         return 'error';
@@ -428,6 +430,7 @@ export class DesignStore {
         this.scheduleCheck();
       }
       this.hooks.toast(r.json.msg ?? '저장했습니다.', true);
+      this.hooks.saved?.();
       return 'ok';
     } catch (e) {
       if ((e as Error).name !== 'AuthError') this.hooks.toast(`저장하지 못했습니다: ${(e as Error).message}`, false);
@@ -463,7 +466,10 @@ export class DesignStore {
   /** 판 기록 하나로 되돌립니다 (편집 중이던 것은 버림) */
   async restore(id: string): Promise<DesignSaveResult & { status: number }> {
     const r = await this.request<DesignSaveResult>('POST', '/design/restore', { id, rev: this.rev });
-    if (r.status === 200 && r.json.ok) await this.reload();
+    if (r.status === 200 && r.json.ok) {
+      await this.reload();
+      this.hooks.saved?.();
+    }
     return { ...r.json, status: r.status };
   }
 }

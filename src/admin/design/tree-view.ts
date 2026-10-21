@@ -106,7 +106,7 @@ function classList(ctx: Ctx): HTMLElement {
           ),
         )
       : h('p', { class: 'dz-hint' }, '이 직업의 기술이 모두 트리에 있습니다.'),
-    h('p', { class: 'dz-hint' }, '새 기술은 gamedata/abilities.json 에 효과와 함께 만든 뒤 여기서 트리에 놓습니다.'),
+    h('p', { class: 'dz-hint' }, '새 기술은 gamedata/abilities.json 에 효과와 함께 만들고 서버를 다시 켠 뒤 여기서 트리에 놓습니다.'),
   );
 }
 

@@ -221,6 +221,7 @@ export class AdminApi {
         .map((a) => ({ id: a.id, name: a.name, kind: a.kind, classId: a.classId, level: a.level })),
       maps: [...d.maps.values()].map((m) => ({ id: m.id, name: m.name, spawn: m.spawn, levelRange: m.levelRange ?? null })),
       monsters: [...d.monsters.values()].map((m) => ({ id: m.id, name: m.name, level: m.level })),
+      beastTypes: d.progression.second.beastTypes,
       maxLevel: this.world.config.maxLevel,
       statCap: this.world.config.statCap,
     };

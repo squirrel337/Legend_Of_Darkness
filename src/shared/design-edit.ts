@@ -48,6 +48,19 @@ export interface AbilitySnapshot {
   price: number;
 }
 
+/** 편집기에서 고치는 기술 값 */
+export type AbilityEditable = Pick<AbilitySnapshot, 'name' | 'desc' | 'mp' | 'cooldownMs'>;
+
+/** cur 를 next 로 바꾸는 기술 수정 (바뀐 값만, 바뀐 것이 없으면 null). 편집기의 저장과 서버의 되돌리기가 같이 씀 */
+export function abilityPatch(id: string, cur: AbilityEditable, next: AbilityEditable): AbilityPatch | null {
+  const p: AbilityPatch = { id };
+  if (next.name !== cur.name) p.name = next.name;
+  if (next.desc !== cur.desc) p.desc = next.desc;
+  if (next.mp !== cur.mp) p.mp = next.mp;
+  if (next.cooldownMs !== cur.cooldownMs) p.cooldownMs = next.cooldownMs;
+  return Object.keys(p).length > 1 ? p : null;
+}
+
 /** 설계 한 판 (판 기록 파일의 design: 그 저장 바로 전에 게임이 쓰던 설계) */
 export interface DesignSnapshot {
   progression: ProgressionConfig;

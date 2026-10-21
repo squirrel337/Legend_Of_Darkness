@@ -14,19 +14,27 @@ import { keepFocus } from './util';
 export interface DesignDeps {
   request: Request;
   toast(msg: string, ok?: boolean): void;
+  /** 저장·되돌리기가 끝났을 때 (관리자 페이지가 들고 있던 게임 데이터 목록을 새로 받게) */
+  saved?(): void;
 }
 
 let store: DesignStore | null = null;
 let current: Ctx | null = null;
+let keysInstalled = false;
 
 /** 탭을 열 때마다 부름 (처음이면 서버에서 불러오고, 저장하지 않은 바뀐 곳이 없으면 새로 불러옴) */
 export async function renderDesign(main: HTMLElement, deps: DesignDeps): Promise<void> {
   if (!store) {
-    store = new DesignStore(deps.request, { toast: deps.toast });
-    await store.load();
-    installGlobalKeys();
+    // 다 불러온 뒤에만 기억 (처음 불러오기가 실패하면 다음에 다시)
+    const s = new DesignStore(deps.request, { toast: deps.toast, saved: () => deps.saved?.() });
+    await s.load();
+    store = s;
   } else if (!store.dirty && !store.saving) {
     await store.reload();
+  }
+  if (!keysInstalled) {
+    keysInstalled = true;
+    installGlobalKeys();
   }
   mount(main, store, deps);
 }
@@ -133,7 +141,7 @@ function subbar(ctx: Ctx): HTMLElement {
   const save = ctx.live(
     h('button', { class: 'btn primary', type: 'button', title: '저장 (Ctrl+S)', onclick: () => void doSave(ctx) }, '저장'),
     (el) => {
-      const errors = s.errorCount;
+      const errors = knownErrors(s);
       el.disabled = s.saving || !s.dirty || errors > 0;
       el.title = errors > 0 ? `검사 오류 ${errors}개를 먼저 고쳐 주세요` : s.dirty ? '저장하고 게임에 바로 반영 (Ctrl+S)' : '바뀐 곳이 없습니다';
     },
@@ -193,13 +201,21 @@ async function reloadAsk(ctx: Ctx): Promise<void> {
   ctx.toast('서버의 설계를 새로 불러왔습니다.');
 }
 
+/** 지금 편집 중인 설계에 대해 이미 알고 있는 오류 수 (검사가 아직 돌아오지 않았으면 0: 저장 요청에서 서버가 다시 검사함) */
+function knownErrors(s: DesignStore): number {
+  return s.checking || s.checkedVersion !== s.version ? 0 : s.errorCount;
+}
+
 async function doSave(ctx: Ctx): Promise<void> {
   const s = ctx.store;
+  if (s.saving) return;
   // 입력 중이던 칸의 값을 먼저 반영 (change 이벤트)
   (document.activeElement as HTMLElement | null)?.blur();
   await new Promise((r) => setTimeout(r, 0));
+  if (s.saving) return;
   if (!s.dirty) return ctx.toast('저장할 바뀐 곳이 없습니다.');
-  if (s.errorCount > 0) return ctx.toast(`검사 오류 ${s.errorCount}개를 먼저 고쳐 주세요.`, false);
+  const errors = knownErrors(s);
+  if (errors > 0) return ctx.toast(`검사 오류 ${errors}개를 먼저 고쳐 주세요.`, false);
   const r = await s.save();
   if (r === 'conflict') showConflict(ctx);
 }
