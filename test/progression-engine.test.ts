@@ -622,8 +622,9 @@ test('배우기: 길드장은 스킬트리 조건(선수과목 숙련도·재료
     mark = c.mark;
     c.send({ t: 'learnAbility', npc: rogueMaster.id, id: 'r_stab' });
     await c.waitFor('chat', (m) => m.ch === 'error' && m.text.includes('지금 직업의 기술만'), mark);
-    // 2차 직업 기술은 레벨이 아니라 어빌로
-    become(p, 'archer', 99);
+    // 2차 직업 기술은 레벨이 아니라 어빌로 (첫 기술의 선수과목인 1차 직업 기술은 승급한 사람이면 배워 둔 것)
+    const firstReqs = Object.fromEntries((data().nodeOf('a_aimed')?.node.requires ?? []).map((r) => [r.ability, r.prof]));
+    become(p, 'archer', 99, firstReqs);
     p.data.gold = 1000;
     const archerMaster = npcEntity('archer_master');
     near(p, archerMaster);

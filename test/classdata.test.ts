@@ -55,6 +55,19 @@ function charOf(classId: ClassId, level: number): CharacterData {
 }
 
 const abilitiesOf = (cls: ClassId): AbilityDef[] => [...gd.abilities.values()].filter((a) => a.classId === cls);
+
+/** 한 캐릭터가 함께 배울 수 있는 기술 묶음. 수인은 계통(포유류·조류·파충류)마다 공통 기술 + 그 계통 기술 */
+interface Kit {
+  label: string;
+  cls: ClassId;
+  list: AbilityDef[];
+}
+const kitsOf = (cls: ClassId): Kit[] => {
+  const all = abilitiesOf(cls);
+  const typeOf = (a: AbilityDef) => gd.nodeOf(a.id)?.node.beastType;
+  if (!all.some(typeOf)) return [{ label: cls, cls, list: all }];
+  return gd.progression.second.beastTypes.map((b) => ({ label: `${cls}(${b.name})`, cls, list: all.filter((a) => !typeOf(a) || typeOf(a) === b.id) }));
+};
 const gearOf = (cls: ClassId, slot: 'weapon' | 'armor'): ItemDef[] =>
   [...gd.items.values()].filter((it) => it.slot === slot && it.classes?.includes(cls)).sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
 
@@ -82,8 +95,11 @@ interface Dps {
 }
 const dpsCache = new Map<string, Dps>();
 
-function dpsOf(cls: ClassId, level: number): Dps {
-  const key = `${cls}:${level}`;
+/** 직업(수인은 계통 묶음)의 초당 기대 피해. cls 만 주면 그 직업의 기술 전부 */
+function dpsOf(who: ClassId | Kit, level: number): Dps {
+  const kit = typeof who === 'string' ? { label: who, cls: who, list: abilitiesOf(who) } : who;
+  const cls = kit.cls;
+  const key = `${kit.label}:${level}`;
   const cached = dpsCache.get(key);
   if (cached) return cached;
   const d = derivedAt(cls, level);
@@ -100,7 +116,7 @@ function dpsOf(cls: ClassId, level: number): Dps {
   let speed = 1;
   let mark = 1;
   let curse = 0;
-  const mine = abilitiesOf(cls).filter((a) => a.level <= level);
+  const mine = kit.list.filter((a) => a.level <= level);
   const hideCd = mine.find((a) => a.effects.some((e) => e.type === 'status' && e.status === 'hide'))?.cooldownMs;
   let ambush: { rate: number; critBonus: number } | null = null;
   for (const a of mine) {
@@ -185,11 +201,14 @@ test('모든 직업은 1~99레벨 사이에 9개 이상의 기술을 가지며, 
       assert.ok(sorted[i]!.price >= sorted[i - 1]!.price, `${c.id}: ${sorted[i]!.id} 가격이 ${sorted[i - 1]!.id} 보다 낮음`);
   }
   for (const cls of NEW_CLASSES) {
-    const list = abilitiesOf(cls);
-    assert.ok(list.length >= 10 && list.length <= 12, `${cls}: 기술 ${list.length}개`);
-    assert.ok(list.filter((a) => a.level <= 12).length >= 2, `${cls}: 12레벨 이하 기술이 2개 미만`);
-    assert.ok(list.some((a) => a.level >= 80), `${cls}: 80레벨 이상 기술 없음`);
-    for (const a of list) {
+    // 한 캐릭터가 배울 수 있는 기술 수 (수인은 계통마다: 공통 + 그 계통)
+    for (const kit of kitsOf(cls)) {
+      const list = kit.list;
+      assert.ok(list.length >= 10 && list.length <= 12, `${kit.label}: 기술 ${list.length}개`);
+      assert.ok(list.filter((a) => a.level <= 12).length >= 2, `${kit.label}: 12레벨 이하 기술이 2개 미만`);
+      assert.ok(list.some((a) => a.level >= 80), `${kit.label}: 80레벨 이상 기술 없음`);
+    }
+    for (const a of abilitiesOf(cls)) {
       assert.ok(a.id.startsWith(ABILITY_PREFIX[cls]!), `${a.id}: id 접두어`);
       assert.ok(a.fx && FX_KEYS.has(a.fx), `${a.id}: 알 수 없는 fx ${a.fx}`);
       assert.ok(a.desc.length > 0 && /[가-힣]/.test(a.name), `${a.id}: 한글 이름/설명`);
@@ -197,8 +216,9 @@ test('모든 직업은 1~99레벨 사이에 9개 이상의 기술을 가지며, 
   }
   // 바드의 노래는 그룹 전체에 걸린다
   assert.ok(abilitiesOf('bard').filter((a) => a.targeting === 'party').length >= 4);
-  // 수인은 흡혈, 검투사는 연속 베기, 궁수는 멀리서 쏘는 기술이 중심
-  assert.ok(abilitiesOf('beastkin').some((a) => a.effects.some((e) => e.type === 'physical' && (e.lifesteal ?? 0) > 0)));
+  // 수인은 (어느 계통이든) 흡혈, 검투사는 연속 베기, 궁수는 멀리서 쏘는 기술이 중심
+  for (const kit of kitsOf('beastkin'))
+    assert.ok(kit.list.some((a) => a.effects.some((e) => e.type === 'physical' && (e.lifesteal ?? 0) > 0)), kit.label);
   assert.ok(abilitiesOf('gladiator').filter((a) => a.effects.some((e) => e.type === 'physical' && (e.hits ?? 1) > 1)).length >= 4);
   assert.ok(abilitiesOf('archer').filter((a) => ['enemy', 'enemyArea', 'line'].includes(a.targeting)).length >= 6);
 });
@@ -323,12 +343,13 @@ test('새 근접·원거리 직업의 피해는 기존 직업과 비슷하고, �
       const old = OLD_PHYSICAL.map((c) => dpsOf(c, lv)[k]);
       const best = Math.max(...old);
       const worst = Math.min(...old);
-      for (const cls of NEW_PHYSICAL) {
-        const v = dpsOf(cls, lv)[k];
+      // 수인은 계통(포유류·조류·파충류)마다 따로: 어느 계통을 골라도 같은 범위 안
+      for (const kit of NEW_PHYSICAL.flatMap(kitsOf)) {
+        const v = dpsOf(kit, lv)[k];
         // 궁수는 기존 직업 중 가장 센 직업을 넘지 않고, 수인·검투사는 10% 넘게 앞서지 않는다
-        const cap = cls === 'archer' ? 1 : 1.1;
-        assert.ok(v <= cap * best, `${lv}레벨 ${cls}(${k}) ${v.toFixed(0)} / 기존 최고 ${best.toFixed(0)}`);
-        assert.ok(v >= 0.8 * worst, `${lv}레벨 ${cls}(${k}) ${v.toFixed(0)} / 기존 최저 ${worst.toFixed(0)}`);
+        const cap = kit.cls === 'archer' ? 1 : 1.1;
+        assert.ok(v <= cap * best, `${lv}레벨 ${kit.label}(${k}) ${v.toFixed(0)} / 기존 최고 ${best.toFixed(0)}`);
+        assert.ok(v >= 0.8 * worst, `${lv}레벨 ${kit.label}(${k}) ${v.toFixed(0)} / 기존 최저 ${worst.toFixed(0)}`);
       }
     }
   }

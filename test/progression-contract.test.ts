@@ -188,7 +188,10 @@ test('applyDesign: 올바른 설계는 서버를 끄지 않고 바로 반영하�
   const server = { name: 'x', motd: '', expRate: 1, goldRate: 1, dropRate: 1, maxLevel: 99, statCap: 255, classLevel: 5, registration: 'open' as const };
   const before = live.clientData(server);
   const trees = JSON.parse(JSON.stringify(live.skillTrees)) as SkillTreesConfig;
-  trees.trees.warrior.nodes.find((n) => n.ability === 'w_whirl')!.requires.push({ ability: 'w_strike', prof: 30 });
+  // 회오리 베기의 선수과목을 통째로 바꿈 (트리에 이미 강타가 있으면 덧붙일 때 "두 번 있음" 오류가 나므로)
+  const whirl = trees.trees.warrior.nodes.find((n) => n.ability === 'w_whirl')!;
+  assert.notDeepEqual(whirl.requires, [{ ability: 'w_strike', prof: 30 }], '바꾸기 전과 달라야 반영을 확인할 수 있음');
+  whirl.requires = [{ ability: 'w_strike', prof: 30 }];
   const prog = JSON.parse(JSON.stringify(live.progression)) as ProgressionConfig;
   prog.ascend.title = '대가';
   // 미리 검사(dryRun)는 아무것도 바꾸지 않음

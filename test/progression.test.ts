@@ -630,7 +630,8 @@ test('숙련도 배율: 숙련도 0 → 70%, 50 → 92.5%, 100 → 115% (위력�
 
 // ───────────────────────── 스킬트리로 배우기 ─────────────────────────
 
-/** 시험용 조건을 붙인 트리 (회오리 베기: 늑대 가죽 3개 + 강타 숙련도 30 + 힘 20, 할퀴기: 포유류 전용) */
+/** 시험용 조건을 붙인 트리 (회오리 베기: 늑대 가죽 3개 + 강타 숙련도 30 + 힘 20, 할퀴기: 포유류 전용,
+ *  2차 직업 시험의 회오리 칼날·할퀴기는 선수과목·재료 없이 어빌·계통만 보게) */
 function treeData(): GameData {
   const live = GameData.load(DIR);
   const trees = clone(live.skillTrees) as SkillTreesConfig;
@@ -638,7 +639,13 @@ function treeData(): GameData {
   whirl.items = [{ item: 'mat_wolf_pelt', qty: 3 }];
   whirl.requires = [{ ability: 'w_strike', prof: 30 }];
   whirl.stats = { str: 20 };
-  trees.trees.beastkin.nodes.find((n) => n.ability === 'k_rend')!.beastType = 'mammal';
+  const gWhirl = trees.trees.gladiator.nodes.find((n) => n.ability === 'g_whirl')!;
+  gWhirl.items = [];
+  gWhirl.requires = [];
+  const rend = trees.trees.beastkin.nodes.find((n) => n.ability === 'k_rend')!;
+  rend.beastType = 'mammal';
+  rend.items = [];
+  rend.requires = [];
   const issues = live.applyDesign({ skillTrees: trees });
   assert.deepEqual(issues.filter((i) => i.level === 'error'), []);
   return live;
