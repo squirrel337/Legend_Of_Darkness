@@ -147,6 +147,33 @@ test('원작처럼 차례로 배운다: 1차 직업은 첫 단계(12레벨까지
   }
 });
 
+/** 승급한 1차 직업이 반드시 배운 기술: 승급 조건의 핵심 기술과, 그것을 배우려고 먼저 배워야 했던 선수과목들 */
+function guaranteedOf(cls: FirstClassId): Set<string> {
+  const out = new Set<string>();
+  const add = (id: string): void => {
+    if (out.has(id)) return;
+    out.add(id);
+    for (const r of gd.nodeOf(id)?.node.requires ?? []) add(r.ability);
+  };
+  for (const c of P.ascend.conditions[cls]) if (c.type === 'skillProf') add(c.ability);
+  return out;
+}
+
+test('2차 직업이 잇는 1차 직업 기술은 승급한 사람이면 반드시 배운 것이라, 그 기술을 안 배워서 2차 직업 트리가 막히는 일이 없다', () => {
+  // 2차 직업은 1차 직업 기술을 더 배울 수 없으므로, 선수과목은 승급 핵심 기술과 그 선수과목 중에서만 (숙련도는 써서 올릴 수 있음)
+  let checked = 0;
+  for (const cls of SECOND_CLASSES)
+    for (const n of treeNodes(cls))
+      for (const r of n.requires) {
+        const at = gd.nodeOf(r.ability)!;
+        if (at.classId === cls || at.classId === 'peasant') continue;
+        checked++;
+        for (const from of P.second.from[cls])
+          assert.ok(guaranteedOf(from).has(r.ability), `${cls}/${nameOf(n.ability)} ← ${nameOf(r.ability)}: ${from} 이(가) 승급하며 꼭 배우는 기술이 아님`);
+      }
+  assert.ok(checked >= SECOND_CLASSES.length, `1차 직업 기술을 잇는 선수과목 ${checked}개`);
+});
+
 test('필요 숙련도: 단계가 오를수록 높아지고, 재사용 대기가 긴 기술은 연습 시간이 한 시간 남짓을 넘지 않게', () => {
   for (const cls of CLASS_IDS) {
     const nodes = treeNodes(cls);

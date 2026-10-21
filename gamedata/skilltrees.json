@@ -95,8 +95,8 @@
     "summoner": {
       "columns": ["소환","정령술","교감"],
       "nodes": [
-        {"ability":"s_fox","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"z_fire1","prof":50}]},
-        {"ability":"s_bolt","row":0,"col":1,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"z_earth1","prof":50}]},
+        {"ability":"s_fox","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"z_focus","prof":50}]},
+        {"ability":"s_bolt","row":0,"col":1,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"z_blink","prof":50}]},
         {"ability":"s_wolf","row":1,"col":0,"abilityLevel":12,"gold":800,"items":[],"requires":[{"ability":"s_fox","prof":20}]},
         {"ability":"s_mend","row":2,"col":2,"abilityLevel":18,"gold":2000,"items":[{"item":"mat_troll_blood","qty":2}],"requires":[{"ability":"s_fox","prof":30}]},
         {"ability":"s_fire","row":3,"col":0,"abilityLevel":25,"gold":5000,"items":[{"item":"mat_salamander_scale","qty":3}],"requires":[{"ability":"s_wolf","prof":40}]},
@@ -112,8 +112,8 @@
     "bard": {
       "columns": ["선율","응원가","안식"],
       "nodes": [
-        {"ability":"b_note","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"p_light","prof":50}]},
-        {"ability":"b_valor","row":0,"col":1,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"p_armor","prof":50}]},
+        {"ability":"b_note","row":0,"col":0,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"p_heal","prof":50}]},
+        {"ability":"b_valor","row":0,"col":1,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"p_revive","prof":50}]},
         {"ability":"b_lullaby","row":1,"col":0,"abilityLevel":12,"gold":800,"items":[],"requires":[{"ability":"b_note","prof":20}]},
         {"ability":"b_rest","row":2,"col":2,"abilityLevel":18,"gold":2000,"items":[{"item":"mat_troll_blood","qty":2}],"requires":[{"ability":"b_valor","prof":10}]},
         {"ability":"b_swift","row":3,"col":1,"abilityLevel":25,"gold":5000,"items":[{"item":"mat_harpy_feather","qty":3}],"requires":[{"ability":"b_valor","prof":20}]},
@@ -155,7 +155,7 @@
     "archer": {
       "columns": ["연사","조준","사냥","바람"],
       "nodes": [
-        {"ability":"a_aimed","row":0,"col":1,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"r_throw","prof":50}]},
+        {"ability":"a_aimed","row":0,"col":1,"abilityLevel":5,"gold":100,"items":[],"requires":[{"ability":"r_stab","prof":50}]},
         {"ability":"a_double","row":1,"col":0,"abilityLevel":12,"gold":800,"items":[],"requires":[{"ability":"a_aimed","prof":20}]},
         {"ability":"a_mark","row":2,"col":2,"abilityLevel":18,"gold":2000,"items":[{"item":"mat_wolf_pelt","qty":5}],"requires":[{"ability":"a_aimed","prof":30}]},
         {"ability":"a_pierce","row":3,"col":0,"abilityLevel":25,"gold":5000,"items":[{"item":"mat_orc_tusk","qty":3}],"requires":[{"ability":"a_double","prof":40}]},
