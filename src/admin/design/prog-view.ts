@@ -366,7 +366,7 @@ export function renderLineage(ctx: Ctx): HTMLElement {
           ),
           issueSlot(ctx, (_i, r) => r.file === 'progression' && (r.path ?? '').startsWith('rebirth.names')),
         ),
-        h('p', { class: 'dz-note' }, '전직하면 레벨·경험치·능력치만 처음으로 돌아가고, 배운 기술·마법과 숙련도, 산 체력·마나, 장비·골드·창고는 그대로입니다.'),
+        h('p', { class: 'dz-note' }, '전직하면 레벨·경험치·능력치만 처음으로 돌아가고, 배운 기술·마법과 숙련도, 산 체력·마나, 장비·골드·창고는 그대로입니다. 새 직업·레벨로 입을 수 없는 장비(직업 제한, 레벨 제한)는 벗겨 소지품(가득하면 창고)에 넣습니다.'),
       ),
       card(
         '전직해서 될 수 있는 직업',

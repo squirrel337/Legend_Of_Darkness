@@ -350,7 +350,8 @@ export function checkRebirth(data: CharacterData, gd: GameData, target: ClassId)
 /**
  * 전직(무도가는 환골탈태): checkRebirth 를 통과하면 조건을 쓰고
  * 직업 = target, 레벨 = restartLevel, 경험치 0, 능력치는 모두 START_STAT, 능력치 포인트 = (restartLevel − 1) × statPointsPerLevel,
- * 기술·마법과 숙련도·bonusHp/bonusMp(음수면 0으로)·장비·소지품·골드·창고는 그대로, 새 직업이 못 입는 장비는 소지품으로,
+ * 기술·마법과 숙련도·bonusHp/bonusMp(음수면 0으로)·장비·소지품·골드·창고는 그대로, 새 직업·레벨로 못 입는 장비(직업 제한,
+ * 레벨 제한)는 벗겨 소지품(가득하면 창고)으로,
  * rebirths + 1, 체력·마나는 새 최대치로. 엔진 트랙.
  */
 export function rebirthOnData(data: CharacterData, gd: GameData, cfg: ServerConfig, target: ClassId): ProgressionResult {
@@ -373,9 +374,11 @@ export function rebirthOnData(data: CharacterData, gd: GameData, cfg: ServerConf
   data.abilityExp = 0;
   data.beastType = null;
   data.rebirths += 1;
-  unequipUnwearable(data, gd);
+  // 장비는 그대로 가지되, 새 직업·레벨로 입을 수 없는 것(직업 제한, 높은 레벨 제한)은 입은 채로 두지 않음
+  const moved = unequipUnwearable(data, gd);
   fillVitals(data, gd);
-  return ok(`${name}했습니다! ${classNameOf(gd, target)}(으)로 ${level}레벨부터 다시 시작합니다. (${data.rebirths}번째)`, r.check);
+  const gear = moved > 0 ? ` 지금 입을 수 없는 장비 ${moved}개는 소지품(가득하면 창고)으로 옮겼습니다.` : '';
+  return ok(`${name}했습니다! ${classNameOf(gd, target)}(으)로 ${level}레벨부터 다시 시작합니다. (${data.rebirths}번째)${gear}`, r.check);
 }
 
 // ───────────────────────── 승급 (엔진 트랙) ─────────────────────────

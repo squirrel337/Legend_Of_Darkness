@@ -400,6 +400,7 @@ function rebirthDialog(world: World, p: Player, npc: Npc, targetRaw: string | un
     const lines = [
       `${name}하면 ${rb.restartLevel}레벨, 경험치 0 으로 돌아가고 능력치도 처음으로 돌아간다.`,
       '배운 기술과 마법(숙련도 포함), 승급 장인에게 산 체력·마나, 장비와 소지품, 골드와 창고는 그대로 남는다.',
+      `다만 새 직업과 레벨(${rb.restartLevel})로 입을 수 없는 장비(다른 직업 전용, 레벨 제한이 더 높은 것)는 벗겨 소지품(가득하면 창고)에 넣어 주마.`,
       '',
       `${tName}(으)로 ${name}하는 조건:`,
       ...conditionLines(r.check),

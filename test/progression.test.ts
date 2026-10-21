@@ -11,7 +11,7 @@ import { profGainChance, titleOf, type Condition, type SkillTreesConfig } from '
 import { loadConfig } from '../src/server/config';
 import { GameData } from '../src/server/gamedata';
 import { CharacterStore, emptyEquipment, normalizeCharacter, type CharacterData } from '../src/server/storage';
-import { addItem, countItem } from '../src/server/systems/character';
+import { addItem, countItem, equipError } from '../src/server/systems/character';
 import {
   abilityExpShare,
   addAbilityExpToData,
@@ -304,20 +304,42 @@ test('전직: 1레벨·경험치 0·능력치 처음으로, 기술·마법·숙�
   assert.deepEqual(d.storage, before.storage);
   assert.equal(d.storageGold, before.storageGold);
   assert.equal(countItem(d, 'pot_hp_1'), 20);
-  // 전사 전용 장비는 소지품으로, 누구나 입는 투구는 그대로
+  // 장비는 그대로 가지되, 새 직업·레벨로 입을 수 없는 것(전사 전용 무기·갑옷, 90레벨 투구)은 벗겨 소지품으로
   assert.equal(d.equipment.weapon, null);
   assert.equal(d.equipment.armor, null);
-  assert.equal(d.equipment.helmet, 'helm_6');
+  assert.equal(d.equipment.helmet, null, '누구나 입는 투구라도 90레벨 것은 1레벨로 입을 수 없음');
   assert.equal(countItem(d, 'w_warrior_1'), 1);
   assert.equal(countItem(d, 'a_warrior_1'), 1);
+  assert.equal(countItem(d, 'helm_6'), 1);
+  assert.match(r.msg, /입을 수 없는 장비 3개는 소지품\(가득하면 창고\)으로 옮겼습니다/);
   // 경험치 1억을 쓰고 남은 5천만도 1레벨이 되면서 0
   assert.equal(d.ascended, false);
   assert.equal(d.abilityLevel, 0);
-  // 체력·마나는 새 최대치로 (산 체력은 그대로이므로 1레벨이어도 큼, 투구의 체력 +180 포함)
+  // 체력·마나는 새 최대치로 (산 체력은 그대로이므로 1레벨이어도 큼)
   const pure = pureVitals(d, gd);
   assert.ok(pure.hp > 8000, `${pure.hp}`);
-  assert.equal(d.hp, pure.hp + 180);
+  assert.equal(d.hp, pure.hp);
   assert.equal(d.mp, pure.mp);
+});
+
+test('전직: 1레벨로 입을 수 없는 장비는 같은 직업이어도 소지품(가득하면 창고)으로, 1레벨 장비는 그대로 입는다', () => {
+  const d = readyWarrior();
+  d.equipment.weapon = 'w_common_1'; // 누구나 입는 1레벨 무기
+  d.equipment.boots = 'boots_5'; // 85레벨 장화
+  // 소지품을 꽉 채워 둠: 벗긴 장비는 창고로 가고 사라지지 않음
+  for (let i = 0; i < d.inventory.length; i++) d.inventory[i] ??= { item: 'mat_bone', qty: 1 };
+  const storage0 = d.storage.length;
+  const r = rebirthOnData(d, gd, cfg, 'warrior');
+  assert.equal(r.ok, true, r.msg);
+  assert.equal(d.equipment.weapon, 'w_common_1', '1레벨로도 입을 수 있는 장비는 그대로');
+  for (const s of ['armor', 'helmet', 'boots'] as const) assert.equal(d.equipment[s], null, s);
+  assert.deepEqual(
+    d.storage.slice(storage0).map((x) => x.item).sort(),
+    ['a_warrior_1', 'boots_5', 'helm_6'],
+    '소지품이 가득하면 창고로',
+  );
+  // 입은 채로 남은 장비는 모두 서버의 장비 규칙(직업·레벨)에 맞음 (벗긴 장비는 그 레벨이 되면 다시 입을 수 있음)
+  for (const id of Object.values(d.equipment)) if (id) assert.equal(equipError(d, gd.items.get(id)!), null, id);
 });
 
 test('전직: 같은 직업으로도 할 수 있고, restartLevel 이 1보다 크면 그 레벨까지의 능력치 포인트를 받는다', () => {
@@ -326,13 +348,15 @@ test('전직: 같은 직업으로도 할 수 있고, restartLevel 이 1보다 �
   assert.equal(r.ok, true, r.msg);
   assert.equal(d.classId, 'warrior');
   assert.equal(d.rebirths, 1);
-  assert.equal(d.equipment.weapon, 'w_warrior_1', '같은 직업이면 장비를 그대로 입음');
   const local = GameData.load(DIR);
   local.progression.rebirth.restartLevel = 10;
   const e = readyWarrior();
-  assert.equal(rebirthOnData(e, local, cfg, 'priest').ok, true);
+  e.equipment.helmet = 'helm_1'; // 3레벨 투구
+  assert.equal(rebirthOnData(e, local, cfg, 'warrior').ok, true);
   assert.equal(e.level, 10);
   assert.equal(e.statPoints, 9 * cfg.statPointsPerLevel);
+  assert.equal(e.equipment.weapon, 'w_warrior_1', '같은 직업의 10레벨 아래 장비는 그대로 입음');
+  assert.equal(e.equipment.helmet, 'helm_1');
 });
 
 test('전직: 무도가는 환골탈태로 무도가로만, 다른 직업은 무도가로 갈 수 없다', () => {

@@ -221,13 +221,16 @@ export function unequipToBag(data: CharacterData, gd: GameData, slot: EquipSlot)
   return true;
 }
 
-/** 지금 직업이 입을 수 없는 장비(다른 직업 전용)를 벗겨 소지품(꽉 차면 창고)으로 옮깁니다. 옮긴 개수를 돌려줍니다 */
+/**
+ * 지금 직업·레벨로 입을 수 없는 장비(다른 직업 전용, 레벨 제한이 더 높음)를 벗겨 소지품(꽉 차면 창고)으로 옮깁니다.
+ * 직업 변경·전직(1레벨로 돌아감)·2차 전직 뒤에 부릅니다. 옮긴 개수를 돌려줍니다
+ */
 export function unequipUnwearable(data: CharacterData, gd: GameData): number {
   let n = 0;
   for (const s of EQUIP_SLOTS) {
     const id = data.equipment[s];
     const def = id ? gd.items.get(id) : undefined;
-    if (def?.classes && def.classes.length > 0 && !def.classes.includes(data.classId) && unequipToBag(data, gd, s)) n++;
+    if (def && equipError(data, def) !== null && unequipToBag(data, gd, s)) n++;
   }
   return n;
 }
