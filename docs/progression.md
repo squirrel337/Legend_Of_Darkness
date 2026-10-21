@@ -111,16 +111,16 @@
 
 | 부분 | 파일 |
 | --- | --- |
-| 공용 형식·공식·배우는 조건 판정 | `src/shared/progression.ts` (형식, `learnStatus`, 공식), `src/shared/design-edit.ts` (편집기 저장 본문·바뀐 곳 요약·판 기록 형식) |
+| 공용 형식·공식·배우는 조건 판정 | `src/shared/progression.ts` (형식, `learnStatus`, 공식), `src/shared/design-edit.ts` (편집기 저장 본문·바뀐 곳 요약·판 기록 형식), `src/shared/tree-route.ts` (선수과목 선이 다른 칸을 지나지 않게 돌아가는 길) |
 | 메시지 | `src/shared/protocol.ts` (`SelfState`·`learn`·`prof`·`abilityLevelUp`·`design`·`gain.abilityExp`), NPC 서비스 `secondJob` 은 `src/shared/types.ts` |
 | 저장 항목 | `src/server/storage.ts` (`CharacterData`·`normalizeCharacter`) |
 | 설계 파일 읽기·검사·바로 반영 | `src/server/gamedata.ts` (`checkDesign`·`applyDesign`·`checkUpdate`·`formatSkillTrees` 등) |
 | 성장 엔진 | `src/server/systems/progression.ts` (조건·전직·승급·교환·2차 전직·어빌·숙련도·배우기), `systems/combat.ts` (숙련도 배율·오르기, 처치의 어빌 경험치), `systems/npc.ts` (길드장·승급 장인·2차 직업 인도자 대화, 배우기), `systems/character.ts` (`unequipUnwearable`), `systems/autohunt.ts` (기술 고르기에 숙련도 배율) |
 | 운영자 기능 | `src/server/admin/AdminService.ts`·`commands.ts` (숙련도·어빌·승급·전직 횟수·계통), `admin/api.ts` (캐릭터 작업), `admin/design.ts` (편집기 API) |
 | 게임 화면 | `src/client/progression.ts` (화면용 계산: 배우기 목록·조건 글·트리 배치), `ui/skilltree.ts` (K 창), `ui/windows.ts` (길드장 창·NPC 대화의 조건 색), `ui/hud.ts`·`panel.ts`·`charwin.ts`·`tooltip.ts`·`help.ts`·`gm.ts`, `public/progression.css` |
-| 관리자 페이지 | `src/admin/design/*` (직업·스킬트리 탭), `src/admin/main.ts` (캐릭터 화면의 성장 체계 칸), `public/admin.css` |
+| 관리자 페이지 | `src/admin/design/*` (직업·스킬트리 탭, 격자 크기와 화살표 길은 `grid.ts`), `src/admin/main.ts` (캐릭터 화면의 성장 체계 칸), `public/admin.css` |
 | 데이터 | `gamedata/progression.json`, `skilltrees.json`, `abilities.json` (수인 계통 기술), `items.json` (재료), `npcs.json` (2차 직업 인도자 마나난, 길드장 대사), `maps/town.json` (마나난은 신전 안 (19,7)) |
-| 시험 | `test/progression*.test.ts`, `test/admin-design.test.ts`, `test/client-progression.test.ts`, `test/classdata.test.ts` |
+| 시험 | `test/progression*.test.ts`, `test/admin-design*.test.ts`, `test/client-progression.test.ts`, `test/classdata.test.ts` |
 
 ### 8.2 데이터 형식 (`src/shared/progression.ts`)
 
