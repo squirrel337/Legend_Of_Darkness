@@ -18,6 +18,7 @@ import {
   physicalBase,
   type DerivedStats,
 } from '../src/shared/formulas';
+import { DEFAULT_SECOND_FROM, profEffect } from '../src/shared/progression';
 import { tileInfo } from '../src/shared/tiles';
 import type { AbilityDef, ItemDef, LootEntry } from '../src/shared/types';
 import { loadConfig } from '../src/server/config';
@@ -68,6 +69,18 @@ const kitsOf = (cls: ClassId): Kit[] => {
   if (!all.some(typeOf)) return [{ label: cls, cls, list: all }];
   return gd.progression.second.beastTypes.map((b) => ({ label: `${cls}(${b.name})`, cls, list: all.filter((a) => !typeOf(a) || typeOf(a) === b.id) }));
 };
+/** 기술을 배우는 레벨: 2차 직업 기술은 스킬트리의 필요 어빌 (2차 직업 캐릭터는 늘 99레벨) */
+const needOf = (a: AbilityDef): number => gd.nodeOf(a.id)?.node.abilityLevel ?? gd.nodeOf(a.id)?.node.level ?? a.level;
+/**
+ * 실제 2차 직업 캐릭터의 기술 묶음: 99레벨에서 이어받은 1차 직업의 기술 전부(승급하려면 배워 둠) + 어빌 abilityLevel 까지 연 2차 직업 기술
+ */
+function secondKit(kit: Kit, abilityLevel: number): Kit {
+  const first = DEFAULT_SECOND_FROM[kit.cls as keyof typeof DEFAULT_SECOND_FROM][0]!;
+  return { label: `${kit.label}@어빌${abilityLevel}`, cls: kit.cls, list: [...abilitiesOf(first), ...kit.list.filter((a) => needOf(a) <= abilityLevel)] };
+}
+/** 숙련도 0(새로 배움)과 100(최대, 이 체계 전에 배운 기술)의 위력 배율 */
+const PROF_EFFECTS = [profEffect(0, gd.progression.proficiency), profEffect(100, gd.progression.proficiency)];
+const ABILITY_STEPS = [1, 5, 12, 25, 35, 45, 55, 68, 80, 88, 99];
 const gearOf = (cls: ClassId, slot: 'weapon' | 'armor'): ItemDef[] =>
   [...gd.items.values()].filter((it) => it.slot === slot && it.classes?.includes(cls)).sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
 
@@ -75,7 +88,8 @@ const gearOf = (cls: ClassId, slot: 'weapon' | 'armor'): ItemDef[] =>
 // 같은 레벨 몬스터 하나를 상대로 한 초당 기대 피해. 능력치는 직업 비율대로 자동 분배하고, 레벨에 맞는 최고 장비를 입힙니다.
 // 평타와 피해 기술은 각자의 재사용 대기마다 씁니다 (평타와 기술의 대기는 따로 돌아감). 명중률·치명타·대상 AC를 반영하고,
 // 중독/출혈은 유지율만큼 더합니다. buffed 는 자기 강화(광폭·야수화·신속)와 대상 약화(표식·저주)를 유지율만큼,
-// 은신 기습은 은신 재사용 대기마다 한 번 반영한 값입니다.
+// 은신 기습은 은신 재사용 대기마다 한 번 반영한 값입니다. eff 는 숙련도 배율로, 게임처럼 기술의 피해와 해로운 상태의
+// 확률에만 곱합니다 (평타는 그대로).
 
 const OLD_PHYSICAL: ClassId[] = ['warrior', 'rogue', 'monk'];
 const NEW_PHYSICAL: ClassId[] = ['beastkin', 'archer', 'gladiator'];
@@ -95,11 +109,11 @@ interface Dps {
 }
 const dpsCache = new Map<string, Dps>();
 
-/** 직업(수인은 계통 묶음)의 초당 기대 피해. cls 만 주면 그 직업의 기술 전부 */
-function dpsOf(who: ClassId | Kit, level: number): Dps {
+/** 직업(수인은 계통 묶음)의 초당 기대 피해. cls 만 주면 그 직업의 기술 전부. eff 는 기술의 숙련도 배율 */
+function dpsOf(who: ClassId | Kit, level: number, eff = 1): Dps {
   const kit = typeof who === 'string' ? { label: who, cls: who, list: abilitiesOf(who) } : who;
   const cls = kit.cls;
-  const key = `${kit.label}:${level}`;
+  const key = `${kit.label}:${level}:${eff}`;
   const cached = dpsCache.get(key);
   if (cached) return cached;
   const d = derivedAt(cls, level);
@@ -123,16 +137,17 @@ function dpsOf(who: ClassId | Kit, level: number): Dps {
     const cd = Math.max(a.cooldownMs, SKILL_GCD_MS) / 1000;
     for (const e of a.effects) {
       if (e.type === 'physical') {
-        const total = e.mult * (e.hits ?? 1);
+        const total = e.mult * (e.hits ?? 1) * eff;
         strikes.push({ rate: total / cd, critBonus: e.critBonus ?? 0 });
         if (hideCd !== undefined && e.hideBonus) {
           const rate = (total * e.hideBonus) / (Math.max(hideCd, a.cooldownMs) / 1000);
           if (!ambush || rate > ambush.rate) ambush = { rate, critBonus: e.critBonus ?? 0 };
         }
       } else if (e.type === 'magic') {
-        magic += magicBase(e.base, e.ratio, d[e.stat ?? 'int'], level, d.magic) / cd;
+        magic += (magicBase(e.base, e.ratio, d[e.stat ?? 'int'], level, d.magic) * eff) / cd;
       } else if (e.type === 'status') {
-        const up = Math.min(1, e.durationMs / Math.max(1, a.cooldownMs)) * (e.chance ?? 1);
+        const chance = STATUS_INFO[e.status].kind === 'debuff' ? Math.min(1, (e.chance ?? 1) * eff) : (e.chance ?? 1);
+        const up = Math.min(1, e.durationMs / Math.max(1, a.cooldownMs)) * chance;
         const pot = e.potency ?? STATUS_INFO[e.status].potency;
         if (e.status === 'poison' || e.status === 'bleed') dots.set(e.status, Math.max(dots.get(e.status) ?? 0, (pot + level * 1.5) * up));
         if (e.status === 'might' || e.status === 'beast') might *= 1 + (pot / 100) * up;
@@ -152,18 +167,21 @@ function dpsOf(who: ClassId | Kit, level: number): Dps {
   return out;
 }
 
-/** 소환사가 그 레벨에 부를 수 있는 소환수를 모두 불렀을 때의 초당 기대 피해 (근접 + 마법) */
-function petDpsAt(level: number): number {
+/**
+ * 소환사가 부를 수 있는 소환수를 모두 불렀을 때의 초당 기대 피해 (근접 + 마법). 소환수는 소환자 레벨(2차 직업은 99)로 나오고,
+ * 부를 수 있는 것은 어빌 abilityLevel 까지 연 소환 기술. eff 는 소환 기술의 숙련도 배율 (게임처럼 소환수의 피해에 곱함)
+ */
+function petDpsAt(level: number, abilityLevel = 99, eff = 1): number {
   const m = monsterAt(level);
   let dps = 0;
   for (const a of abilitiesOf('summoner')) {
-    if (a.level > level) continue;
+    if (needOf(a) > abilityLevel) continue;
     for (const e of a.effects) {
       if (e.type !== 'summon') continue;
       const def = gd.monsters.get(e.monster)!;
       const s = monsterStats({ ...def, level });
       const hit = hitChance(s.dex, level, m.dex, level, 0);
-      let one = (((s.dmg[0] + s.dmg[1]) / 2) * hit * acMultiplier(m.ac)) / ((def.attackMs ?? 1400) / 1000);
+      let one = (((s.dmg[0] + s.dmg[1]) / 2) * eff * hit * acMultiplier(m.ac)) / ((def.attackMs ?? 1400) / 1000);
       for (const sp of def.spells ?? []) {
         const sd = gd.abilities.get(sp.id)!;
         // 몬스터 마법은 재사용 대기가 끝난 뒤 1초마다 chance 확률로 씁니다
@@ -323,34 +341,60 @@ test('소환수를 모두 불러도 다른 직업 한 명의 몫을 넘지 않�
     }
   assert.ok(power <= 2, `소환수 전체의 공격 ${power.toFixed(2)}마리 몫 (2 이하)`);
   assert.ok(hp <= 7, `소환수 전체의 체력 ${hp.toFixed(2)}마리 몫 (7 이하)`);
-  for (const lv of [25, 35, 55, 88, 99]) {
-    const pets = petDpsAt(lv);
-    const warrior = dpsOf('warrior', lv).base;
-    assert.ok(pets <= 0.6 * warrior, `${lv}레벨: 소환수 ${pets.toFixed(0)} / 전사 ${warrior.toFixed(0)}`);
-    if (lv >= 35) assert.ok(pets >= 0.25 * warrior, `${lv}레벨: 소환수가 너무 약함 ${pets.toFixed(0)} / 전사 ${warrior.toFixed(0)}`);
-  }
+  // 소환사는 늘 99레벨이라 소환수도 99레벨로 나오고, 어빌이 오를수록 부를 수 있는 것이 늘어남. 숙련도는 양쪽에 같게
+  for (const eff of PROF_EFFECTS)
+    for (const L of ABILITY_STEPS) {
+      const pets = petDpsAt(99, L, eff);
+      const warrior = dpsOf('warrior', 99, eff).base;
+      const at = `어빌 ${L}, 숙련 배율 ${eff}`;
+      assert.ok(pets <= 0.6 * warrior, `${at}: 소환수 ${pets.toFixed(0)} / 99레벨 전사 ${warrior.toFixed(0)}`);
+      if (L >= 35) assert.ok(pets >= 0.25 * warrior, `${at}: 소환수가 너무 약함 ${pets.toFixed(0)} / 99레벨 전사 ${warrior.toFixed(0)}`);
+    }
 });
 
-test('새 근접·원거리 직업의 피해는 기존 직업과 비슷하고, 궁사는 멀리서 쏘는 만큼 전사보다 약하다', () => {
-  for (const lv of [25, 55, 88]) {
-    const war = dpsOf('warrior', lv);
-    const arch = dpsOf('archer', lv);
-    assert.ok(arch.base <= 0.9 * war.base, `${lv}레벨 궁사 ${arch.base.toFixed(0)} / 전사 ${war.base.toFixed(0)}`);
-    assert.ok(arch.buffed <= 0.9 * war.buffed, `${lv}레벨 궁사(강화) ${arch.buffed.toFixed(0)} / 전사 ${war.buffed.toFixed(0)}`);
-  }
-  for (let lv = 10; lv <= 99; lv++) {
-    for (const k of ['base', 'buffed'] as const) {
-      const old = OLD_PHYSICAL.map((c) => dpsOf(c, lv)[k]);
-      const best = Math.max(...old);
-      const worst = Math.min(...old);
-      // 수인은 계통(포유류·조류·파충류)마다 따로: 어느 계통을 골라도 같은 범위 안
-      for (const kit of NEW_PHYSICAL.flatMap(kitsOf)) {
-        const v = dpsOf(kit, lv)[k];
-        // 궁사는 기존 직업 중 가장 센 직업을 넘지 않고, 수인·검투사는 10% 넘게 앞서지 않는다
-        const cap = kit.cls === 'archer' ? 1 : 1.1;
-        assert.ok(v <= cap * best, `${lv}레벨 ${kit.label}(${k}) ${v.toFixed(0)} / 기존 최고 ${best.toFixed(0)}`);
-        assert.ok(v >= 0.8 * worst, `${lv}레벨 ${kit.label}(${k}) ${v.toFixed(0)} / 기존 최저 ${worst.toFixed(0)}`);
+test('1차 물리 직업은 숙련도 0(새로 배움)·100(최대) 모두 어느 레벨에서나 서로 크게 벌어지지 않는다', () => {
+  // 평타는 숙련도와 상관없으므로 기술에 기대는 정도에 따라 직업 사이가 벌어질 수 있음
+  for (const eff of PROF_EFFECTS)
+    for (let lv = 5; lv <= 99; lv++)
+      for (const k of ['base', 'buffed'] as const) {
+        const v = OLD_PHYSICAL.map((c) => dpsOf(c, lv, eff)[k]);
+        assert.ok(Math.min(...v) >= 0.65 * Math.max(...v), `${lv}레벨(숙련 배율 ${eff}, ${k}): ${OLD_PHYSICAL.map((c, i) => `${c} ${v[i]!.toFixed(0)}`).join(' / ')}`);
       }
+});
+
+test('2차 직업은 99레벨에서 어빌로 큰다 (1차 직업 기술 전부 + 어빌로 연 2차 직업 기술, 숙련도 0·100): 어빌이 오를수록 세지고, 어빌 99 에는 이어받은 1차 직업보다 세되 너무 앞서지 않는다', () => {
+  for (const eff of PROF_EFFECTS) {
+    const oldBest = (k: keyof Dps) => Math.max(...OLD_PHYSICAL.map((c) => dpsOf(c, 99, eff)[k]));
+    // 물리 2차 직업 (수인은 계통마다 따로: 어느 계통을 골라도 같은 범위 안)
+    for (const kit of NEW_PHYSICAL.flatMap(kitsOf)) {
+      const first = dpsOf(DEFAULT_SECOND_FROM[kit.cls as keyof typeof DEFAULT_SECOND_FROM][0]!, 99, eff);
+      let prev: Dps = { base: 0, buffed: 0 };
+      for (const L of ABILITY_STEPS) {
+        const v = dpsOf(secondKit(kit, L), 99, eff);
+        const at = `${kit.label} 어빌 ${L} (숙련 배율 ${eff})`;
+        for (const k of ['base', 'buffed'] as const) assert.ok(v[k] >= prev[k] - 1e-9, `${at}: 어빌이 올랐는데 약해짐 (${k} ${prev[k].toFixed(0)} → ${v[k].toFixed(0)})`);
+        prev = v;
+        // 2차 전직 직후(어빌 1)에도 이어받은 1차 직업 99레벨보다 크게 약해지지 않음
+        if (L === 1) assert.ok(v.base >= 0.75 * first.base, `${at}: ${v.base.toFixed(0)} / 1차 직업 ${first.base.toFixed(0)}`);
+      }
+      const top = prev;
+      const at = `${kit.label} 어빌 99 (숙련 배율 ${eff})`;
+      for (const k of ['base', 'buffed'] as const) {
+        assert.ok(top[k] >= 1.2 * first[k], `${at}(${k}): ${top[k].toFixed(0)} / 1차 직업 ${first[k].toFixed(0)}`);
+        assert.ok(top[k] <= 2 * oldBest(k), `${at}(${k}): ${top[k].toFixed(0)} / 가장 센 1차 직업 ${oldBest(k).toFixed(0)}`);
+      }
+    }
+    // 궁사는 멀리서 쏘는 만큼 검투사보다 약함 (어빌 99)
+    const arch = dpsOf(secondKit(kitsOf('archer')[0]!, 99), 99, eff);
+    const glad = dpsOf(secondKit(kitsOf('gladiator')[0]!, 99), 99, eff);
+    for (const k of ['base', 'buffed'] as const) assert.ok(arch[k] <= 0.9 * glad[k], `궁사 ${arch[k].toFixed(0)} / 검투사 ${glad[k].toFixed(0)} (${k}, 숙련 배율 ${eff})`);
+    // 바드·소환사(마법 + 소환수): 어빌이 오를수록 세지고, 어빌 99 에는 2차 전직 직후보다 확실히 셈
+    for (const cls of ['bard', 'summoner'] as const) {
+      const kit = kitsOf(cls)[0]!;
+      const dps = (L: number) => dpsOf(secondKit(kit, L), 99, eff).base + (cls === 'summoner' ? petDpsAt(99, L, eff) : 0);
+      for (let i = 1; i < ABILITY_STEPS.length; i++)
+        assert.ok(dps(ABILITY_STEPS[i]!) >= dps(ABILITY_STEPS[i - 1]!) - 1e-9, `${cls} 어빌 ${ABILITY_STEPS[i]} (숙련 배율 ${eff})`);
+      assert.ok(dps(99) >= 1.2 * dps(1), `${cls}: 어빌 99 ${dps(99).toFixed(0)} / 어빌 1 ${dps(1).toFixed(0)}`);
     }
   }
 });
