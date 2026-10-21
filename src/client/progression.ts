@@ -112,10 +112,9 @@ export function reqText(r: ReqStatus): string {
   return d ? `${r.label} (${d})` : r.label;
 }
 
-/** 배우는 곳 (평민 트리는 수련장, 다른 트리는 그 직업의 길드장) */
+/** 배우는 곳 (평민 트리는 수련장, 다른 트리는 그 직업의 길드장. 2차 직업의 스승도 마을에서는 길드장) */
 export function teacherOf(treeClass: ClassId, className: string): string {
-  if (treeClass === 'peasant') return '수련장 관리인';
-  return isSecondClass(treeClass) ? `${className} 스승(길드장)` : `${className} 길드장`;
+  return treeClass === 'peasant' ? '수련장 관리인' : `${className} 길드장`;
 }
 
 // ───────────────────────── 숙련도 ─────────────────────────
@@ -185,7 +184,7 @@ export function treeTabs(
 /** 칸 크기 (px). 창의 CSS(.gt-node 등)와 같아야 합니다 */
 export const TREE_NODE = 44;
 export const TREE_COL_W = 96;
-export const TREE_ROW_H = 80;
+export const TREE_ROW_H = 76;
 export const TREE_GUTTER = 54;
 export const TREE_HEAD_H = 26;
 export const TREE_PAD = 14;

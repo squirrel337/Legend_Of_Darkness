@@ -104,6 +104,18 @@
 
 /* ───────── 상태 줄·능력치 칸·캐릭터 창: 칭호와 어빌 ───────── */
 
+/* 칭호·수인 계통·운영자 표시로 직업 글씨가 길어져도 금화·포인트가 밀려나지 않게 직업 글씨만 줄임표로 (전체는 툴팁) */
+.lod-status > span {
+  flex-shrink: 0;
+}
+
+.lod-status > .st-level {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .st-level.master {
   color: #ffe6a0;
 }
@@ -113,7 +125,7 @@
   color: var(--abil);
 }
 
-.exp-bar.abil {
+.st-abil .exp-bar {
   width: 70px;
 }
 
@@ -146,6 +158,12 @@
   margin: 0 0 1px;
 }
 
+.char-name .rebirths {
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--muted);
+}
+
 .char-abil {
   grid-column: 1 / -1;
   display: flex;
@@ -156,12 +174,6 @@
 
 .char-abil .bar {
   flex: 1;
-}
-
-@media (max-width: 900px) {
-  .st-abil {
-    display: none;
-  }
 }
 
 /* ───────── 길드장의 기술 배우기 창 ───────── */
@@ -317,17 +329,23 @@
 /* ───────── 스킬트리 창 (K) ───────── */
 
 .win-tree {
-  width: min(840px, calc(100vw - 24px));
-  max-width: none;
+  width: 620px;
+  max-width: calc(100vw - 24px);
 }
 
+/* 창 높이(.win 의 max-height)에 맞춰 트리 칸만 줄어들고 스크롤됩니다 */
 .win-tree .win-body {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 7px;
   min-height: 0;
   padding: 9px 11px 11px;
   overflow: hidden;
+}
+
+.win-tree .win-body > * {
+  flex-shrink: 0;
 }
 
 .gt-head {
@@ -438,10 +456,9 @@
   color: var(--muted);
 }
 
-.gt-board-wrap {
+.win-tree .gt-board-wrap {
   flex: 1 1 auto;
-  min-height: 140px;
-  max-height: calc(100vh - var(--hud-h) - 300px);
+  min-height: 120px;
   overflow: auto;
   background: radial-gradient(ellipse at center, #2a1a0d 0%, #140c06 100%);
   border: 1px solid var(--g-line);
@@ -806,6 +823,9 @@
 }
 
 @media (max-width: 720px) {
+  .st-abil .exp-bar {
+    width: 50px;
+  }
   .gt-legend {
     display: none;
   }

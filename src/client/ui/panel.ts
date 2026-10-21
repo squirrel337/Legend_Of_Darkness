@@ -299,14 +299,17 @@ export class Panel {
         h(
           'div',
           { class: 'stats-col' },
-          h('div', { class: 'char-name' }, s.name, s.title ? h('span', { class: 'title-badge' }, s.title) : null),
           h(
             'div',
-            { class: 'char-sub' },
-            `${classLabel(st.className(s.classId), s, prog.second.beastTypes)} · ${s.level}레벨 · ${circleOf(s.level)}서클${s.rebirths > 0 ? ` · ${rebirthWord(s.classId, prog)} ${s.rebirths}회` : ''}`,
+            { class: 'char-name' },
+            s.name,
+            s.title ? h('span', { class: 'title-badge' }, s.title) : null,
+            s.rebirths > 0 ? h('small', { class: 'rebirths' }, ` ${rebirthWord(s.classId, prog)} ${s.rebirths}회`) : null,
           ),
+          h('div', { class: 'char-sub' }, `${classLabel(st.className(s.classId), s, prog.second.beastTypes)} · ${s.level}레벨 · ${circleOf(s.level)}서클`),
           row('경험치', s.expNext > 0 ? `${fmt(s.exp)} / ${fmt(s.expNext)}` : `만렙 (${fmt(s.exp)})`),
-          h('div', { class: 'bar tiny exp' }, h('div', { class: 'bar-fill exp', style: { width: `${pct}%` } })),
+          // 2차 직업은 레벨이 99 그대로라 경험치 막대 대신 어빌 경험치 막대
+          ab === null ? h('div', { class: 'bar tiny exp' }, h('div', { class: 'bar-fill exp', style: { width: `${pct}%` } })) : null,
           ab !== null ? row(`어빌 ${s.abilityLevel}`, s.abilityExpNext > 0 ? `${fmt(s.abilityExp)} / ${fmt(s.abilityExpNext)}` : '어빌 만렙') : null,
           ab !== null ? h('div', { class: 'bar tiny abil', title: abilityExpTitle(s) }, h('div', { class: 'bar-fill abil', style: { width: `${ab}%` } })) : null,
           h('button', { class: 'btn small', onclick: () => this.game.charWin.toggle(true) }, '장비·일러스트 (C)'),

@@ -366,7 +366,7 @@ export class Game {
         break;
       case 'abilityLevelUp':
         // 알림 글은 서버가 보냄. 반짝임에 붙일 글씨와 어빌 표시만 (어빌 값은 뒤따르는 'self' 로 옴)
-        this.levelText = { text: `ABILITY ${m.abilityLevel}!`, color: '#9fe8ff', until: now + LEVEL_TEXT_MS };
+        this.levelText = { text: 'ABILITY UP!', color: '#9fe8ff', until: now + LEVEL_TEXT_MS };
         break;
       case 'gain': {
         this.hud.gain(m.exp, m.gold, m.abilityExp ?? 0);

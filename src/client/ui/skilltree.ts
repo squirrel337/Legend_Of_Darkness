@@ -27,6 +27,9 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /** 수인 계통 표시 색 (칸 귀퉁이 점·열 제목) */
 const BEAST_COLORS: Record<string, string> = { mammal: '#e0a060', bird: '#8fd0ff', reptile: '#8fe08a' };
 const beastColor = (id: string) => BEAST_COLORS[id] ?? '#d9b45a';
+/** 창 너비 (px): 트리 너비에 맞추되 이 범위 안에서 */
+const TREE_WIN_MIN_W = 620;
+const TREE_WIN_MAX_W = 880;
 
 export class SkillTreeWindow {
   private readonly win: Win;
@@ -112,6 +115,8 @@ export class SkillTreeWindow {
     if (this.hover && !this.nodes.has(this.hover)) this.hover = null;
 
     const lay = layoutTree(tree);
+    // 창 너비는 트리에 맞춤 (탭·요약 줄이 들어갈 만큼은 넓게, 너무 넓은 트리는 칸 안에서 스크롤)
+    this.win.el.style.width = `${Math.min(TREE_WIN_MAX_W, Math.max(TREE_WIN_MIN_W, lay.width + 26))}px`;
     const board = h('div', { class: 'gt-board', style: { width: `${lay.width}px`, height: `${lay.height}px` } });
     this.svg = this.edges(lay, ctx);
     board.appendChild(this.svg);

@@ -211,10 +211,10 @@ test('조건 설명: 채우지 못한 조건에만 지금 값을 붙인다', () 
   assert.equal(reqDetail({ kind: 'class', label: '지금 직업의 기술이 아님', met: false }), '');
 });
 
-test('배우는 곳: 평민 트리는 수련장, 1차 직업은 길드장, 2차 직업은 스승', () => {
+test('배우는 곳: 평민 트리는 수련장, 1차·2차 직업은 그 직업의 길드장', () => {
   assert.equal(teacherOf('peasant', '평민'), '수련장 관리인');
   assert.equal(teacherOf('warrior', '전사'), '전사 길드장');
-  assert.equal(teacherOf('archer', '궁사'), '궁사 스승(길드장)');
+  assert.equal(teacherOf('archer', '궁사'), '궁사 길드장');
 });
 
 // ───────────────────────── 숙련도 ─────────────────────────

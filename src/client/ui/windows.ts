@@ -284,9 +284,10 @@ export class Windows {
           ? h('div', { class: 'learn-reqs' }, ...reqs.map((r) => h('span', { class: `req ${r.met ? 'met' : 'unmet'}` }, `${r.met ? '✓' : '✗'} ${reqText(r)}`)))
           : null,
       );
+      // 조건은 줄에 이미 보이므로 툴팁에는 설명과 숙련도만
       this.game.tooltip.attach(row, () =>
         abilityTooltip(def, {
-          ...(a.learned ? { prof: { value: st.prof(a.id), cfg: prof } } : { reqs }),
+          ...(a.learned ? { prof: { value: st.prof(a.id), cfg: prof } } : {}),
           extra: a.learned ? '이미 배웠습니다' : a.learnable ? `배울 수 있습니다 · ${a.price ? fmt(a.price) + ' 골드' : '무료'}` : (a.reason ?? ''),
         }),
       );
