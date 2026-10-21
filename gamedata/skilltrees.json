@@ -33,7 +33,7 @@
         {"ability":"r_throw","row":5,"col":1,"level":45,"gold":20000,"items":[{"item":"mat_orc_tusk","qty":3}],"requires":[{"ability":"r_poison","prof":50}]},
         {"ability":"r_flurry","row":6,"col":0,"level":60,"gold":40000,"items":[{"item":"mat_crystal","qty":3}],"requires":[{"ability":"r_double","prof":60}]},
         {"ability":"r_shadowstep","row":7,"col":2,"level":72,"gold":70000,"items":[{"item":"mat_soul_gem","qty":3}],"requires":[{"ability":"r_shadow","prof":60}],"stats":{"dex":45}},
-        {"ability":"r_assassin","row":8,"col":2,"level":88,"gold":120000,"items":[{"item":"mat_demon_horn","qty":3},{"item":"mat_lich_dust","qty":3}],"requires":[{"ability":"r_shadowstep","prof":70},{"ability":"r_flurry","prof":60}],"stats":{"dex":55}}
+        {"ability":"r_assassin","row":8,"col":2,"level":88,"gold":120000,"items":[{"item":"mat_demon_horn","qty":3},{"item":"mat_lich_dust","qty":3}],"requires":[{"ability":"r_shadowstep","prof":70},{"ability":"r_flurry","prof":70}],"stats":{"dex":55}}
       ]
     },
     "wizard": {
@@ -84,12 +84,12 @@
         {"ability":"m_punch","row":0,"col":0,"level":5,"gold":100,"items":[],"requires":[]},
         {"ability":"m_kick","row":1,"col":0,"level":12,"gold":800,"items":[],"requires":[{"ability":"m_punch","prof":20}]},
         {"ability":"m_ki","row":2,"col":1,"level":18,"gold":2000,"items":[],"requires":[{"ability":"m_kick","prof":30}]},
-        {"ability":"m_meditate","row":3,"col":2,"level":25,"gold":5000,"items":[{"item":"mat_ecto","qty":2}],"requires":[{"ability":"m_ki","prof":30}]},
+        {"ability":"m_meditate","row":3,"col":2,"level":25,"gold":5000,"items":[{"item":"mat_ecto","qty":2}],"requires":[{"ability":"m_ki","prof":40}]},
         {"ability":"m_iron","row":4,"col":2,"level":35,"gold":12000,"items":[{"item":"mat_golem_core","qty":2}],"requires":[{"ability":"m_meditate","prof":20}]},
         {"ability":"m_combo","row":5,"col":0,"level":45,"gold":20000,"items":[{"item":"mat_wolf_pelt","qty":3}],"requires":[{"ability":"m_kick","prof":50}]},
         {"ability":"m_recover","row":6,"col":2,"level":55,"gold":35000,"items":[{"item":"mat_troll_blood","qty":3}],"requires":[{"ability":"m_iron","prof":20}]},
-        {"ability":"m_wave","row":7,"col":1,"level":68,"gold":60000,"items":[{"item":"mat_soul_gem","qty":3}],"requires":[{"ability":"m_ki","prof":70}],"stats":{"dex":30}},
-        {"ability":"m_ultimate","row":8,"col":0,"level":85,"gold":120000,"items":[{"item":"mat_demon_horn","qty":5}],"requires":[{"ability":"m_combo","prof":80},{"ability":"m_wave","prof":50}],"stats":{"str":35,"dex":40}}
+        {"ability":"m_wave","row":7,"col":1,"level":68,"gold":60000,"items":[{"item":"mat_soul_gem","qty":3}],"requires":[{"ability":"m_ki","prof":60}],"stats":{"dex":30}},
+        {"ability":"m_ultimate","row":8,"col":0,"level":85,"gold":120000,"items":[{"item":"mat_demon_horn","qty":5}],"requires":[{"ability":"m_combo","prof":80},{"ability":"m_wave","prof":70}],"stats":{"str":35,"dex":40}}
       ]
     },
     "summoner": {
@@ -175,7 +175,7 @@
         {"ability":"g_whirl","row":1,"col":2,"abilityLevel":12,"gold":800,"items":[],"requires":[{"ability":"g_twin","prof":20}]},
         {"ability":"g_parry","row":2,"col":3,"abilityLevel":18,"gold":2000,"items":[{"item":"mat_orc_tusk","qty":3}],"requires":[{"ability":"g_whirl","prof":30}]},
         {"ability":"g_bleed","row":3,"col":1,"abilityLevel":25,"gold":5000,"items":[{"item":"mat_troll_blood","qty":3}],"requires":[{"ability":"g_twin","prof":40}]},
-        {"ability":"g_charge","row":4,"col":1,"abilityLevel":30,"gold":8000,"items":[{"item":"mat_golem_core","qty":3}],"requires":[{"ability":"g_bleed","prof":40}]},
+        {"ability":"g_charge","row":4,"col":1,"abilityLevel":30,"gold":8000,"items":[{"item":"mat_golem_core","qty":3}],"requires":[{"ability":"g_bleed","prof":50}]},
         {"ability":"g_dance","row":5,"col":0,"abilityLevel":35,"gold":12000,"items":[{"item":"mat_soul_gem","qty":3}],"requires":[{"ability":"g_twin","prof":50}]},
         {"ability":"g_warcry","row":6,"col":3,"abilityLevel":45,"gold":20000,"items":[{"item":"mat_lich_dust","qty":3}],"requires":[{"ability":"g_parry","prof":20}]},
         {"ability":"g_flurry","row":7,"col":0,"abilityLevel":55,"gold":35000,"items":[{"item":"mat_soul_gem","qty":5}],"requires":[{"ability":"g_dance","prof":60}]},
