@@ -21,8 +21,19 @@ function removeSummon(m: Monster, fx: 'death' | 'warp'): void {
   m.map?.remove(m, fx);
 }
 
-/** 소환 효과: 시전자 곁에 소환수를 부릅니다. 부른 수를 돌려줍니다 */
-export function summonCreatures(world: World, p: Player, e: SummonEffect, now = Date.now()): number {
+/**
+ * 소환수의 체력과 피해에 배율을 곱합니다 (소환 기술의 숙련도: 숙련도 0 → 70%, 최대 → 115%, docs/progression.md).
+ * 다른 직업의 피해·회복 기술처럼 소환사의 소환도 숙련도에 따라 세집니다.
+ */
+function scaleSummon(m: Monster, power: number): void {
+  const s = m.stats;
+  s.hp = Math.max(1, Math.round(s.hp * power));
+  s.dmg = [Math.max(1, Math.round(s.dmg[0] * power)), Math.max(1, Math.round(s.dmg[1] * power))];
+  m.hp = s.hp;
+}
+
+/** 소환 효과: 시전자 곁에 소환수를 부릅니다. power 는 소환 기술의 숙련도 배율. 부른 수를 돌려줍니다 */
+export function summonCreatures(world: World, p: Player, e: SummonEffect, now = Date.now(), power = 1): number {
   const map = p.map;
   const def = world.data.monsters.get(e.monster);
   if (!map || !def || p.isDead) return 0;
@@ -44,6 +55,7 @@ export function summonCreatures(world: World, p: Player, e: SummonEffect, now = 
     if (!spot) break;
     // 소환자의 레벨에 맞춰 강해집니다
     const m = new Monster(world.allocId(), def, p.level);
+    if (power !== 1) scaleSummon(m, power);
     m.owner = p;
     m.expireAt = now + e.durationMs;
     m.x = spot.x;

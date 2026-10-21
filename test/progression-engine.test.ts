@@ -228,6 +228,34 @@ test('숙련도: 해로운 상태가 걸릴 확률에도 배율 (확률이 없�
   despawn(caster);
 });
 
+test('숙련도 배율: 소환수의 체력·피해도 소환 기술의 숙련도를 따른다 (0 → 70%, 100 → 115%)', async () => {
+  const { p } = fighter;
+  become(p, 'summoner', 40, { s_fox: 0 });
+  place(p, training(), 3, 12, 1);
+  const summonOnce = (prof: number): Monster => {
+    p.data.prof.s_fox = prof;
+    // 난수 0.99: 숙련도는 오르지 않음
+    withRandom(0.99, () => use(p, 's_fox'));
+    const fox = [...p.summons].at(-1)!;
+    assert.ok(fox && fox.def.id === 'spirit_fox');
+    return fox;
+  };
+  const f0 = summonOnce(0);
+  const hp0 = f0.maxHp;
+  const dmg0 = [...f0.stats.dmg];
+  const f100 = summonOnce(100);
+  assert.ok(f0.dead, '같은 종류는 max 마리까지라 앞의 것은 돌아감');
+  assert.ok(Math.abs(f100.maxHp / hp0 - 1.15 / 0.7) < 0.02, `${hp0} → ${f100.maxHp}`);
+  assert.equal(f100.hp, f100.maxHp);
+  assert.ok(Math.abs(f100.stats.dmg[1] / dmg0[1]! - 1.15 / 0.7) < 0.1, `${dmg0} → ${f100.stats.dmg}`);
+  // 기준 (같은 레벨의 그 몬스터) 의 70% · 115%
+  const base = new Monster(0, data().monsters.get('spirit_fox')!, p.level);
+  assert.ok(Math.abs(hp0 / base.maxHp - 0.7) < 0.01);
+  assert.ok(Math.abs(f100.maxHp / base.maxHp - 1.15) < 0.01);
+  for (const m of [...p.summons]) despawn(m);
+  p.summons.clear();
+});
+
 test('어빌 경험치: 2차 직업이 몬스터를 잡으면 받은 경험치의 25% 를 함께 받고, 모이면 어빌 업 (1차 직업은 없음)', async () => {
   const { c, p } = await join('어빌궁사');
   become(p, 'archer', 99);

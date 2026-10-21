@@ -668,7 +668,7 @@ export function gainProficiency(p: Player, abilityId: string): boolean {
 
 /**
  * 이 기술의 위력·상태 이상 확률 배율 = profEffect(숙련도). 피해(물리·마법·희생), 회복(체력·마나),
- * 해로운 상태의 확률(chance 없으면 1로 보고 곱한 뒤 1에서 자름)에 곱합니다. 흡혈은 깎은 체력에 비례하므로 따로 곱하지 않습니다.
+ * 해로운 상태의 확률(chance 없으면 1로 보고 곱한 뒤 1에서 자름), 소환수의 체력·피해에 곱합니다. 흡혈은 깎은 체력에 비례하므로 따로 곱하지 않습니다.
  * 몬스터의 기술에는 쓰지 않습니다. 엔진 트랙
  */
 export function proficiencyMultiplier(p: Player, abilityId: string): number {

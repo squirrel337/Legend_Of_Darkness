@@ -674,8 +674,8 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
       continue;
     }
     if (e.type === 'summon') {
-      // 소환은 대상과 상관없이 한 번 (플레이어만 소환수를 거느립니다)
-      if (isPlayer(caster)) summonCreatures(world, caster, e);
+      // 소환은 대상과 상관없이 한 번 (플레이어만 소환수를 거느립니다). 소환수의 체력·피해에 숙련도 배율
+      if (isPlayer(caster)) summonCreatures(world, caster, e, Date.now(), power);
       continue;
     }
     for (const t of list) {
