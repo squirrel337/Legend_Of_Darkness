@@ -176,6 +176,26 @@
   flex: 1;
 }
 
+/* ───────── NPC 대화: 전직·승급·2차 전직의 조건 줄 ───────── */
+
+.dialog-text p.cond-ok,
+.dialog-text p.cond-bad {
+  margin: 0 0 1px;
+  padding-left: 6px;
+  line-height: 1.45;
+  border-left: 2px solid;
+}
+
+.dialog-text p.cond-ok {
+  color: var(--req-ok);
+  border-color: rgba(120, 220, 140, 0.5);
+}
+
+.dialog-text p.cond-bad {
+  color: var(--req-bad);
+  border-color: rgba(255, 120, 100, 0.6);
+}
+
 /* ───────── 길드장의 기술 배우기 창 ───────── */
 
 .win-learn {

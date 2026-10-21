@@ -109,7 +109,7 @@ export class GmTool {
         row(
           btn('만렙 세팅', () => this.cmd('만렙', maxClassSel.value), 'primary'),
           maxClassSel,
-          h('span', { class: 'hint' }, '레벨 최대 + 능력치 최대 + 모든 기술 + 최고 장비'),
+          h('span', { class: 'hint' }, '레벨·능력치 최대 + 모든 기술(숙련도 최대) + 최고 장비, 2차 직업은 어빌도 최대'),
         ),
         row(
           btn('레벨 +1', () => this.cmd('레벨업', 1)),

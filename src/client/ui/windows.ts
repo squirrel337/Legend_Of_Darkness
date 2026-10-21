@@ -111,7 +111,8 @@ export class Windows {
     this.learn.el.classList.add('hidden');
     this.storage.el.classList.add('hidden');
     this.game.panel.setInvMode('normal');
-    const paragraphs = text.split('\n').map((l) => h('p', null, l));
+    // 전직·승급·2차 전직의 조건 줄("○ 순수 체력 …", "× 경험치 …")은 채움/모자람 색으로
+    const paragraphs = text.split('\n').map((l) => h('p', { class: l.startsWith('○ ') ? 'cond-ok' : l.startsWith('× ') ? 'cond-bad' : undefined }, l));
     const opts = h(
       'div',
       { class: 'dialog-options' },
