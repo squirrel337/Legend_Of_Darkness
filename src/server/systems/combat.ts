@@ -247,7 +247,7 @@ export function physicalAttack(world: World, attacker: Creature, target: Creatur
   if (isPlayer(attacker)) {
     const d = attacker.derived;
     base = physicalBase(d, attacker.level, randInt(d.dmgMin, d.dmgMax)) * o.mult + (o.bonus ?? 0);
-    if (o.power !== undefined) base *= o.power;
+    base *= o.power ?? 1;
     if (o.hideBonus && o.wasHidden) base *= 1 + o.hideBonus;
     const might = attacker.statuses.get('might');
     if (might) base *= 1 + might.potency / 100;
@@ -695,7 +695,7 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
               hideBonus: e.hideBonus,
               wasHidden,
               element: el,
-              ...(ctx.power !== undefined ? { power } : {}),
+              power,
             });
             dealt += Math.max(0, before - t.hp);
           }

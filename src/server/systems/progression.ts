@@ -419,11 +419,14 @@ export function tradeLimits(data: CharacterData, gd: GameData): { hp: number; mp
   return {
     hp: Math.min(byExp, room(data.bonusHp, asc.expTrade.hp), MAX_TRADE_TIMES),
     mp: Math.min(byExp, room(data.bonusMp, asc.expTrade.mp), MAX_TRADE_TIMES),
-    stat: Math.min(
-      Math.max(0, Math.floor(spare / asc.hpToStat.hp)),
-      Math.floor((data.bonusHp + MAX_BONUS) / asc.hpToStat.hp),
-      Math.floor((MAX_STAT_POINTS - data.statPoints) / asc.hpToStat.stat),
-      MAX_TRADE_TIMES,
+    stat: Math.max(
+      0,
+      Math.min(
+        Math.floor(spare / asc.hpToStat.hp),
+        Math.floor((data.bonusHp + MAX_BONUS) / asc.hpToStat.hp),
+        Math.floor((MAX_STAT_POINTS - data.statPoints) / asc.hpToStat.stat),
+        MAX_TRADE_TIMES,
+      ),
     ),
   };
 }
