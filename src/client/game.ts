@@ -23,6 +23,7 @@ import { Help } from './ui/help';
 import { Hud } from './ui/hud';
 import { LoginScreen } from './ui/login';
 import { Panel } from './ui/panel';
+import { SkillTreeWindow } from './ui/skilltree';
 import { Tooltip } from './ui/tooltip';
 import { Windows } from './ui/windows';
 
@@ -32,6 +33,8 @@ const DEATH_FADE_MS = 500;
 const AUTO_STOP_WAIT_MS = 3000;
 /** 한 번의 클릭 이동에서 서버가 위치를 이보다 많이 바로잡으면 그 이동은 포기합니다 */
 const MAX_CORRECTIONS = 3;
+/** 레벨업·어빌 업 메시지 뒤에 오는 반짝임(fx 'levelup')에 붙일 글씨를 이만큼 기다립니다 */
+const LEVEL_TEXT_MS = 1500;
 
 /** 클릭 이동이 끝나면 할 일. range 가 있으면 활로 다가가는 중: 그 사거리 안에 들어오면 멈추고 쏨 */
 type Pending = { kind: 'talk' | 'pickup' | 'approach'; id: number; range?: number } | null;
@@ -44,6 +47,7 @@ export class Game {
   hud!: Hud;
   chat!: ChatBox;
   charWin!: CharWindow;
+  skillTree!: SkillTreeWindow;
   panel!: Panel;
   windows!: Windows;
   gm!: GmTool;
@@ -62,6 +66,16 @@ export class Game {
   private lastMinimap = 0;
   private kickReason = '';
   private overlay: HTMLElement | null = null;
+  /**
+   * 내 캐릭터의 반짝임(fx 'levelup')에 붙일 글씨. 서버는 레벨업·어빌 업 말고도 승급·전직·교환에 같은 반짝임을 쓰므로,
+   * 바로 앞에 'levelUp'·'abilityLevelUp' 을 받았을 때만 글씨를 붙입니다.
+   */
+  private levelText: { text: string; color: string; until: number } | null = null;
+  /**
+   * 다른 사람의 반짝임(fx 'levelup'): 같은 묶음에 레벨이 오른 모습('look')이 뒤따를 때만 "LEVEL UP!" 을 붙입니다
+   * (승급·교환은 모습이 안 오고, 전직은 레벨이 내려감). 엔티티 id → 반짝일 때의 레벨과 기다릴 시각
+   */
+  private levelFx = new Map<number, { level: number; until: number }>();
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -114,8 +128,9 @@ export class Game {
     this.hud = new Hud(this.root, this.frame, this);
     this.windows = new Windows(this.root, this);
     this.gm = new GmTool(this.root, this);
-    this.help = new Help(this.root);
+    this.help = new Help(this.root, () => this.state.data?.progression ?? null);
     this.charWin = new CharWindow(this.root, this);
+    this.skillTree = new SkillTreeWindow(this.root, this);
     this.panel = new Panel(this.frame, this);
     this.renderer.resize();
   }
@@ -162,6 +177,8 @@ export class Game {
         this.panel.updateButtons();
         if (this.panel.tab === 'stats') this.panel.render('stats');
         this.charWin.refresh();
+        this.skillTree.refresh();
+        this.windows.refreshLearn();
         if (prev && prev.role !== m.s.role) this.gm.close();
         break;
       }
@@ -181,11 +198,15 @@ export class Game {
         this.hud.updateGold();
         this.windows.refreshShopGold();
         this.charWin.refresh();
+        this.skillTree.refresh();
+        this.windows.refreshLearn();
         break;
       case 'abilities':
         st.skills = m.skills;
         st.spells = m.spells;
         if (this.panel.tab === 'skills' || this.panel.tab === 'spells') this.panel.render();
+        this.skillTree.refresh();
+        this.windows.refreshLearn();
         break;
       case 'cooldown':
         // 'assail' 은 기술의 재사용 대기가 아니라 평타 연타 간격 (기술 칸에는 표시하지 않음)
@@ -194,6 +215,7 @@ export class Game {
         break;
       case 'map':
         st.setMap(m.map);
+        this.levelFx.clear();
         for (const e of m.entities) st.entities.set(e.id, entityFromSnapshot(e));
         this.path = [];
         this.pending = null;
@@ -286,12 +308,23 @@ export class Game {
         const at = target ? this.renderer.entityPoint(target, now) : m.x !== undefined && m.y !== undefined ? { sx: (m.x - m.y) * 32, sy: (m.x + m.y) * 16 + 16 } : null;
         if (!at) break;
         this.renderer.effects.fx(m.fx, m.el, target?.id ?? null, at, from?.id ?? null, from ? this.renderer.entityPoint(from, now) : null, now, from?.dir);
-        if (m.fx === 'levelup' && target) this.renderer.effects.text(target.id, at, 'LEVEL UP!', '#ffe066', now, 18, 1800);
+        if (m.fx === 'levelup' && target) {
+          if (target.id !== st.selfId) this.levelFx.set(target.id, { level: target.level, until: now + LEVEL_TEXT_MS });
+          else {
+            if (this.levelText && now <= this.levelText.until) this.renderer.effects.text(target.id, at, this.levelText.text, this.levelText.color, now, 18, 1800);
+            this.levelText = null;
+          }
+        }
         break;
       }
       case 'look': {
         const e = st.entities.get(m.id);
         if (!e) break;
+        const fx = this.levelFx.get(m.id);
+        if (fx) {
+          this.levelFx.delete(m.id);
+          if (now <= fx.until && m.level > fx.level) this.renderer.effects.text(e.id, this.renderer.entityPoint(e, now), 'LEVEL UP!', '#ffe066', now, 18, 1800);
+        }
         e.look = m.look;
         e.ghost = m.ghost;
         e.level = m.level;
@@ -323,7 +356,7 @@ export class Game {
         this.windows.showShop(m.npc, m.name, m.items, m.sell);
         break;
       case 'learn':
-        this.windows.showLearn(m.npc, m.name, m.list);
+        this.windows.showLearn(m.npc, m.name, m.classId, m.list);
         break;
       case 'storage':
         this.windows.showStorage(m.npc, m.slots, m.gold);
@@ -342,13 +375,47 @@ export class Game {
         this.hud.notice(m.text, m.kind);
         break;
       case 'levelUp':
+        this.levelText = { text: 'LEVEL UP!', color: '#ffe066', until: now + LEVEL_TEXT_MS };
+        break;
+      case 'abilityLevelUp':
+        // 알림 글은 서버가 보냄. 반짝임에 붙일 글씨와 어빌 표시만 (어빌 값은 뒤따르는 'self' 로 옴)
+        this.levelText = { text: 'ABILITY UP!', color: '#9fe8ff', until: now + LEVEL_TEXT_MS };
         break;
       case 'gain': {
-        this.hud.gain(m.exp, m.gold);
+        this.hud.gain(m.exp, m.gold, m.abilityExp ?? 0);
         const me = st.me;
         if (me && m.exp > 0) this.renderer.effects.text(me.id, this.renderer.entityPoint(me, now), `+${m.exp.toLocaleString('ko-KR')} EXP`, '#c9a7ff', now, 12, 1300);
+        if (me && (m.abilityExp ?? 0) > 0) {
+          const p = this.renderer.entityPoint(me, now);
+          this.renderer.effects.text(me.id, { sx: p.sx, sy: p.sy - 14 }, `+${m.abilityExp!.toLocaleString('ko-KR')} 어빌`, '#9fe8ff', now, 11, 1300);
+        }
         break;
       }
+      case 'prof': {
+        // 숙련도 한 칸 (10 단위와 최대는 서버가 대화창에도 알림)
+        if (!st.self) break;
+        st.self.prof[m.id] = m.prof;
+        this.panel.updateProf(m.id);
+        this.skillTree.refresh();
+        this.windows.refreshLearn();
+        const me = st.me;
+        const def = st.abilities.get(m.id);
+        if (me && def) {
+          const max = st.data.progression.proficiency.max;
+          const p = this.renderer.entityPoint(me, now);
+          this.renderer.effects.text(me.id, { sx: p.sx, sy: p.sy - 26 }, `${def.name} 숙련 ${m.prof >= max ? 'MAX' : m.prof}`, '#f3d27a', now, 11, 1200);
+        }
+        break;
+      }
+      case 'design':
+        // 관리자가 직업·스킬트리 설계를 바꿈: 기술 이름·설명, 트리, 성장 규칙을 바꿔 끼우고 열린 창을 다시 그림
+        st.applyDesign(m);
+        this.panel.render();
+        this.hud.updateSelf();
+        this.charWin.refresh();
+        this.skillTree.refresh(true);
+        this.windows.refreshLearn(true);
+        break;
       case 'kick':
         this.kickReason = m.reason;
         break;
@@ -952,6 +1019,8 @@ export class Game {
         return this.panel.setTab('stats');
       case 'KeyC':
         return this.charWin.toggle();
+      case 'KeyK':
+        return this.skillTree.toggle();
       case 'KeyM':
         return this.hud.toggleMinimap();
       case 'KeyZ':
@@ -986,6 +1055,7 @@ export class Game {
       case 'Escape':
         if (this.help.open) return this.help.toggle(false);
         if (this.windows.closeTop()) return;
+        if (this.skillTree.open) return this.skillTree.close();
         if (this.charWin.open) return this.charWin.close();
         if (this.gm.open) return this.gm.close();
         this.state.targetId = null;

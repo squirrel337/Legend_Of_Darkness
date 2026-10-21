@@ -1,5 +1,6 @@
 // 클라이언트가 알고 있는 게임 상태
 import { WALK_MS, type ClassId, type Dir, type Role, type StatusId } from '../shared/constants';
+import type { LearnContext } from '../shared/progression';
 import type {
   ClientGameData,
   EntitySnapshot,
@@ -7,10 +8,12 @@ import type {
   InvSlot,
   MapView,
   PublicMonsterDef,
+  S2C,
   SelfState,
 } from '../shared/protocol';
 import type { AbilityDef, ClassDef, HumanLook, ItemDef } from '../shared/types';
 import { tileInfo } from '../shared/tiles';
+import { clientLearnContext } from './progression';
 
 export interface CEntity {
   id: number;
@@ -169,6 +172,38 @@ export class ClientState {
     this.classes = new Map(data.classes.map((c) => [c.id, c]));
     this.monsters = new Map(data.monsters.map((m) => [m.id, m]));
     this.mapNames = new Map(data.maps.map((m) => [m.id, m.name]));
+  }
+
+  /** 설계(기술·스킬트리·성장 규칙)를 바꿔 끼운 횟수 (창이 다시 그릴지 가릴 때) */
+  designGen = 0;
+
+  /** 관리자가 직업·스킬트리 설계를 바꿨을 때 ('design'): welcome 의 같은 항목을 바꿔 끼웁니다 */
+  applyDesign(m: Extract<S2C, { t: 'design' }>): void {
+    this.data.abilities = m.abilities;
+    this.data.skillTrees = m.skillTrees;
+    this.data.progression = m.progression;
+    this.abilities = new Map(m.abilities.map((a) => [a.id, a]));
+    this.designGen++;
+  }
+
+  /** 배우기 조건 확인용 캐릭터 정보 (서버의 learnContextOf 와 같은 값, 내 상태를 아직 받지 못했으면 null) */
+  learnContext(): LearnContext | null {
+    if (!this.self) return null;
+    return clientLearnContext({
+      self: this.self,
+      gold: this.gold,
+      skills: this.skills,
+      spells: this.spells,
+      inventory: this.inventory,
+      abilities: this.abilities,
+      items: this.items,
+      beastTypes: this.data.progression.second.beastTypes,
+    });
+  }
+
+  /** 배운 기술·마법의 숙련도 (배우지 않았으면 0) */
+  prof(abilityId: string): number {
+    return this.self?.prof[abilityId] ?? 0;
   }
 
   get me(): CEntity | undefined {

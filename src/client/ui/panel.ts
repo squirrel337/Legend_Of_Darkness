@@ -1,6 +1,7 @@
 // 아래 패널의 가운데 칸(소지품/기술/마법/대화/능력치)과 오른쪽 단추들
 import { ELEMENT_NAMES, INVENTORY_SIZE, STAT_KEYS, STAT_NAMES, circleOf } from '../../shared/constants';
 import type { Game } from '../game';
+import { abilityExpPct, abilityExpTitle, classLabel, profInfo, rebirthWord } from '../progression';
 import { abilityIconUrl, iconUrl } from '../render/icons';
 import { clear, fmt, h } from './dom';
 import { svgIcon, type BottomFrame } from './frame';
@@ -25,6 +26,8 @@ export class Panel {
   private readonly bodies = new Map<TabId, HTMLElement>();
   tab: TabId = 'skills';
   private cdEls = new Map<string, HTMLElement>();
+  /** 기술 칸 아래의 숙련도 막대 (숙련도가 오르면 그 칸만 고침) */
+  private profEls = new Map<string, HTMLElement>();
   /** 상점 판매/창고 맡기기 모드일 때 소지품 클릭 동작 */
   invMode: 'normal' | 'sell' | 'deposit' = 'normal';
   private readonly invModeBanner: HTMLElement;
@@ -66,6 +69,7 @@ export class Panel {
         'div',
         { class: 'menu-btns' },
         menu('person', '캐릭터', '캐릭터 정보와 장비 (C)', () => game.charWin.toggle()),
+        menu('tree', '트리', '기술 트리: 배운 기술·숙련도·배울 수 있는 기술 (K)', () => game.skillTree.toggle()),
         menu('map', '지도', '지도 켜기/끄기 (M)', () => game.hud.toggleMinimap()),
         menu('help', '도움말', '조작 방법 (H)', () => game.help.toggle()),
         this.autoBtn,
@@ -179,6 +183,7 @@ export class Panel {
     const list = kind === 'skill' ? st.skills : st.spells;
     const grid = h('div', { class: 'slot-grid' });
     this.cdEls.clear();
+    this.profEls.clear();
     for (let i = 0; i < PANE_SLOTS; i++) {
       const id = list[i];
       const def = id ? st.abilities.get(id) : undefined;
@@ -191,16 +196,21 @@ export class Panel {
       }
       const cd = h('div', { class: 'cd' });
       this.cdEls.set(id, cd);
+      // 숙련도: 칸 아래의 가는 막대 (최대면 금빛)
+      const prof = h('span', { class: 'prof-bar' }, h('i'));
+      this.profEls.set(id, prof);
+      this.setProfBar(prof, st.prof(id));
       const slot = h(
         'div',
         { class: 'slot ability', draggable: true },
         h('img', { src: abilityIconUrl(def.icon), alt: def.name, draggable: false }),
         cd,
+        prof,
         i < 10 ? h('span', { class: 'hotkey' }, HOTKEYS[i]) : null,
         def.mp ? h('span', { class: 'mp-cost' }, String(def.mp)) : null,
       );
       slot.addEventListener('click', () => this.game.useAbility(id));
-      this.game.tooltip.attach(slot, () => abilityTooltip(def));
+      this.game.tooltip.attach(slot, () => abilityTooltip(def, { prof: { value: st.prof(id), cfg: st.data.progression.proficiency } }));
       this.wireDrag(slot, kind, i);
       grid.appendChild(slot);
     }
@@ -216,6 +226,24 @@ export class Panel {
         ),
       );
     }
+  }
+
+  private setProfBar(el: HTMLElement, prof: number): void {
+    const p = profInfo(prof, this.game.state.data.progression.proficiency);
+    el.classList.toggle('max', p.maxed);
+    (el.firstElementChild as HTMLElement).style.width = `${p.ratio * 100}%`;
+  }
+
+  /** 숙련도가 올랐을 때 ('prof'): 그 칸의 막대만 고치고 잠깐 빛나게 */
+  updateProf(id: string): void {
+    const el = this.profEls.get(id);
+    if (!el) return;
+    this.setProfBar(el, this.game.state.prof(id));
+    const slot = el.parentElement;
+    if (!slot) return;
+    slot.classList.remove('prof-up');
+    void slot.offsetWidth;
+    slot.classList.add('prof-up');
   }
 
   /** 매 프레임: 재사용 대기 표시 */
@@ -262,17 +290,28 @@ export class Panel {
       );
     });
     const pct = s.expNext > 0 ? Math.min(100, (s.exp / s.expNext) * 100) : 100;
+    const prog = st.data.progression;
+    const ab = abilityExpPct(s);
     body.append(
       h(
         'div',
         { class: 'stats-cols' },
         h(
           'div',
-          { class: 'stats-col' },
-          h('div', { class: 'char-name' }, s.name),
-          h('div', { class: 'char-sub' }, `${st.className(s.classId)} · ${s.level}레벨 · ${circleOf(s.level)}서클`),
+          { class: `stats-col${ab !== null ? ' has-abil' : ''}` },
+          h(
+            'div',
+            { class: 'char-name' },
+            s.name,
+            s.title ? h('span', { class: 'title-badge' }, s.title) : null,
+            s.rebirths > 0 ? h('small', { class: 'rebirths' }, ` ${rebirthWord(s.classId, prog)} ${s.rebirths}회`) : null,
+          ),
+          h('div', { class: 'char-sub' }, `${classLabel(st.className(s.classId), s, prog.second.beastTypes)} · ${s.level}레벨 · ${circleOf(s.level)}서클`),
           row('경험치', s.expNext > 0 ? `${fmt(s.exp)} / ${fmt(s.expNext)}` : `만렙 (${fmt(s.exp)})`),
-          h('div', { class: 'bar tiny exp' }, h('div', { class: 'bar-fill exp', style: { width: `${pct}%` } })),
+          // 2차 직업은 레벨이 99 그대로라 경험치 막대 대신 어빌 경험치 막대
+          ab === null ? h('div', { class: 'bar tiny exp' }, h('div', { class: 'bar-fill exp', style: { width: `${pct}%` } })) : null,
+          ab !== null ? row(`어빌 ${s.abilityLevel}`, s.abilityExpNext > 0 ? `${fmt(s.abilityExp)} / ${fmt(s.abilityExpNext)}` : '어빌 만렙') : null,
+          ab !== null ? h('div', { class: 'bar tiny abil', title: abilityExpTitle(s) }, h('div', { class: 'bar-fill abil', style: { width: `${ab}%` } })) : null,
           h('button', { class: 'btn small', onclick: () => this.game.charWin.toggle(true) }, '장비·일러스트 (C)'),
         ),
         h(

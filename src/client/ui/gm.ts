@@ -72,6 +72,12 @@ export class GmTool {
     const classSel = sel(CLASS_OPTIONS);
     const maxClassSel = sel([['', '현재 직업'], ...CLASS_OPTIONS.filter(([v]) => v !== '평민')]);
 
+    // 성장 체계 (전직·승급·어빌·숙련도·수인 계통)
+    const rebirthInput = h('input', { type: 'number', min: 0, max: 999, value: '1', class: 'num' });
+    const abilityInput = h('input', { type: 'number', min: 1, max: st.data.progression.ability.maxLevel, value: '30', class: 'num' });
+    const profInput = h('input', { type: 'number', min: 0, max: st.data.progression.proficiency.max, value: '50', class: 'num' });
+    const beastSel = sel([...st.data.progression.second.beastTypes.map((b): [string, string] => [b.name, b.name]), ['없음', '계통 없음']]);
+
     const itemInput = h('input', { type: 'text', placeholder: '아이템 이름 (예: 엘릭서)', list: 'gm-items', class: 'wide' });
     const itemList = h('datalist', { id: 'gm-items' }, ...st.data.items.map((i) => h('option', { value: i.name })));
     const itemQty = h('input', { type: 'number', min: 1, value: '1', class: 'num' });
@@ -103,7 +109,7 @@ export class GmTool {
         row(
           btn('만렙 세팅', () => this.cmd('만렙', maxClassSel.value), 'primary'),
           maxClassSel,
-          h('span', { class: 'hint' }, '레벨 최대 + 능력치 최대 + 모든 기술 + 최고 장비'),
+          h('span', { class: 'hint' }, '레벨·능력치 최대 + 모든 기술(숙련도 최대) + 최고 장비, 2차 직업은 어빌도 최대'),
         ),
         row(
           btn('레벨 +1', () => this.cmd('레벨업', 1)),
@@ -120,6 +126,26 @@ export class GmTool {
         ),
         row(btn('모든 기술/마법 배우기', () => this.cmd('배우기', '전부')), btn('레벨에 맞는 최고 장비', () => this.cmd('장비'))),
         row(classSel, btn('직업 바꾸기', () => this.cmd('직업', classSel.value))),
+      ),
+      section(
+        '성장 체계 (전직·승급·어빌·숙련도)',
+        row(
+          btn('승급 켜기', () => this.cmd('승급', '켜기')),
+          btn('승급 끄기', () => this.cmd('승급', '끄기')),
+          rebirthInput,
+          btn('전직 횟수', () => this.cmd('전직횟수', rebirthInput.value)),
+        ),
+        row(
+          abilityInput,
+          btn('어빌 설정', () => this.cmd('어빌', abilityInput.value)),
+          h('span', { class: 'hint' }, '2차 직업만'),
+        ),
+        row(
+          btn('숙련도 모두 최대', () => this.cmd('숙련도', '전부')),
+          profInput,
+          btn('숙련도 모두 설정', () => this.cmd('숙련도', '전부', profInput.value)),
+        ),
+        row(beastSel, btn('수인 계통 바꾸기', () => this.cmd('계통', beastSel.value)), h('span', { class: 'hint' }, 'K: 기술 트리로 확인')),
       ),
       section(
         '상태',

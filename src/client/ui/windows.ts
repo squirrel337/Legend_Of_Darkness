@@ -1,6 +1,8 @@
-// 떠 있는 창들: NPC 대화, 상점, 기술 배우기, 창고, 그룹 초대, 입력 상자
-import type { DialogOption, InvSlot } from '../../shared/protocol';
+// 떠 있는 창들: NPC 대화, 상점, 기술 배우기(스킬트리 조건), 창고, 그룹 초대, 입력 상자
+import type { ClassId } from '../../shared/constants';
+import type { DialogOption, InvSlot, LearnEntry } from '../../shared/protocol';
 import type { Game } from '../game';
+import { profInfo, refreshLearnEntries, reqText } from '../progression';
 import { portraitUrl } from '../render/chibi';
 import { abilityIconUrl, iconUrl } from '../render/icons';
 import { fmt, h, makeDraggable } from './dom';
@@ -51,6 +53,12 @@ export class Windows {
   readonly invite: Win;
   /** 현재 대화 중인 NPC 엔티티 id */
   npcId: number | null = null;
+  /** 열려 있는 기술 배우기 창의 내용 (서버가 보낸 그대로, 상태가 바뀌면 다시 판정해 그림) */
+  private learnData: { npc: number; name: string; classId: ClassId; list: LearnEntry[] } | null = null;
+  /** 배운 기술을 목록에서 숨길지 */
+  private hideLearned = false;
+  /** 마지막으로 그린 배우기 목록 (같으면 다시 그리지 않음) */
+  private learnKey = '';
 
   constructor(
     root: HTMLElement,
@@ -103,7 +111,8 @@ export class Windows {
     this.learn.el.classList.add('hidden');
     this.storage.el.classList.add('hidden');
     this.game.panel.setInvMode('normal');
-    const paragraphs = text.split('\n').map((l) => h('p', null, l));
+    // 전직·승급·2차 전직의 조건 줄("○ 순수 체력 …", "× 경험치 …")은 채움/모자람 색으로
+    const paragraphs = text.split('\n').map((l) => h('p', { class: l.startsWith('○ ') ? 'cond-ok' : l.startsWith('× ') ? 'cond-bad' : undefined }, l));
     const opts = h(
       'div',
       { class: 'dialog-options' },
@@ -205,33 +214,130 @@ export class Windows {
     if (g) g.textContent = `가진 골드: ${fmt(this.game.state.gold)}`;
   }
 
-  showLearn(npc: number, name: string, list: { id: string; level: number; price: number; learned: boolean }[]): void {
+  /** 길드장의 기술 배우기 창: classId 트리의 기술마다 배우는 조건(채움/모자람)과 배우기 단추 */
+  showLearn(npc: number, name: string, classId: ClassId, list: LearnEntry[]): void {
     this.npcId = npc;
     this.dialog.el.classList.add('hidden');
+    // 서버가 막 보낸 판정을 그대로 그림 (배운 직후라면 내 상태 메시지보다 먼저 옴)
+    this.learnData = { npc, name, classId, list };
+    this.renderLearn(list, true);
+  }
+
+  /**
+   * 기술 배우기 창이 열린 채로 골드·소지품·기술·숙련도가 바뀌면 지금 상태로 다시 판정합니다.
+   * force: 설계가 바뀌었을 때처럼 목록이 같아도 (기술 이름·설명이 바뀌었을 수 있어) 다시 그림
+   */
+  refreshLearn(force = false): void {
+    const d = this.learnData;
+    if (!d || !this.learn.open) return;
     const st = this.game.state;
-    const myLevel = st.self?.level ?? 1;
+    const ctx = st.learnContext();
+    if (!ctx) return;
+    this.renderLearn(refreshLearnEntries(d.classId, d.list, st.data.skillTrees[d.classId], ctx), force);
+  }
+
+  private renderLearn(list: LearnEntry[], force: boolean): void {
+    const d = this.learnData;
+    if (!d) return;
+    const st = this.game.state;
+    // 배운 줄의 숙련도는 목록에 없으므로 숙련도도 함께 비교
+    const key = JSON.stringify([list, this.hideLearned, st.gold, st.self?.prof]);
+    if (!force && key === this.learnKey) return;
+    this.learnKey = key;
+    const scroll = this.learn.body.querySelector('.learn-list')?.scrollTop ?? 0;
+    const prof = st.data.progression.proficiency;
+    const className = st.className(d.classId);
+    const second = list.some((a) => a.abilityLevel > 0);
     const rows = list.map((a) => {
       const def = st.abilities.get(a.id);
-      if (!def) return null;
-      const can = !a.learned && myLevel >= a.level;
+      if (!def || (this.hideLearned && a.learned)) return null;
+      const need = a.abilityLevel > 0 ? `어빌 ${a.abilityLevel}` : `Lv.${a.level}`;
+      let side: HTMLElement;
+      if (a.learned) {
+        const p = profInfo(st.prof(a.id), prof);
+        side = h(
+          'div',
+          { class: 'learn-side' },
+          h('span', { class: 'learned-tag' }, '배움'),
+          h('span', { class: `learn-prof${p.maxed ? ' max' : ''}`, title: `숙련도 ${p.prof} / ${p.max} · 위력 ${p.effectPct}%` }, `숙련 ${p.prof}`, h('i', null, h('b', { style: { width: `${p.ratio * 100}%` } }))),
+        );
+      } else {
+        side = h(
+          'div',
+          { class: 'learn-side' },
+          h('span', { class: 'shop-price' }, a.price ? `${fmt(a.price)} G` : '무료'),
+          h(
+            'button',
+            {
+              class: `btn small${a.learnable ? ' primary' : ''}`,
+              disabled: !a.learnable,
+              title: a.learnable ? '배우기 (골드와 재료를 냅니다)' : (a.reason ?? ''),
+              onclick: () => this.game.net.send({ t: 'learnAbility', npc: d.npc, id: a.id }),
+            },
+            '배우기',
+          ),
+        );
+      }
       const row = h(
         'div',
-        { class: `shop-row ${a.learned ? 'learned' : can ? '' : 'unusable'}` },
+        { class: `learn-row ${a.learned ? 'learned' : a.learnable ? 'learnable' : 'locked'}` },
         h('img', { src: abilityIconUrl(def.icon, 30), alt: '' }),
-        h('div', { class: 'shop-name' }, def.name, h('small', null, ` ${def.kind === 'skill' ? '기술' : '마법'} · Lv.${a.level}`)),
-        h('div', { class: 'shop-price' }, a.price ? `${fmt(a.price)} G` : '무료'),
-        a.learned
-          ? h('span', { class: 'learned-tag' }, '배움')
-          : h('button', { class: 'btn small', disabled: !can, onclick: () => this.game.net.send({ t: 'learnAbility', npc, id: a.id }) }, '배우기'),
+        h('div', { class: 'learn-name' }, def.name, h('small', null, ` ${def.kind === 'skill' ? '기술' : '마법'} · ${need}`)),
+        side,
+        // 배운 기술은 조건 대신 숙련도만
+        !a.learned && a.reqs.length
+          ? h('div', { class: 'learn-reqs' }, ...a.reqs.map((r) => h('span', { class: `req ${r.met ? 'met' : 'unmet'}` }, `${r.met ? '✓' : '✗'} ${reqText(r)}`)))
+          : null,
       );
-      this.game.tooltip.attach(row, () => abilityTooltip(def, a.learned ? '이미 배웠습니다' : `필요 레벨 ${a.level} · ${a.price ? fmt(a.price) + ' 골드' : '무료'}`));
+      // 조건은 줄에 이미 보이므로 툴팁에는 설명과 숙련도만
+      this.game.tooltip.attach(row, () =>
+        abilityTooltip(def, {
+          ...(a.learned ? { prof: { value: st.prof(a.id), cfg: prof } } : {}),
+          extra: a.learned ? '이미 배웠습니다' : a.learnable ? `배울 수 있습니다 · ${a.price ? fmt(a.price) + ' 골드' : '무료'}` : (a.reason ?? ''),
+        }),
+      );
       return row;
     });
-    this.learn.show(
-      `${name} — 기술/마법 배우기`,
-      h('div', { class: 'shop-gold' }, `가진 골드: ${fmt(st.gold)}`),
-      h('div', { class: 'shop-list' }, ...rows.filter((r): r is HTMLDivElement => r !== null)),
+    const shown = rows.filter((r): r is HTMLDivElement => r !== null);
+    const can = list.filter((a) => a.learnable).length;
+    const learned = list.filter((a) => a.learned).length;
+    const toggle = h('input', {
+      type: 'checkbox',
+      checked: this.hideLearned,
+      onchange: (e: Event) => {
+        this.hideLearned = (e.target as HTMLInputElement).checked;
+        this.refreshLearnNow();
+      },
+    });
+    const listEl = h(
+      'div',
+      { class: 'shop-list learn-list' },
+      ...(shown.length ? shown : [h('div', { class: 'hint center' }, list.length ? '모두 배웠습니다.' : '이 길드에서 배울 기술이 없습니다.')]),
     );
+    this.learn.show(
+      `${d.name} — ${d.classId === 'peasant' ? '기본' : className} 기술·마법 배우기`,
+      h(
+        'div',
+        { class: 'learn-head' },
+        h('span', { class: 'shop-gold' }, `가진 골드 ${fmt(st.gold)}`),
+        h('span', { class: 'learn-count' }, `배울 수 있는 것 ${can}개 · 배운 것 ${learned}/${list.length}`),
+        h('label', { class: 'inline learn-filter' }, toggle, '배운 것 숨기기'),
+      ),
+      listEl,
+      h(
+        'div',
+        { class: 'hint' },
+        `조건을 모두 채우면 배울 수 있습니다. 재료는 배울 때 사라집니다. ${second ? '2차 직업 기술은 필요 레벨 대신 필요 어빌을 봅니다. ' : ''}`,
+        h('span', { class: 'dim' }, 'K 키: 스킬트리에서 선수과목 연결 보기'),
+      ),
+    );
+    listEl.scrollTop = scroll;
+  }
+
+  /** 숨기기를 바꿨을 때: 지금 상태로 곧바로 다시 그림 */
+  private refreshLearnNow(): void {
+    this.learnKey = '';
+    this.refreshLearn();
   }
 
   showStorage(npc: number, slots: InvSlot[], gold: number): void {

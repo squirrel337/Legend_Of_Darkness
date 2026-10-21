@@ -2,6 +2,7 @@
 import { STATUS_INFO, circleOf } from '../../shared/constants';
 import type { GroupMember } from '../../shared/protocol';
 import type { Game } from '../game';
+import { abilityExpPct, abilityExpTitle, classLabel, growthParts } from '../progression';
 import { portraitUrl } from '../render/chibi';
 import { clear, fmt, h } from './dom';
 import type { BottomFrame } from './frame';
@@ -18,9 +19,15 @@ export class Hud {
   private readonly coord: HTMLElement;
   private readonly mapName: HTMLElement;
   private readonly goldEl: HTMLElement;
+  private readonly expEl: HTMLElement;
   private readonly expFill: HTMLElement;
   private readonly expText: HTMLElement;
   private readonly levelEl: HTMLElement;
+  /** 2차 직업의 어빌 레벨과 어빌 경험치 막대 (2차 직업은 레벨이 99 그대로라 경험치 막대 대신 보임) */
+  private readonly abilEl: HTMLElement;
+  private readonly abilLabel: HTMLElement;
+  private readonly abilFill: HTMLElement;
+  private readonly abilText: HTMLElement;
   private readonly pointsEl: HTMLElement;
   private readonly buffs: HTMLElement;
   private readonly target: HTMLElement;
@@ -69,11 +76,17 @@ export class Hud {
     this.expText = h('span');
     this.levelEl = h('span', { class: 'st-level' });
     this.pointsEl = h('span', { class: 'st-points hidden', title: 'G: 능력치 분배' });
+    this.abilLabel = h('b');
+    this.abilFill = h('i');
+    this.abilText = h('span');
+    this.abilEl = h('span', { class: 'st-exp st-abil hidden' }, this.abilLabel, h('span', { class: 'exp-bar abil' }, this.abilFill), this.abilText);
+    this.expEl = h('span', { class: 'st-exp', title: '경험치' }, h('span', { class: 'exp-bar' }, this.expFill), this.expText);
     frame.status.append(
       this.coord,
       this.mapName,
       this.levelEl,
-      h('span', { class: 'st-exp', title: '경험치' }, h('span', { class: 'exp-bar' }, this.expFill), this.expText),
+      this.expEl,
+      this.abilEl,
       this.goldEl,
       this.pointsEl,
     );
@@ -129,8 +142,26 @@ export class Hud {
     const s = this.game.state.self;
     if (!s) return;
     this.updateVitals();
-    this.levelEl.textContent = `${this.game.state.className(s.classId)} Lv.${s.level} · ${circleOf(s.level)}서클${s.role !== 'player' ? (s.role === 'admin' ? ' · 관리자' : ' · GM') : ''}${s.god ? ' · 무적' : ''}`;
+    const st = this.game.state;
+    const prog = st.data.progression;
+    // 칭호(마스터)는 직업 앞에. 상태 줄이 넘치지 않게 전직(환골탈태) 횟수는 툴팁과 능력치 칸(G)·캐릭터 창(C)에,
+    // 2차 직업은 서클(늘 99레벨) 대신 어빌 막대
+    const cls = classLabel(st.className(s.classId), s, prog.second.beastTypes);
+    const ab = abilityExpPct(s);
+    this.levelEl.textContent = `${s.title ? `${s.title} ` : ''}${cls} Lv.${s.level}${ab === null ? ` · ${circleOf(s.level)}서클` : ''}${s.role !== 'player' ? (s.role === 'admin' ? ' · 관리자' : ' · GM') : ''}${s.god ? ' · 무적' : ''}`;
+    const growth = growthParts(s, prog);
+    this.levelEl.title = `${this.levelEl.textContent}${growth.length ? `\n성장: ${growth.join(' · ')}` : ''}`;
     this.levelEl.classList.toggle('gm', s.role !== 'player');
+    this.levelEl.classList.toggle('master', !!s.title);
+    // 2차 직업: 경험치 막대 자리에 어빌 레벨과 어빌 경험치 막대 (경험치는 툴팁에)
+    this.expEl.classList.toggle('hidden', ab !== null);
+    this.abilEl.classList.toggle('hidden', ab === null);
+    if (ab !== null) {
+      this.abilLabel.textContent = `어빌 ${s.abilityLevel}`;
+      this.abilFill.style.width = `${ab}%`;
+      this.abilText.textContent = s.abilityExpNext > 0 ? `${ab.toFixed(1)}%` : '만렙';
+      this.abilEl.title = `${abilityExpTitle(s)} · 경험치 ${fmt(s.exp)}`;
+    }
     if (s.expNext > 0) {
       const pct = Math.min(100, (s.exp / s.expNext) * 100);
       this.expFill.style.width = `${pct}%`;
@@ -265,9 +296,10 @@ export class Hud {
     setTimeout(() => n.remove(), 3600);
   }
 
-  gain(exp: number, gold: number): void {
+  gain(exp: number, gold: number, abilityExp = 0): void {
     const parts: string[] = [];
     if (exp > 0) parts.push(`경험치 +${fmt(exp)}`);
+    if (abilityExp > 0) parts.push(`어빌 +${fmt(abilityExp)}`);
     if (gold > 0) parts.push(`금화 +${fmt(gold)}`);
     if (!parts.length) return;
     const g = h('div', { class: 'gain' }, parts.join('  '));
