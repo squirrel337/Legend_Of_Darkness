@@ -69,7 +69,7 @@ export class Panel {
         'div',
         { class: 'menu-btns' },
         menu('person', '캐릭터', '캐릭터 정보와 장비 (C)', () => game.charWin.toggle()),
-        menu('tree', '트리', '기술 트리: 배운 기술·숙련도·배울 수 있는 기술 (K)', () => game.skillTree.toggle()),
+        menu('tree', '트리', '스킬트리: 배운 기술·숙련도·배울 수 있는 기술 (K)', () => game.skillTree.toggle()),
         menu('map', '지도', '지도 켜기/끄기 (M)', () => game.hud.toggleMinimap()),
         menu('help', '도움말', '조작 방법 (H)', () => game.help.toggle()),
         this.autoBtn,

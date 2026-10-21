@@ -145,7 +145,7 @@ export class GmTool {
           profInput,
           btn('숙련도 모두 설정', () => this.cmd('숙련도', '전부', profInput.value)),
         ),
-        row(beastSel, btn('수인 계통 바꾸기', () => this.cmd('계통', beastSel.value)), h('span', { class: 'hint' }, 'K: 기술 트리로 확인')),
+        row(beastSel, btn('수인 계통 바꾸기', () => this.cmd('계통', beastSel.value)), h('span', { class: 'hint' }, 'K: 스킬트리로 확인')),
       ),
       section(
         '상태',

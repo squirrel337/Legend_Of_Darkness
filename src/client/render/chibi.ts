@@ -4053,7 +4053,7 @@ function drawShortCape(d: D, b: Body, overBody: boolean): void {
   paint(d, pal.trim, d.lw * 0.8);
 }
 
-/** 궁수의 화살통. 앞모습은 몸 뒤(어깨 너머로 깃만), 뒷모습은 등 위에 */
+/** 궁사의 화살통. 앞모습은 몸 뒤(어깨 너머로 깃만), 뒷모습은 등 위에 */
 function drawQuiver(d: D, overBody: boolean): void {
   const { ctx, pal, lw } = d;
   const sw = d.rig.sway * 0.3;

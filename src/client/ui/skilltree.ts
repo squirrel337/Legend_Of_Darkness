@@ -194,7 +194,7 @@ export class SkillTreeWindow {
     const summary = [`Lv.${s.level}`, ...(s.abilityLevel > 0 ? [`어빌 ${s.abilityLevel}`] : []), `금화 ${fmt(st.gold)}`, `기술 ${learnedN}/${MAX_ABILITIES}`, `마법 ${spellN}/${MAX_ABILITIES}`];
     const note = treeNote(cls, s, prog, tree, (c) => st.className(c));
     this.win.show(
-      `${current ? classLabel(className, s, prog.second.beastTypes) : className} 기술 트리`,
+      `${current ? classLabel(className, s, prog.second.beastTypes) : className} 스킬트리`,
       h('div', { class: 'gt-head' }, h('div', { class: 'gt-tabs' }, ...tabEls), others.length ? pick : null),
       h(
         'div',

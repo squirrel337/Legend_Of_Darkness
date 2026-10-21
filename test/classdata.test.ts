@@ -216,7 +216,7 @@ test('모든 직업은 1~99레벨 사이에 9개 이상의 기술을 가지며, 
   }
   // 바드의 노래는 그룹 전체에 걸린다
   assert.ok(abilitiesOf('bard').filter((a) => a.targeting === 'party').length >= 4);
-  // 수인은 (어느 계통이든) 흡혈, 검투사는 연속 베기, 궁수는 멀리서 쏘는 기술이 중심
+  // 수인은 (어느 계통이든) 흡혈, 검투사는 연속 베기, 궁사는 멀리서 쏘는 기술이 중심
   for (const kit of kitsOf('beastkin'))
     assert.ok(kit.list.some((a) => a.effects.some((e) => e.type === 'physical' && (e.lifesteal ?? 0) > 0)), kit.label);
   assert.ok(abilitiesOf('gladiator').filter((a) => a.effects.some((e) => e.type === 'physical' && (e.hits ?? 1) > 1)).length >= 4);
@@ -268,7 +268,7 @@ test('새 직업도 레벨 5/40/99에서 착용 가능한 최고 장비를 받�
   }
 });
 
-test('활만 사거리가 길고, 궁수의 무기는 모두 활이다', () => {
+test('활만 사거리가 길고, 궁사의 무기는 모두 활이다', () => {
   for (const it of gd.items.values()) {
     if (it.slot !== 'weapon') continue;
     if (it.icon.shape === 'bow') {
@@ -331,12 +331,12 @@ test('소환수를 모두 불러도 다른 직업 한 명의 몫을 넘지 않�
   }
 });
 
-test('새 근접·원거리 직업의 피해는 기존 직업과 비슷하고, 궁수는 멀리서 쏘는 만큼 전사보다 약하다', () => {
+test('새 근접·원거리 직업의 피해는 기존 직업과 비슷하고, 궁사는 멀리서 쏘는 만큼 전사보다 약하다', () => {
   for (const lv of [25, 55, 88]) {
     const war = dpsOf('warrior', lv);
     const arch = dpsOf('archer', lv);
-    assert.ok(arch.base <= 0.9 * war.base, `${lv}레벨 궁수 ${arch.base.toFixed(0)} / 전사 ${war.base.toFixed(0)}`);
-    assert.ok(arch.buffed <= 0.9 * war.buffed, `${lv}레벨 궁수(강화) ${arch.buffed.toFixed(0)} / 전사 ${war.buffed.toFixed(0)}`);
+    assert.ok(arch.base <= 0.9 * war.base, `${lv}레벨 궁사 ${arch.base.toFixed(0)} / 전사 ${war.base.toFixed(0)}`);
+    assert.ok(arch.buffed <= 0.9 * war.buffed, `${lv}레벨 궁사(강화) ${arch.buffed.toFixed(0)} / 전사 ${war.buffed.toFixed(0)}`);
   }
   for (let lv = 10; lv <= 99; lv++) {
     for (const k of ['base', 'buffed'] as const) {
@@ -346,7 +346,7 @@ test('새 근접·원거리 직업의 피해는 기존 직업과 비슷하고, �
       // 수인은 계통(포유류·조류·파충류)마다 따로: 어느 계통을 골라도 같은 범위 안
       for (const kit of NEW_PHYSICAL.flatMap(kitsOf)) {
         const v = dpsOf(kit, lv)[k];
-        // 궁수는 기존 직업 중 가장 센 직업을 넘지 않고, 수인·검투사는 10% 넘게 앞서지 않는다
+        // 궁사는 기존 직업 중 가장 센 직업을 넘지 않고, 수인·검투사는 10% 넘게 앞서지 않는다
         const cap = kit.cls === 'archer' ? 1 : 1.1;
         assert.ok(v <= cap * best, `${lv}레벨 ${kit.label}(${k}) ${v.toFixed(0)} / 기존 최고 ${best.toFixed(0)}`);
         assert.ok(v >= 0.8 * worst, `${lv}레벨 ${kit.label}(${k}) ${v.toFixed(0)} / 기존 최저 ${worst.toFixed(0)}`);
