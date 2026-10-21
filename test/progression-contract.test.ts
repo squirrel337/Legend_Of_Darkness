@@ -149,6 +149,11 @@ test('설계 검사는 없는 id, 선수과목 순환, 범위 밖 값, 알 수 �
   assert.ok(has(errorsOf((d) => d.progression.ascend.conditions.rogue.push({ type: 'skillProf', ability: 'nope', min: 100 })), /nope/));
   assert.ok(has(errorsOf((d) => delete (d.skillTrees.trees as Partial<SkillTreesConfig['trees']>).bard), /skilltrees\.json\(bard\).*트리가 없습니다/));
   assert.ok(has(errorsOf((d) => (d.progression.rebirth as unknown as Record<string, unknown>).allowAfterAscended = true), /allowAfterAscended/));
+  // 무도가 규칙(편집기에서 잠긴 정해진 규칙)은 서버도 지킴: API 로 바로 저장하거나 되돌리거나 파일을 손으로 고쳐도 거절
+  assert.ok(has(errorsOf((d) => d.progression.rebirth.targets.warrior.push('monk')), /rebirth\.targets\.warrior.*무도가\(으\)로 전직할 수 없습니다/));
+  assert.ok(has(errorsOf((d) => d.progression.rebirth.targets.monk.push('warrior')), /rebirth\.targets\.monk.*무도가\(으\)로만 다시 태어납니다/));
+  assert.ok(has(errorsOf((d) => (d.progression.rebirth.targets.monk = [])), /rebirth\.targets\.monk/));
+  assert.ok(has(errorsOf((d) => (d.progression.rebirth.targets.monk = ['rogue'])), /rebirth\.targets\.monk/));
   // 2차 직업 트리는 필요 어빌, 계통은 수인 트리에서만, 같은 칸에 두 기술은 안 됨
   assert.ok(
     has(

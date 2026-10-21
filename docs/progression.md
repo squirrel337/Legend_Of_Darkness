@@ -129,7 +129,7 @@
 - 조건 `Condition` (모두 채워야 함, 쓰는 조건은 전부 확인한 뒤에만 한꺼번에 씀):
   `level{min}` · `ascended` · `rebirths{min}` · `pureHp{min}` · `pureMp{min}` · `exp{min, consume}` · `payHp{amount}` · `payMp{amount}` · `gold{min, consume}` · `item{item, qty, consume}` · `skillProf{ability, min}`.
   확인 결과는 `ConditionCheck { ok, results: ConditionResult[] }`, 설명 글은 `describeCondition`. 같은 종류의 쓰는 조건이 여럿이면 합친 양을 채워야 합니다.
-- `progression.json` = `ProgressionConfig`: `rebirth{level, restartLevel, allowAfterAscend, targets, conditions, names}`, `ascend{level, expTrade{exp,hp,mp}, hpToStat{hp,stat}, conditions, title}`, `second{from, conditions, beastTypes[{id,name}]}`, `ability{maxLevel, expRatio, hpPerLevel, mpPerLevel}`, `proficiency{max, baseChance, slowdown, minChance, effectMin, effectMax}`. 직업별 항목은 1차 직업 다섯(전직·승급), 2차 직업 다섯(2차 전직)이 빠짐없이 있어야 합니다.
+- `progression.json` = `ProgressionConfig`: `rebirth{level, restartLevel, allowAfterAscend, targets, conditions, names}`, `ascend{level, expTrade{exp,hp,mp}, hpToStat{hp,stat}, conditions, title}`, `second{from, conditions, beastTypes[{id,name}]}`, `ability{maxLevel, expRatio, hpPerLevel, mpPerLevel}`, `proficiency{max, baseChance, slowdown, minChance, effectMin, effectMax}`. 직업별 항목은 1차 직업 다섯(전직·승급), 2차 직업 다섯(2차 전직)이 빠짐없이 있어야 합니다. 무도가 규칙(`rebirth.targets.monk` 는 `["monk"]`, 다른 직업의 `targets` 에는 무도가가 없음)은 편집기에서 잠겨 있고, 서버 검사도 오류로 막습니다 (API 로 바로 저장·되돌리기·손으로 고친 파일도).
 - `skilltrees.json` = `SkillTreesConfig { version: 1, trees: { <평민 포함 모든 직업>: { columns?, nodes } } }`. 노드 하나:
   ```json
   {"ability":"w_cleave","row":4,"col":0,"level":35,"gold":12000,"items":[{"item":"mat_orc_tusk","qty":3}],"requires":[{"ability":"w_whirl","prof":50}]}

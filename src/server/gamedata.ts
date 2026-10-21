@@ -686,7 +686,12 @@ export function checkProgression(raw: unknown, refs: DesignRefs): DesignIssue[] 
     boolField(out, 'rebirth', rb, 'allowAfterAscend');
     perClass(out, refs, 'rebirth.targets', rb.targets, FIRST_CLASSES, (v, w, id) => {
       classList(out, refs, w, v, FIRST_CLASSES);
-      if (Array.isArray(v) && v.length === 0) out.warn(w, `${designClassName(refs, id)}은(는) 전직할 수 없습니다 (갈 수 있는 직업이 없음).`);
+      // 정해진 규칙 (편집기에서도 잠김): 무도가는 환골탈태로 무도가로만, 다른 직업은 무도가로 전직할 수 없음
+      if (Array.isArray(v) && id === 'monk' && !(v.length === 1 && v[0] === 'monk'))
+        out.error(w, `${designClassName(refs, 'monk')}은(는) 환골탈태로 ${designClassName(refs, 'monk')}(으)로만 다시 태어납니다. (["monk"] 여야 하는 정해진 규칙)`);
+      else if (Array.isArray(v) && id !== 'monk' && v.includes('monk'))
+        out.error(w, `${designClassName(refs, id)}은(는) ${designClassName(refs, 'monk')}(으)로 전직할 수 없습니다. (정해진 규칙)`);
+      else if (Array.isArray(v) && v.length === 0) out.warn(w, `${designClassName(refs, id)}은(는) 전직할 수 없습니다 (갈 수 있는 직업이 없음).`);
     });
     perClass(out, refs, 'rebirth.conditions', rb.conditions, FIRST_CLASSES, conditionList);
     perClass(out, refs, 'rebirth.names', rb.names, FIRST_CLASSES, (v, w) => {
