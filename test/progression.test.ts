@@ -197,6 +197,64 @@ test('조건: 종류마다 채움/모자람을 따로 판정하고, 확인만으
   assert.deepEqual(d.stats, before.stats);
 });
 
+test('조건: 행동(승급)에 모든 종류의 조건을 걸면, 하나라도 모자랄 때 아무것도 쓰지 않고 다 채우면 쓰는 것만 한 번 쓴다', () => {
+  const local = GameData.load(DIR);
+  local.progression.ascend.conditions.warrior = [
+    { type: 'level', min: 99 },
+    { type: 'rebirths', min: 2 },
+    { type: 'pureHp', min: 14_000 },
+    { type: 'pureMp', min: 3500 },
+    { type: 'exp', min: 7000, consume: true },
+    { type: 'payHp', amount: 300 },
+    { type: 'payMp', amount: 200 },
+    { type: 'gold', min: 5000, consume: true },
+    { type: 'gold', min: 1000, consume: false },
+    { type: 'item', item: 'mat_bone', qty: 3, consume: true },
+    { type: 'item', item: 'mat_web', qty: 1, consume: false },
+    { type: 'skillProf', ability: 'w_strike', min: 60 },
+  ];
+  const good = (): CharacterData => {
+    const d = readyWarrior({ exp: 7000, gold: 5000, rebirths: 2, prof: { first_aid: 100, w_strike: 60, w_ironwall: 100 } });
+    addItem(d, gd.items.get('mat_bone')!, 3);
+    addItem(d, gd.items.get('mat_web')!, 1);
+    return d;
+  };
+  const breakers: [string, (x: CharacterData) => void][] = [
+    ['레벨', (x) => (x.level = 98)],
+    ['전직 횟수', (x) => (x.rebirths = 1)],
+    ['순수 체력', (x) => (x.bonusHp = 7000)],
+    ['순수 마력', (x) => (x.bonusMp = 2000)],
+    ['경험치', (x) => (x.exp = 6999)],
+    ['바칠 체력', (x) => ((x.stats.con = 3), (x.bonusHp = 0))],
+    ['바칠 마력', (x) => ((x.stats.wis = 3), (x.bonusMp = 0))],
+    ['골드', (x) => (x.gold = 4999)],
+    ['재료', (x) => (x.inventory = x.inventory.map((s) => (s?.item === 'mat_bone' ? { ...s, qty: 2 } : s)))],
+    ['보여 줄 아이템', (x) => (x.inventory = x.inventory.map((s) => (s?.item === 'mat_web' ? null : s)))],
+    ['숙련도', (x) => (x.prof.w_strike = 59)],
+  ];
+  for (const [what, brk] of breakers) {
+    const d = good();
+    brk(d);
+    const before = clone(d);
+    const r = ascendOnData(d, local);
+    assert.equal(r.ok, false, what);
+    assert.deepEqual(d, before, `${what}: 아무것도 쓰지 않음`);
+  }
+  const d = good();
+  const before = clone(d);
+  const r = ascendOnData(d, local);
+  assert.equal(r.ok, true, r.msg);
+  assert.equal(d.exp, 0);
+  assert.equal(d.bonusHp, before.bonusHp - 300);
+  assert.equal(d.bonusMp, before.bonusMp - 200);
+  assert.equal(d.gold, 0, '쓰는 골드 조건만 냄');
+  assert.equal(countItem(d, 'mat_bone'), 0);
+  assert.equal(countItem(d, 'mat_web'), 1, '쓰지 않는 아이템 조건은 그대로');
+  assert.equal(d.prof.w_strike, 60);
+  assert.equal(d.rebirths, 2);
+  assert.equal(d.level, 99);
+});
+
 test('조건: 같은 종류의 쓰는 조건이 여럿이면 합친 양을 채워야 한다 (한꺼번에 써도 음수가 되지 않게)', () => {
   const d = readyWarrior({ exp: 1200, gold: 1000 });
   const twice: Condition[] = [
