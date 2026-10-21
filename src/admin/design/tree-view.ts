@@ -11,8 +11,6 @@ import { parseWhere, type DesignStore } from './state';
 import { cellPos, COLW, edgeRoute, GUT, NH, nodeBox, NW, ROWH, TOP } from './grid';
 import { clamp, josa, shortGold, svg } from './util';
 
-export { cellPos, COLW, GUT, NH, NW, ROWH, TOP } from './grid';
-
 /** 그릴 줄·칸 수: 놓인 노드보다 한 줄·한 칸 더 (옮길 자리) */
 export function gridSize(tree: SkillTreeConfig): { rows: number; cols: number } {
   let maxRow = -1;
