@@ -1,0 +1,815 @@
+/* 어둠의 전설 — 성장 체계 화면: 숙련도 막대, 길드장 배우기 창, 스킬트리 창(K), 칭호·어빌 표시.
+   색과 글꼴은 style.css 의 변수(--gold, --text …)를 그대로 씁니다. */
+
+:root {
+  /* 스킬트리 창: 원작의 가죽·금색 (관리자 편집기의 "게임 화면 미리보기"와 같은 색) */
+  --g-bg: #1b1109;
+  --g-panel: #2c1b0f;
+  --g-line: #7a5a2a;
+  --g-gold: #e0b84a;
+  --g-ink: #f3e7c9;
+  --g-dim: #7d6a4c;
+  --g-lock: #3a2b1c;
+  --g-glow: #ffd86b;
+  /* 어빌 경험치 (일반 경험치의 금색과 구별되는 하늘색) */
+  --abil: #9fe8ff;
+  --abil-dk: #2f86b0;
+  --req-ok: #9fe8a8;
+  --req-bad: #ffab9c;
+}
+
+/* ───────── 아래 칸: 기술·마법의 숙련도 막대 ───────── */
+
+.slot .prof-bar {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 1px;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.75);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.slot .prof-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a8742a, #f0c860);
+}
+
+.slot .prof-bar.max i {
+  background: linear-gradient(90deg, #ffe58a, #fff6d0);
+  box-shadow: 0 0 4px rgba(255, 230, 140, 0.9);
+}
+
+/* 숙련도가 오른 칸: 잠깐 금빛 */
+.slot.prof-up {
+  animation: prof-up 0.7s ease-out;
+}
+
+@keyframes prof-up {
+  0% {
+    box-shadow: inset 0 0 0 2px var(--g-glow), 0 0 10px rgba(255, 216, 107, 0.9);
+  }
+  100% {
+    box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.65), inset -1px -1px 0 rgba(255, 214, 160, 0.13);
+  }
+}
+
+/* ───────── 툴팁: 숙련도와 배우는 조건 ───────── */
+
+.tt-prof {
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 1px solid rgba(217, 180, 90, 0.25);
+}
+
+.tt-prof-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gold-2);
+}
+
+.tt-prof-bar {
+  flex: 1;
+  height: 5px;
+  min-width: 60px;
+  background: #0b0502;
+  border: 1px solid #3a2410;
+}
+
+.tt-prof-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a8742a, #f0c860);
+}
+
+.tt-prof-bar.max i {
+  background: linear-gradient(90deg, #ffe58a, #fff6d0);
+}
+
+.tt-prof-sub {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tt-reqs {
+  margin-top: 4px;
+}
+
+.tt-ok {
+  color: var(--req-ok);
+}
+
+/* ───────── 상태 줄·능력치 칸·캐릭터 창: 칭호와 어빌 ───────── */
+
+.st-level.master {
+  color: #ffe6a0;
+}
+
+.st-abil b {
+  font-weight: normal;
+  color: var(--abil);
+}
+
+.exp-bar.abil {
+  width: 70px;
+}
+
+.exp-bar.abil i {
+  background: linear-gradient(#d8f6ff, var(--abil-dk));
+}
+
+.bar-fill.abil {
+  background: linear-gradient(#d8f6ff, var(--abil-dk));
+}
+
+.title-badge,
+.char-title {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 14px;
+  font-style: normal;
+  font-weight: bold;
+  color: #2a1606;
+  background: linear-gradient(#f6dc8c, #c29238);
+  border: 1px solid #3a2408;
+  border-radius: 3px;
+  vertical-align: 2px;
+  letter-spacing: 1px;
+}
+
+.char-title {
+  margin: 0 0 1px;
+}
+
+.char-abil {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.char-abil .bar {
+  flex: 1;
+}
+
+@media (max-width: 900px) {
+  .st-abil {
+    display: none;
+  }
+}
+
+/* ───────── 길드장의 기술 배우기 창 ───────── */
+
+.win-learn {
+  width: 580px;
+}
+
+.learn-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.learn-head .shop-gold {
+  margin: 0;
+}
+
+.learn-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.learn-filter {
+  margin-left: auto;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.learn-filter input {
+  padding: 0;
+  margin: 0 2px 0 0;
+  box-shadow: none;
+}
+
+.learn-list {
+  gap: 3px;
+  max-height: 52vh;
+}
+
+.learn-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 8px;
+  padding: 4px 6px;
+  background: rgba(16, 8, 3, 0.4);
+  border: 1px solid rgba(18, 9, 4, 0.7);
+  border-radius: 3px;
+}
+
+.learn-row:hover {
+  background: rgba(217, 180, 90, 0.12);
+}
+
+.learn-row img {
+  border: 1px solid #0b0502;
+}
+
+.learn-row.learnable {
+  border-color: rgba(224, 184, 74, 0.7);
+  box-shadow: inset 0 0 10px rgba(255, 210, 120, 0.12);
+}
+
+.learn-row.learned {
+  opacity: 0.62;
+}
+
+.learn-row.locked .learn-name {
+  color: #c7ab8c;
+}
+
+.learn-name {
+  min-width: 0;
+}
+
+.learn-name small {
+  color: var(--muted);
+}
+
+.learn-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.learn-reqs {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+/* 조건 하나: 채움은 초록, 모자람은 빨강 (✓/✗ 도 함께 적어 색만으로 구별하지 않게) */
+.req {
+  display: inline-block;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+  border: 1px solid;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.req.met {
+  color: var(--req-ok);
+  border-color: rgba(120, 220, 140, 0.35);
+  background: rgba(40, 90, 50, 0.25);
+}
+
+.req.unmet {
+  color: var(--req-bad);
+  border-color: rgba(255, 120, 100, 0.45);
+  background: rgba(120, 30, 20, 0.3);
+}
+
+.learn-prof {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--gold-2);
+}
+
+.learn-prof i {
+  display: inline-block;
+  width: 42px;
+  height: 5px;
+  background: #0b0502;
+  border: 1px solid #3a2410;
+}
+
+.learn-prof i b {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a8742a, #f0c860);
+}
+
+.learn-prof.max i b {
+  background: linear-gradient(90deg, #ffe58a, #fff6d0);
+}
+
+.win-learn .hint {
+  margin-top: 8px;
+}
+
+.hint .dim,
+.gt-hint .dim {
+  color: var(--dim);
+}
+
+/* ───────── 스킬트리 창 (K) ───────── */
+
+.win-tree {
+  width: min(840px, calc(100vw - 24px));
+  max-width: none;
+}
+
+.win-tree .win-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+  padding: 9px 11px 11px;
+  overflow: hidden;
+}
+
+.gt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gt-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.gt-tab {
+  padding: 3px 11px;
+  font-size: 12px;
+  color: #ead7ae;
+  background: linear-gradient(#7a5230, #4e3019 60%, #432812);
+  border: 1px solid #140a04;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 225, 170, 0.3);
+  cursor: pointer;
+}
+
+.gt-tab small {
+  color: var(--muted);
+}
+
+.gt-tab:hover {
+  color: #fff;
+}
+
+.gt-tab.active {
+  color: #2a1606;
+  background: linear-gradient(#f0cf78, #c29238 60%, #9c7128);
+  box-shadow: inset 0 1px 0 rgba(255, 245, 210, 0.6), 0 0 6px rgba(255, 210, 120, 0.4);
+}
+
+.gt-tab.active small {
+  color: #5a3a10;
+}
+
+.gt-other {
+  margin-left: auto;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.gt-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--g-ink);
+  background: var(--g-panel);
+  border: 1px solid var(--g-line);
+  border-radius: 3px;
+}
+
+.gt-legend {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.gt-legend .lg {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-left: 6px;
+  border: 2px solid;
+  border-radius: 2px;
+}
+
+.gt-legend .lg.learned {
+  border-color: var(--g-glow);
+  background: #8a5a28;
+}
+
+.gt-legend .lg.learnable {
+  border-color: var(--g-gold);
+  background: var(--g-lock);
+  box-shadow: 0 0 5px rgba(255, 216, 107, 0.6);
+}
+
+.gt-legend .lg.locked {
+  border-color: #4a3620;
+  background: var(--g-lock);
+}
+
+.gt-note {
+  padding: 3px 9px;
+  font-size: 12px;
+  color: #ffdca0;
+  background: rgba(120, 70, 20, 0.25);
+  border-left: 3px solid var(--g-gold);
+}
+
+.gt-empty {
+  padding: 30px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.gt-board-wrap {
+  flex: 1 1 auto;
+  min-height: 140px;
+  max-height: calc(100vh - var(--hud-h) - 300px);
+  overflow: auto;
+  background: radial-gradient(ellipse at center, #2a1a0d 0%, #140c06 100%);
+  border: 1px solid var(--g-line);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px #000, inset 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+.gt-board {
+  position: relative;
+  margin: 0 auto;
+}
+
+.gt-lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.gt-lines path {
+  fill: none;
+  stroke: #57401f;
+  stroke-width: 2;
+}
+
+.gt-lines path.on {
+  stroke: var(--g-gold);
+}
+
+.gt-lines path.hl {
+  stroke: #fff1b8;
+  stroke-width: 3;
+}
+
+.gt-rowlabel {
+  position: absolute;
+  left: 6px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: #a08a5e;
+  white-space: nowrap;
+}
+
+.gt-colhead {
+  position: absolute;
+  top: 7px;
+  transform: translateX(-50%);
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--g-gold);
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(217, 180, 90, 0.35);
+}
+
+.gt-colhead.beast {
+  border: 1px solid;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.gt-colhead.mine {
+  background: rgba(255, 216, 107, 0.16);
+  box-shadow: 0 0 6px rgba(255, 216, 107, 0.45);
+}
+
+.gt-colhead.other {
+  opacity: 0.4;
+}
+
+.gt-node {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 2px solid #4a3620;
+  border-radius: 5px;
+  background: var(--g-lock);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.gt-node img {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 3px;
+}
+
+.gt-node.locked img {
+  filter: grayscale(1) brightness(0.45) contrast(0.9);
+}
+
+.gt-node.learnable {
+  border-color: var(--g-gold);
+  box-shadow: 0 0 10px rgba(255, 216, 107, 0.4);
+  animation: gt-glow 1.6s ease-in-out infinite alternate;
+}
+
+.gt-node.learnable img {
+  filter: brightness(0.85);
+}
+
+.gt-node.learned {
+  border-color: var(--g-glow);
+  box-shadow: 0 0 0 1px #000, 0 0 8px rgba(255, 210, 120, 0.3);
+}
+
+.gt-node.other {
+  opacity: 0.35;
+}
+
+.gt-node:hover,
+.gt-node:focus-visible {
+  outline: none;
+  border-color: #fff1b8;
+}
+
+.gt-node.pinned {
+  outline: 2px solid #fff3c4;
+  outline-offset: 2px;
+}
+
+@keyframes gt-glow {
+  from {
+    box-shadow: 0 0 4px rgba(255, 216, 107, 0.25);
+  }
+  to {
+    box-shadow: 0 0 12px rgba(255, 216, 107, 0.65);
+  }
+}
+
+.gt-missing {
+  color: var(--g-dim);
+  font-size: 18px;
+}
+
+.gt-profbar {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 2px;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.gt-profbar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a8742a, #f0c860);
+}
+
+.gt-profbar.max i {
+  background: linear-gradient(90deg, #ffe58a, #fff6d0);
+}
+
+.gt-prof {
+  position: absolute;
+  right: -8px;
+  bottom: -7px;
+  min-width: 17px;
+  padding: 0 3px;
+  font-size: 10px;
+  font-weight: bold;
+  line-height: 13px;
+  color: var(--g-glow);
+  background: #000;
+  border: 1px solid var(--g-line);
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gt-prof.max {
+  color: #2a1606;
+  background: linear-gradient(#ffe58a, #c9922a);
+  border-color: #3a2408;
+}
+
+/* 다른 트리에 있는 선수과목 (예: 소환사 ← 마법사의 마력 집중) */
+.gt-ext {
+  position: absolute;
+  left: -9px;
+  top: -9px;
+  width: 20px;
+  height: 20px;
+  background: #000;
+  border: 1px solid var(--g-line);
+  border-radius: 3px;
+}
+
+.gt-ext img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.gt-ext.on {
+  border-color: var(--g-glow);
+}
+
+.gt-ext.off img {
+  filter: grayscale(1) brightness(0.6);
+}
+
+.gt-ext b {
+  position: absolute;
+  left: 13px;
+  top: -6px;
+  font-size: 9px;
+  color: var(--g-ink);
+  text-shadow: 0 0 2px #000;
+}
+
+.gt-beast {
+  position: absolute;
+  right: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #000;
+  border-radius: 50%;
+}
+
+.gt-name {
+  position: absolute;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92px;
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--g-ink);
+  background: rgba(20, 12, 6, 0.85);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.gt-node.locked .gt-name {
+  color: #9c8662;
+}
+
+/* 선 위의 필요 숙련도 */
+.gt-req {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 13px;
+  color: #a8916a;
+  background: #1a0f06;
+  border: 1px solid #57401f;
+  border-radius: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gt-req.on {
+  color: var(--g-glow);
+  border-color: var(--g-gold);
+}
+
+/* 먼저 배웠지만 숙련도가 아직 모자람 */
+.gt-req.short {
+  color: var(--req-bad);
+  border-color: #8a3a2a;
+}
+
+/* 아래 정보 칸 (높이를 고정해 마우스를 옮길 때 창이 흔들리지 않게) */
+.gt-info {
+  display: flex;
+  gap: 10px;
+  height: 108px;
+  padding: 7px 10px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--g-ink);
+  background: var(--g-panel);
+  border: 1px solid var(--g-line);
+  border-radius: 3px;
+}
+
+.gt-info-icon {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #000;
+  border-radius: 3px;
+}
+
+.gt-info-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.gt-info-title {
+  color: var(--g-gold);
+  font-weight: bold;
+  font-size: 13px;
+}
+
+.gt-info-title small {
+  color: var(--muted);
+  font-weight: normal;
+  font-size: 11px;
+}
+
+.gt-state b {
+  font-weight: bold;
+}
+
+.gt-state.learned b {
+  color: var(--g-glow);
+}
+
+.gt-state.learnable b {
+  color: var(--req-ok);
+}
+
+.gt-state.locked b {
+  color: var(--req-bad);
+}
+
+.gt-bar {
+  display: inline-block;
+  width: 70px;
+  height: 6px;
+  vertical-align: 1px;
+  background: #0b0502;
+  border: 1px solid #3a2410;
+}
+
+.gt-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a8742a, #f0c860);
+}
+
+.gt-bar.max i {
+  background: linear-gradient(90deg, #ffe58a, #fff6d0);
+}
+
+.gt-reqs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 3px 0;
+}
+
+.gt-desc {
+  color: #e4d6b8;
+}
+
+.gt-desc small {
+  color: var(--muted);
+}
+
+.gt-hint {
+  color: var(--g-ink);
+}
+
+@media (max-width: 720px) {
+  .gt-legend {
+    display: none;
+  }
+  .win-learn {
+    width: calc(100vw - 24px);
+  }
+}
