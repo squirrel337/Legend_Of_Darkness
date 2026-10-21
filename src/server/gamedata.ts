@@ -970,3 +970,120 @@ function pickPatch(p: AbilityPatch): Partial<AbilityDef> {
   if (p.cooldownMs !== undefined) o.cooldownMs = p.cooldownMs;
   return o;
 }
+
+// ───────────────────────── 설계 파일 쓰기 모양 ─────────────────────────
+// 관리자 편집기가 gamedata/ 에 다시 쓸 때 지금 파일과 같은 모양으로 써서, 바꾼 곳만 git 차이로 보이게 합니다.
+
+/** 배열 파일(abilities.json, items.json …): 한 줄에 항목 하나. 지금 파일을 그대로 다시 만듭니다 */
+export function formatListFile(list: readonly unknown[]): string {
+  return `[\n${list.map((x) => `  ${JSON.stringify(x)}`).join(',\n')}\n]\n`;
+}
+
+/** 스킬트리 노드의 항목 순서 (파일에 쓸 때) */
+function canonNode(n: SkillTreeNode): SkillTreeNode {
+  return {
+    ability: n.ability,
+    row: n.row,
+    col: n.col,
+    ...(n.level !== undefined ? { level: n.level } : {}),
+    ...(n.abilityLevel !== undefined ? { abilityLevel: n.abilityLevel } : {}),
+    gold: n.gold,
+    items: n.items.map((x) => ({ item: x.item, qty: x.qty })),
+    requires: n.requires.map((x) => ({ ability: x.ability, prof: x.prof })),
+    ...(n.stats ? { stats: Object.fromEntries(STAT_KEY_ORDER.filter((k) => n.stats![k] !== undefined).map((k) => [k, n.stats![k]])) } : {}),
+    ...(n.beastType !== undefined ? { beastType: n.beastType } : {}),
+  };
+}
+
+const STAT_KEY_ORDER = ['str', 'int', 'wis', 'con', 'dex'] as const;
+
+/** skilltrees.json: 직업 순서대로, 노드 한 줄에 하나 */
+export function formatSkillTrees(cfg: SkillTreesConfig): string {
+  const lines = ['{', '  "version": 1,', '  "trees": {'];
+  CLASS_IDS.forEach((id, i) => {
+    const t = cfg.trees[id];
+    lines.push(`    ${JSON.stringify(id)}: {`);
+    if (t.columns) lines.push(`      "columns": ${JSON.stringify(t.columns)},`);
+    if (t.nodes.length === 0) lines.push('      "nodes": []');
+    else {
+      lines.push('      "nodes": [');
+      t.nodes.forEach((n, j) => lines.push(`        ${JSON.stringify(canonNode(n))}${j < t.nodes.length - 1 ? ',' : ''}`));
+      lines.push('      ]');
+    }
+    lines.push(`    }${i < CLASS_IDS.length - 1 ? ',' : ''}`);
+  });
+  lines.push('  }', '}', '');
+  return lines.join('\n');
+}
+
+/** 조건의 항목 순서 (type 먼저) */
+const CONDITION_KEY_ORDER = ['type', 'ability', 'item', 'min', 'qty', 'amount', 'consume'];
+
+function canonCondition(c: Condition): Condition {
+  const keys = Object.keys(c).sort((a, b) => CONDITION_KEY_ORDER.indexOf(a) - CONDITION_KEY_ORDER.indexOf(b));
+  return Object.fromEntries(keys.map((k) => [k, (c as unknown as Record<string, unknown>)[k]])) as unknown as Condition;
+}
+
+/** progression.json 의 항목 순서 (파일에 쓸 때) */
+function canonProgression(c: ProgressionConfig): ProgressionConfig {
+  const byClass = <K extends string, V>(keys: readonly K[], rec: Record<K, V>, f: (v: V) => V = (v) => v): Record<K, V> =>
+    Object.fromEntries(keys.map((k) => [k, f(rec[k])])) as Record<K, V>;
+  const conds = (list: Condition[]) => list.map(canonCondition);
+  return {
+    version: 1,
+    rebirth: {
+      level: c.rebirth.level,
+      restartLevel: c.rebirth.restartLevel,
+      allowAfterAscend: c.rebirth.allowAfterAscend,
+      names: byClass(FIRST_CLASSES, c.rebirth.names),
+      targets: byClass(FIRST_CLASSES, c.rebirth.targets),
+      conditions: byClass(FIRST_CLASSES, c.rebirth.conditions, conds),
+    },
+    ascend: {
+      level: c.ascend.level,
+      expTrade: { exp: c.ascend.expTrade.exp, hp: c.ascend.expTrade.hp, mp: c.ascend.expTrade.mp },
+      hpToStat: { hp: c.ascend.hpToStat.hp, stat: c.ascend.hpToStat.stat },
+      title: c.ascend.title,
+      conditions: byClass(FIRST_CLASSES, c.ascend.conditions, conds),
+    },
+    second: {
+      from: byClass(SECOND_CLASSES, c.second.from),
+      conditions: byClass(SECOND_CLASSES, c.second.conditions, conds),
+      beastTypes: c.second.beastTypes.map((b) => ({ id: b.id, name: b.name })),
+    },
+    ability: { maxLevel: c.ability.maxLevel, expRatio: c.ability.expRatio, hpPerLevel: c.ability.hpPerLevel, mpPerLevel: c.ability.mpPerLevel },
+    proficiency: {
+      max: c.proficiency.max,
+      baseChance: c.proficiency.baseChance,
+      slowdown: c.proficiency.slowdown,
+      minChance: c.proficiency.minChance,
+      effectMin: c.proficiency.effectMin,
+      effectMax: c.proficiency.effectMax,
+    },
+  };
+}
+
+/** 한 줄로 쓴 JSON ({ "a": 1, "b": [1, 2] } 모양) */
+function inlineJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(inlineJson).join(', ')}]`;
+  if (typeof v === 'object' && v !== null) {
+    const e = Object.entries(v);
+    return e.length ? `{ ${e.map(([k, x]) => `${JSON.stringify(k)}: ${inlineJson(x)}`).join(', ')} }` : '{}';
+  }
+  return JSON.stringify(v);
+}
+
+/** 한 줄(들여쓰기·이름 포함)이 width 글자 안이면 한 줄로, 넘으면 두 칸 들여쓰기로 펼칩니다 */
+function prettyJson(v: unknown, indent: string, prefixLen: number, width: number): string {
+  const one = inlineJson(v);
+  if (typeof v !== 'object' || v === null || indent.length + prefixLen + one.length <= width) return one;
+  const inner = `${indent}  `;
+  if (Array.isArray(v)) return `[\n${v.map((x) => inner + prettyJson(x, inner, 0, width)).join(',\n')}\n${indent}]`;
+  const lines = Object.entries(v).map(([k, x]) => `${inner}${JSON.stringify(k)}: ${prettyJson(x, inner, JSON.stringify(k).length + 2, width)}`);
+  return `{\n${lines.join(',\n')}\n${indent}}`;
+}
+
+/** progression.json: 항목 순서를 맞추고, 짧은 객체·배열은 한 줄로 */
+export function formatProgression(cfg: ProgressionConfig): string {
+  return `${prettyJson(canonProgression(cfg), '', 0, 120)}\n`;
+}

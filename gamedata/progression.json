@@ -130,5 +130,12 @@
     ]
   },
   "ability": { "maxLevel": 99, "expRatio": 0.25, "hpPerLevel": 30, "mpPerLevel": 15 },
-  "proficiency": { "max": 100, "baseChance": 0.35, "slowdown": 0.8, "minChance": 0.03, "effectMin": 0.7, "effectMax": 1.15 }
+  "proficiency": {
+    "max": 100,
+    "baseChance": 0.35,
+    "slowdown": 0.8,
+    "minChance": 0.03,
+    "effectMin": 0.7,
+    "effectMax": 1.15
+  }
 }

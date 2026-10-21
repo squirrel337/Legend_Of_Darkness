@@ -171,7 +171,7 @@ learnFromTree(data, gd, abilityId, { free? }): ProgressionResult
 // ProgressionResult = { ok, msg, check?: ConditionCheck }
 ```
 
-`src/server/gamedata.ts` — `gd.progression`, `gd.skillTrees` (설계가 바뀌면 통째로 바뀌므로 붙잡아 두지 말고 쓸 때마다 `world.data.…` 로 읽기), `gd.treeOf(직업)`, `gd.nodeOf(기술)`, `gd.designWarnings`, `gd.applyDesign({ progression?, skillTrees?, abilities?: AbilityPatch[] }): DesignIssue[]` (오류가 하나라도 있으면 아무것도 바꾸지 않음, 파일은 쓰지 않음), `gd.reloadDesign(dir)`, 검사 함수 `checkDesign`·`checkProgression`·`checkSkillTrees`·`checkAbilityPatches`, `normalizeSkillTrees`. 문제는 `DesignIssue { level: 'error' | 'warn', where: "skilltrees.json(warrior/w_whirl)", msg }`.
+`src/server/gamedata.ts` — `gd.progression`, `gd.skillTrees` (설계가 바뀌면 통째로 바뀌므로 붙잡아 두지 말고 쓸 때마다 `world.data.…` 로 읽기), `gd.treeOf(직업)`, `gd.nodeOf(기술)`, `gd.designWarnings`, `gd.applyDesign({ progression?, skillTrees?, abilities?: AbilityPatch[] }): DesignIssue[]` (오류가 하나라도 있으면 아무것도 바꾸지 않음, 파일은 쓰지 않음), `gd.reloadDesign(dir)`, 검사 함수 `checkDesign`·`checkProgression`·`checkSkillTrees`·`checkAbilityPatches`, `normalizeSkillTrees`. 문제는 `DesignIssue { level: 'error' | 'warn', where: "skilltrees.json(warrior/w_whirl)", msg }`. 파일을 다시 쓸 때는 `formatSkillTrees`·`formatProgression`·`formatListFile`(abilities.json) 로 지금 파일과 같은 모양을 지킵니다 (바꾼 줄만 차이로 보임).
 
 `src/server/admin/design.ts` — `DesignApi.handle(method, path, readBody, actor) → { status, body } | null` (인증 뒤 `api.ts` 가 부름, 지금은 501):
 

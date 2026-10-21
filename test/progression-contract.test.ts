@@ -28,7 +28,7 @@ import {
 } from '../src/shared/progression';
 import type { DesignIssue } from '../src/shared/progression';
 import { startServer, type RunningServer } from '../src/server/app';
-import { checkDesign, GameData, GameDataError } from '../src/server/gamedata';
+import { checkDesign, formatListFile, formatProgression, formatSkillTrees, GameData, GameDataError } from '../src/server/gamedata';
 import { emptyEquipment, normalizeCharacter } from '../src/server/storage';
 import { learnOnData, setClassOnData } from '../src/server/systems/character';
 import { ADMIN_PW, Client, create, httpJson, testConfig } from './helpers';
@@ -214,6 +214,18 @@ test('applyDesign: 올바른 설계는 서버를 끄지 않고 바로 반영하�
   const badPatch = live.applyDesign({ abilities: [{ id: 'mon_poison', name: '독' }] });
   assert.ok(has(badPatch, /몬스터 전용/));
   assert.equal(live.abilities.get('mon_poison')!.name, '독침');
+});
+
+test('설계 파일 쓰기 모양: 지금 gamedata 파일을 글자 하나 다르지 않게 다시 만든다 (관리자 저장의 차이를 바꾼 줄로 줄이려고)', () => {
+  const text = (f: string) => fs.readFileSync(path.join(DIR, f), 'utf8');
+  assert.equal(formatSkillTrees(gd.skillTrees), text('skilltrees.json'));
+  assert.equal(formatProgression(gd.progression), text('progression.json'));
+  assert.equal(formatListFile([...gd.abilities.values()]), text('abilities.json'));
+  // 항목 순서가 달라도 같은 모양으로
+  const reverse = (o: object) => Object.fromEntries(Object.entries(o).reverse());
+  const shuffled = JSON.parse(JSON.stringify(gd.progression)) as ProgressionConfig;
+  const reordered = { ...reverse(shuffled), ascend: reverse(shuffled.ascend) } as ProgressionConfig;
+  assert.equal(formatProgression(reordered), text('progression.json'));
 });
 
 // ───────────────────────── 저장 파일 이전 ─────────────────────────
