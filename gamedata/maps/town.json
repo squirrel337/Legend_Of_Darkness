@@ -12,6 +12,7 @@
     {"npc":"temple_priest","x":21,"y":4,"dir":2},
     {"npc":"priest_master","x":24,"y":5,"dir":2},
     {"npc":"ascension","x":19,"y":5,"dir":2},
+    {"npc":"second_guide","x":19,"y":7,"dir":2},
     {"npc":"general_store","x":15,"y":23,"dir":0},
     {"npc":"weaponsmith","x":18,"y":23,"dir":0},
     {"npc":"armorsmith","x":25,"y":23,"dir":0},
