@@ -868,6 +868,13 @@
   .st-abil .exp-bar {
     width: 50px;
   }
+  /* 트리 단추가 늘어 메뉴 단추가 3줄이 되지 않게 (좁은 화면에서는 그림만 보임) */
+  .menu-btns {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .menu-btn {
+    height: 28px;
+  }
   .gt-legend {
     display: none;
   }
