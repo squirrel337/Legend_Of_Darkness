@@ -194,7 +194,7 @@ learnFromTree(data, gd, abilityId, { free? }): ProgressionResult
 - **2차 전직**: 지금 1차 직업 ∈ `second.from[대상]`, 조건(승급 포함) → 직업 = 대상, 어빌 1, 어빌 경험치 0, 수인만 계통, 레벨·능력치·기술·숙련도는 그대로, 못 입는 장비는 소지품으로. 2차 직업 인도자에게서. 계통이 없는 옛 수인은 인도자에게서 한 번 고릅니다.
 - **어빌 경험치**: 2차 직업이 몬스터를 잡아 받은 일반 경험치(배율·그룹 분배 뒤)의 `expRatio`. `abilityExpToNext` 만큼 모이면 어빌 레벨업, 어빌 만렙이면 더 쌓이지 않음. 체력·마나 보너스는 `vitalsBonus` 로 저절로 붙습니다.
 - **숙련도**: 기술·마법을 실제로 쓴 뒤 `profGainChance` 확률로 +1 (최대에서 멈춤), 오르면 `{ t: 'prof' }`. 배율 `profEffect` 는 피해(물리·마법·희생), 회복(체력·마나), 해로운 상태의 확률(chance 가 없으면 1로 보고 곱한 뒤 1에서 자름)에 곱합니다. 흡혈은 깎은 체력에 비례하므로 따로 곱하지 않고, 평타와 몬스터의 기술은 해당 없습니다.
-- **배우기**: `learnFromTree` 는 `learnStatus` 가 `learnable` 일 때 골드와 재료를 내고 `learnOnData`(숙련도 0). 운영자는 `free`.
+- **배우기**: `learnFromTree` 는 `learnStatus` 가 `learnable` 일 때 골드와 재료를 내고 `learnOnData`(숙련도 0). 운영자는 `free`. 길드장 창의 목록(`learnEntries`)은 이미 트리를 따르지만, `learnAbility` 메시지를 받는 `npc.ts` 의 `learn()` 은 아직 abilities.json 의 level/price 로 판정하므로 `learnFromTree` 로 바꿉니다.
 
 ### 8.7 트랙이 정하고 알릴 것
 
