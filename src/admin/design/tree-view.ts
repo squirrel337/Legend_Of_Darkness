@@ -255,6 +255,7 @@ function drawEdges(ctx: Ctx, el: SVGSVGElement, tree: SkillTreeConfig): void {
     );
   }
   el.append(defs);
+  const laneUse = new Map<number, number>();
   for (const n of tree.nodes) {
     for (const r of n.requires) {
       const p = tree.nodes.find((x) => x.ability === r.ability);
@@ -263,7 +264,7 @@ function drawEdges(ctx: Ctx, el: SVGSVGElement, tree: SkillTreeConfig): void {
       const b = cellPos(n.row, n.col);
       // 다른 노드 뒤로 지나가면 그 노드에서 나온 화살표처럼 보이므로 돌아가게 (grid.ts)
       const others = tree.nodes.filter((x) => x !== p && x !== n).map((x) => nodeBox(cellPos(x.row, x.col)));
-      const route = edgeRoute(a, b, others);
+      const route = edgeRoute(a, b, others, laneUse);
       const d = route.d;
       const sel = s.sel?.type === 'edge' && s.sel.from === p.ability && s.sel.to === n.ability;
       const late = s.need(cls, p) > s.need(cls, n);

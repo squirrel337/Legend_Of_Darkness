@@ -382,6 +382,8 @@ test('선수과목 선: 같은 열에서 사이 칸을 건너뛰면 열 사이�
   assert.ok(last.edges[0]!.d.includes(`L ${px + TREE_NODE / 2 - TREE_COL_W / 2} `), last.edges[0]!.d);
 });
 
+type Pt2 = { x: number; y: number };
+
 /** 선이 지나가는 다른 칸 (아이콘이나 그 밑의 이름표) */
 function crossed(lay: ReturnType<typeof layoutTree>): string[] {
   const out: string[] = [];
@@ -422,6 +424,42 @@ test('선수과목 선: 곧은 곡선이 다른 칸 뒤로 지나가면 (그 칸
   assert.ok(e.d.endsWith(`${shout.x + TREE_NODE / 2} ${shout.y}`), '도착 칸 위 가운데로 들어감');
   // 바로 아래 칸으로 가는 선은 그대로 곧은 곡선
   assert.ok(!lay.edges.find((x) => x.to === 'whirl')!.d.includes('L '));
+});
+
+test('선수과목 선: 돌아가는 선 둘이 같은 길을 쓰면 비켜 나란히 가서, 한 모서리에서 만나 이어진 선처럼 보이지 않는다', () => {
+  // 관리자가 함성을 돌격 열(회오리 베기와 돌진 사이)로 옮긴 경우: 강타 → 함성, 회오리 베기 → 돌진이 같은 길을 씀
+  const tree: SkillTreeConfig = {
+    nodes: [
+      node('strike', 0, 0),
+      node('whirl', 1, 0, { requires: [{ ability: 'strike', prof: 20 }] }),
+      node('shout', 2, 1, { requires: [{ ability: 'strike', prof: 30 }, { ability: 'whirl', prof: 20 }] }),
+      node('charge', 3, 1, { requires: [{ ability: 'whirl', prof: 40 }] }),
+      node('x', 0, 2),
+    ],
+  };
+  const lay = layoutTree(tree);
+  assert.deepEqual(crossed(lay), []);
+  /** 선의 곧은 토막들 (토막 끝점을 차례로 이은 것 중 가로·세로인 것) */
+  const straights = (d: string) => {
+    const ends = d
+      .split(/(?=[MLC])/)
+      .map((seg) => seg.match(/-?\d+(?:\.\d+)?/g)!.map(Number))
+      .map((n) => ({ x: n[n.length - 2]!, y: n[n.length - 1]! }));
+    return ends.slice(1).map((p, i) => [ends[i]!, p] as const).filter(([p, q]) => p.x === q.x || p.y === q.y);
+  };
+  /** 두 곧은 토막이 같은 줄 위에서 겹치거나 끝이 닿는지 */
+  const touch = ([p, q]: readonly [Pt2, Pt2], [r, t]: readonly [Pt2, Pt2]) => {
+    const lo = (u: number, v: number) => Math.min(u, v);
+    const hi = (u: number, v: number) => Math.max(u, v);
+    if (p.x === q.x && r.x === t.x && p.x === r.x) return lo(p.y, q.y) <= hi(r.y, t.y) && lo(r.y, t.y) <= hi(p.y, q.y);
+    if (p.y === q.y && r.y === t.y && p.y === r.y) return lo(p.x, q.x) <= hi(r.x, t.x) && lo(r.x, t.x) <= hi(p.x, q.x);
+    return [p, q].some((u) => [r, t].some((v) => u.x === v.x && u.y === v.y));
+  };
+  const a = lay.edges.find((e) => e.from === 'strike' && e.to === 'shout')!;
+  const b = lay.edges.find((e) => e.from === 'whirl' && e.to === 'charge')!;
+  assert.ok(a.d.includes(' L ') && b.d.includes(' L '), '둘 다 돌아감');
+  for (const sa of straights(a.d)) for (const sb of straights(b.d)) assert.ok(!touch(sa, sb), `${JSON.stringify(sa)} / ${JSON.stringify(sb)}`);
+  assert.notEqual(a.badge.x, b.badge.x);
 });
 
 test('실제 스킬트리: K 창의 선수과목 선은 다른 칸(아이콘·이름표)을 지나지 않는다', () => {

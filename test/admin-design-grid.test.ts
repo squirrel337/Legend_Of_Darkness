@@ -60,6 +60,27 @@ test('편집기 화살표: 곧은 곡선이 다른 노드 뒤로 지나가면 �
   assert.equal(edgeRoute(a, b, [nodeBox(cellPos(0, 3))]).d, straight.d);
 });
 
+test('편집기 화살표: 돌아가는 화살표 둘이 같은 길을 쓰면 비켜 나란히 간다', () => {
+  const nodes = [
+    node('strike', 0, 0),
+    node('whirl', 1, 0, [{ ability: 'strike', prof: 20 }]),
+    node('shout', 2, 1, [
+      { ability: 'strike', prof: 30 },
+      { ability: 'whirl', prof: 20 },
+    ]),
+    node('charge', 3, 1, [{ ability: 'whirl', prof: 40 }]),
+  ];
+  assert.deepEqual(crossed(nodes), []);
+  const laneUse = new Map<number, number>();
+  const boxes = (except: string[]) => nodes.filter((x) => !except.includes(x.ability)).map((x) => nodeBox(cellPos(x.row, x.col)));
+  const r1 = edgeRoute(cellPos(0, 0), cellPos(2, 1), boxes(['strike', 'shout']), laneUse);
+  const r2 = edgeRoute(cellPos(1, 0), cellPos(3, 1), boxes(['whirl', 'charge']), laneUse);
+  const lane = cellPos(2, 1).x + NW / 2 - COLW / 2;
+  assert.ok(r1.d.includes(`L ${lane} `), r1.d);
+  assert.ok(!r2.d.includes(`L ${lane} `), r2.d);
+  assert.ok(r2.d.includes(`L ${lane - 4} `), r2.d);
+});
+
 test('편집기 화살표: 실제 스킬트리의 모든 직업에서 다른 노드를 지나지 않는다', () => {
   const trees = JSON.parse(fs.readFileSync(path.join(ROOT, 'gamedata', 'skilltrees.json'), 'utf8')) as SkillTreesConfig;
   for (const [cls, tree] of Object.entries(trees.trees)) assert.deepEqual(crossed(tree.nodes), [], cls);

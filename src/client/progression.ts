@@ -334,10 +334,11 @@ const TREE_GAP_MID = (TREE_ROW_H - TREE_NODE - TREE_LABEL_H) / 2;
 /**
  * 곧은 곡선이 다른 칸에 걸릴 때 돌아가는 선: 출발 칸 밑의 줄 사이 틈 → 도착 칸 옆의 열 사이 길 → 도착 칸 위의 틈 → 도착 칸 위 가운데.
  * 틈과 길에는 칸이 없어 다른 칸을 지나지 않습니다. 필요 숙련도는 도착 칸 가까운 길 위(길이 없으면 틈 위)에.
- * 길은 도착 칸의 옆 중 출발 칸 쪽 (같은 열이면 side: 1 오른쪽, -1 왼쪽).
+ * 길은 도착 칸의 옆 중 출발 칸 쪽 (같은 열이면 side: 1 오른쪽, -1 왼쪽, detourLane). 같은 길을 여러 선이 쓰면
+ * shift 만큼 비켜 나란히 가게 해서, 두 선이 한 모서리에서 만나 서로 이어진 선처럼 보이지 않게 합니다.
  * 같은 줄이면 줄 위의 틈으로, 아래 줄에서 위 줄로(편집기에서 거꾸로 놓은 경우)는 위아래를 바꿔 갑니다.
  */
-export function detourGeometry(a: Pt, b: Pt, node = TREE_NODE, side: 1 | -1 = 1): { d: string; badge: Pt } {
+export function detourGeometry(a: Pt, b: Pt, node = TREE_NODE, side: 1 | -1 = 1, shift = 0): { d: string; badge: Pt } {
   const half = node / 2;
   const ax = a.x + half;
   const bx = b.x + half;
@@ -361,11 +362,21 @@ export function detourGeometry(a: Pt, b: Pt, node = TREE_NODE, side: 1 | -1 = 1)
     gapA = a.y - TREE_GAP_MID;
     gapB = b.y + node + TREE_LABEL_H + TREE_GAP_MID;
   }
-  const lane = bx + (ax < bx ? -1 : ax > bx ? 1 : side) * (TREE_COL_W / 2);
+  const lane = detourLane(a, b, node, side) + shift;
   const d = roundedPath(detourPoints(start, gapA, end, gapB, lane), 6);
   const badge = gapA === gapB ? { x: (ax + bx) / 2, y: gapA } : { x: lane, y: gapB + (gapB > gapA ? -14 : 14) };
   return { d, badge: { x: Math.round(badge.x * 10) / 10, y: Math.round(badge.y * 10) / 10 } };
 }
+
+/** 돌아가는 선이 지나는 열 사이 길의 x: 도착 칸 옆 중 출발 칸 쪽 (같은 열이면 side 쪽) */
+export function detourLane(a: Pt, b: Pt, node = TREE_NODE, side: 1 | -1 = 1): number {
+  const ax = a.x + node / 2;
+  const bx = b.x + node / 2;
+  return bx + (ax < bx ? -1 : ax > bx ? 1 : side) * (TREE_COL_W / 2);
+}
+
+/** 같은 길을 쓰는 돌아가는 선끼리 비켜 가는 거리 (길 하나에 몇 번째로 들어온 선인지에 따라) */
+const LANE_SHIFTS = [0, -5, 5, -10, 10];
 
 /** 선이 피해야 할 칸의 자리: 아이콘과 그 밑의 이름표 (이름표는 가운데 맞춤이라 아이콘보다 넓을 수 있음) */
 function cellBoxes(c: TreeCell): Box[] {
@@ -412,6 +423,8 @@ export function layoutTree(tree: SkillTreeConfig): TreeLayout {
 
   const edges: TreeEdge[] = [];
   const external: Record<string, LearnPrereq[]> = {};
+  /** 돌아가는 선이 쓴 열 사이 길 (x → 몇 개) */
+  const laneUse = new Map<number, number>();
   for (const c of cells) {
     for (const r of c.node.requires) {
       const from = at.get(r.ability);
@@ -423,7 +436,13 @@ export function layoutTree(tree: SkillTreeConfig): TreeLayout {
       // 열 사이 길로 돌아감 (같은 열에서 사이 칸을 건너뛸 때 포함, 길은 오른쪽이고 마지막 열이면 왼쪽)
       let g = edgeGeometry(from, c, TREE_NODE);
       const others = cells.filter((o) => o !== from && o !== c).flatMap(cellBoxes);
-      if (pathHits(g.d, others)) g = detourGeometry(from, c, TREE_NODE, c.node.col < cols - 1 ? 1 : -1);
+      if (pathHits(g.d, others)) {
+        const side = c.node.col < cols - 1 ? 1 : -1;
+        const lane = detourLane(from, c, TREE_NODE, side);
+        const n = laneUse.get(lane) ?? 0;
+        laneUse.set(lane, n + 1);
+        g = detourGeometry(from, c, TREE_NODE, side, LANE_SHIFTS[n % LANE_SHIFTS.length]);
+      }
       edges.push({ from: r.ability, to: c.node.ability, prof: r.prof, d: g.d, badge: g.badge });
     }
   }
