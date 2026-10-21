@@ -46,6 +46,7 @@ import {
 } from '../../shared/progression';
 import { formatListFile, formatProgression, formatSkillTrees, normalizeSkillTrees, type DesignUpdate } from '../gamedata';
 import { log } from '../log';
+import { clampAbilityLevel } from '../systems/progression';
 import type { World } from '../world/World';
 
 /** 처리한 요청의 응답: HTTP 상태와 JSON 본문 */
@@ -525,6 +526,8 @@ export class DesignApi {
     const data = w.data.clientData(w.publicInfo());
     w.broadcastAll({ t: 'design', abilities: data.abilities, skillTrees: data.skillTrees, progression: data.progression });
     for (const p of w.players.values()) {
+      // 어빌 최대를 낮췄으면 접속 중인 2차 직업도 그 안으로
+      if (clampAbilityLevel(p.data, w.data)) p.markSelf();
       p.recompute();
       p.markAbilities();
     }

@@ -661,7 +661,7 @@ export function renderGrowth(ctx: Ctx): HTMLElement {
         h('p', { class: 'dz-hint' }, `오를 확률 = max(바닥, 처음 확률 × (1 − 느려짐 × 숙련도/최대)). 위력(피해·회복)과 해로운 상태 확률은 숙련도에 따라 ${pct(pf.effectMin)}% → ${pct(pf.effectMax)}%.`),
         profChart(pf),
         h('div', { class: 'dz-out' }, `숙련도 0 → ${pf.max} 까지 평균 `, h('b', null, `${fmtNum(Math.round(uses))}번`), ' 쓰면 됩니다.'),
-        h('p', { class: 'dz-note' }, '이 체계 전에 배운 기술은 숙련도 최대로 옮겨 지금의 위력을 유지합니다.'),
+        h('p', { class: 'dz-note' }, '이 체계 전에 배운 기술은 숙련도 최대로 옮깁니다 (위력은 최대 배율, 기본값이면 이 체계 전보다 15% 셈).'),
       ),
     ),
   );

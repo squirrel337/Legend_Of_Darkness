@@ -12,6 +12,7 @@ import { autoHuntTick, stopAuto } from '../systems/autohunt';
 import { dismissSummons, onOwnerMoved, summonTick } from '../systems/summons';
 import { tickStatuses } from '../systems/combat';
 import { GroupManager } from '../systems/groups';
+import { clampAbilityLevel } from '../systems/progression';
 import { MapInstance } from './MapInstance';
 import { Npc } from './Npc';
 import { Player, type PlayerLink } from './Player';
@@ -158,6 +159,8 @@ export class World {
     }
     data.lastLoginAt = Date.now();
     data.lastIp = link.ip;
+    // 어빌은 설정의 최대까지 (손으로 고친 저장 파일, 관리자가 최대를 낮춘 경우)
+    clampAbilityLevel(data, this.data);
     const p = new Player(this.allocId(), this, data, link);
     this.players.set(nameKey(data.name), p);
     p.send({ t: 'welcome', selfId: p.id, data: this.data.clientData(this.publicInfo()) });

@@ -31,7 +31,7 @@ import { startServer, type RunningServer } from '../src/server/app';
 import { checkDesign, formatListFile, formatProgression, formatSkillTrees, GameData, GameDataError } from '../src/server/gamedata';
 import { emptyEquipment, normalizeCharacter } from '../src/server/storage';
 import { learnOnData, setClassOnData } from '../src/server/systems/character';
-import { ADMIN_PW, Client, create, httpJson, testConfig } from './helpers';
+import { ADMIN_PW, Client, create, httpJson, testConfig, until } from './helpers';
 
 const DIR = path.resolve(import.meta.dirname, '..', 'gamedata');
 const gd = GameData.load(DIR);
@@ -243,16 +243,21 @@ test('설계 파일 쓰기 모양: 지금 gamedata 파일을 글자 하나 다�
 // ───────────────────────── 저장 파일 이전 ─────────────────────────
 
 test('저장 파일 이전: 이미 배운 기술은 숙련도 100, 2차 직업은 어빌 1, 새 항목은 기본값', () => {
+  // 숙련도 항목이 아예 없는 옛 저장 파일만 배운 기술을 100 으로
+  const ancient = normalizeCharacter({ name: '옛사람', classId: 'warrior', level: 40, skills: ['first_aid', 'w_strike'], spells: [] });
+  assert.deepEqual(ancient.prof, { first_aid: 100, w_strike: 100 });
+  // 항목이 있으면 값이 없거나 숫자가 아닌 기술(손으로 고쳤거나 망가진 저장)은 가장 센 100 이 아니라 0
   const old = normalizeCharacter({
     name: '옛사람',
     classId: 'warrior',
     level: 40,
-    skills: ['first_aid', 'w_strike'],
+    skills: ['first_aid', 'w_strike', 'w_whirl', 'w_shout'],
     spells: [],
-    prof: { w_strike: 37, z_fire1: 50 },
+    prof: { w_strike: 37, z_fire1: 50, w_whirl: null, w_shout: '30' },
     bonusHp: -300,
   });
-  assert.deepEqual(old.prof, { first_aid: 100, w_strike: 37 });
+  assert.deepEqual(old.prof, { first_aid: 0, w_strike: 37, w_whirl: 0, w_shout: 0 });
+  for (const bad of [null, 'x', [1, 2]]) assert.deepEqual(normalizeCharacter({ name: '망가짐', skills: ['first_aid'], prof: bad }).prof, { first_aid: 0 }, JSON.stringify(bad));
   assert.equal(old.rebirths, 0);
   assert.equal(old.ascended, false);
   assert.equal(old.abilityLevel, 0);
@@ -432,6 +437,27 @@ test('접속하면 스킬트리와 성장 규칙을 받고, 내 상태에 어빌
   assert.equal(s.beastType, null);
   assert.deepEqual(s.prof, { first_aid: 0 });
   c.close();
+});
+
+test('어빌은 설정의 최대까지: 손으로 고친 저장 파일의 어빌 500 도 접속하면 99 (체력 보너스도 99 까지)', async () => {
+  const c = await Client.connect(srv.port);
+  create(c, '손고침');
+  await c.waitFor('welcome');
+  await c.self();
+  c.close();
+  await until(() => !srv.world.findPlayer('손고침'));
+  // 접속을 끊은 사이 저장 파일을 고친 것처럼
+  Object.assign(srv.world.store.get('손고침')!, { classId: 'archer', level: 99, abilityLevel: 500, abilityExp: 1234 });
+  const again = await Client.connect(srv.port);
+  again.send({ t: 'login', name: '손고침', password: 'pass1234' });
+  const s = await again.self();
+  const max = gd.progression.ability.maxLevel;
+  assert.equal(s.abilityLevel, max);
+  assert.equal(s.abilityExp, 0);
+  const d = srv.world.store.get('손고침')!;
+  assert.equal(d.abilityLevel, max);
+  assert.deepEqual(abilityVitals(d.abilityLevel, gd.progression.ability), abilityVitals(max, gd.progression.ability));
+  again.close();
 });
 
 test('5레벨 직업 선택은 1차 직업 길드장만 내놓고, 길드장의 기술 배우기 창은 스킬트리 조건을 보낸다', async () => {

@@ -565,6 +565,18 @@ export function chooseBeastTypeOnData(data: CharacterData, gd: GameData, beastTy
 
 // ───────────────────────── 어빌리티 (엔진 트랙) ─────────────────────────
 
+/**
+ * 어빌 레벨을 설정의 최대(ability.maxLevel) 안으로 (접속할 때, 관리자가 설계를 바꿨을 때).
+ * 저장 파일은 999 까지 읽으므로 손으로 고친 값이나 관리자가 최대를 낮춘 뒤의 값을 여기서 자릅니다. 바꿨으면 true
+ */
+export function clampAbilityLevel(data: CharacterData, gd: GameData): boolean {
+  const max = gd.progression.ability.maxLevel;
+  if (data.abilityLevel <= max) return false;
+  data.abilityLevel = max;
+  data.abilityExp = 0;
+  return true;
+}
+
 /** 몬스터를 잡아 받은 일반 경험치 amount 중 어빌 경험치로도 받는 양 (2차 직업이 아니거나 어빌 만렙이면 0) */
 export function abilityExpShare(data: CharacterData, gd: GameData, amount: number): number {
   const cfg = gd.progression.ability;

@@ -198,15 +198,17 @@ export function normalizeCharacter(raw: unknown, knownItem?: (id: string) => boo
 }
 
 /**
- * 배운 기술·마법마다 숙련도 하나. 저장된 값이 없는 기술(이 체계 전에 배운 기술)은 숙련도 최대(100)로 옮겨
- * 지금의 위력을 그대로 유지합니다. 배우지 않은 기술의 항목은 버립니다.
+ * 배운 기술·마법마다 숙련도 하나. 숙련도 항목(prof)이 아예 없는 저장 파일(이 체계 전의 캐릭터)은 배운 기술을 모두
+ * 숙련도 최대(PROF_MIGRATED)로 옮깁니다. 항목이 있는데 값이 없거나 숫자가 아니면(손으로 고쳤거나 망가진 저장) 가장 낮은 0.
+ * 배우지 않은 기술의 항목은 버립니다.
  */
 function parseProf(v: unknown, learned: string[]): Record<string, number> {
+  if (v === undefined) return Object.fromEntries(learned.map((id) => [id, PROF_MIGRATED]));
   const raw = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
   const out: Record<string, number> = {};
   for (const id of learned) {
     const n = raw[id];
-    out[id] = typeof n === 'number' && Number.isFinite(n) ? Math.round(Math.min(PROF_LIMIT, Math.max(0, n))) : PROF_MIGRATED;
+    out[id] = typeof n === 'number' && Number.isFinite(n) ? Math.round(Math.min(PROF_LIMIT, Math.max(0, n))) : 0;
   }
   return out;
 }
