@@ -1484,6 +1484,12 @@ select:focus {
   text-align: left;
 }
 
+/* 고른 선택지를 보내고 답을 기다리는 동안 (대개 아주 잠깐이라 조금만 흐리게) */
+.btn.option:disabled {
+  opacity: 0.75;
+  cursor: progress;
+}
+
 .btn.option small {
   color: var(--gold-2);
 }

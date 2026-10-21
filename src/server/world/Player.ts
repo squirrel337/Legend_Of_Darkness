@@ -51,6 +51,8 @@ export class Player extends Creature {
   auto: AutoRun | null = null;
   lastWhisperFrom: string | null = null;
   talkingTo: Npc | null = null;
+  /** 승급 장인 교환 선택지의 표: 교환 메뉴·확인을 보낼 때마다 바뀌어, 지난 메뉴의 선택(두 번 누름 등)은 받지 않습니다 */
+  tradeToken = 0;
   readonly loginAt = Date.now();
   saveDirty = false;
 

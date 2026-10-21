@@ -337,6 +337,8 @@ async function pick(c: Client, npc: Npc, key: string): Promise<Msg<'dialog'>> {
 }
 
 const keys = (d: Msg<'dialog'>) => d.options.map((o) => o.key);
+/** 승급 장인 교환 메뉴·확인의 표 ('ascend:hp:1:<표>' 의 네 번째 칸) */
+const tokenOf = (d: Msg<'dialog'>) => d.options[0]!.key.split(':')[3]!;
 
 /** 전직 조건을 채운 99레벨 전사 (순수 체력 14,530 · 마력 3,604, 경험치 1억 5천만) */
 function readyWarrior(p: Player, learn: Record<string, number> = {}): void {
@@ -445,19 +447,49 @@ test('승급 장인: 경험치로 체력·마나를 사고, 체력으로 능력�
   assert.deepEqual(keys(d), ['ascend:hp', 'ascend:mp', 'ascend:stat', 'ascend:do', 'back']);
   assert.match(d.text, /쌓인 경험치: 2억 5,250만/);
   d = await pick(c, smith, 'ascend:hp');
-  assert.deepEqual(keys(d), ['ascend:hp:1', 'ascend:hp:10', 'ascend:hp:100', 'ascend:hp:505', 'ascend']);
+  // 교환 선택지에는 그 메뉴의 표가 붙음 (메뉴를 보낼 때마다 바뀜)
+  let t = tokenOf(d);
+  assert.deepEqual(keys(d), [`ascend:hp:1:${t}`, `ascend:hp:10:${t}`, `ascend:hp:100:${t}`, `ascend:hp:all:${t}`, 'ascend']);
+  assert.match(d.options[3]!.label, /^505번 모두 \(체력 \+50,500\)$/);
   let mark = c.mark;
-  d = await pick(c, smith, 'ascend:hp:5');
+  d = await pick(c, smith, `ascend:hp:5:${t}`);
   assert.match(d.text, /최대 체력 \+500/);
   let s = await c.self((x) => x.bonusHp === 11_000, mark);
   assert.equal(s.exp, 250_000_000);
-  // 체력 → 능력치: 순수 체력 17,530 에서 150 을 팔아도 승급 조건(17,000)은 채움
+  assert.notEqual(tokenOf(d), t, '바꾼 뒤의 메뉴는 새 표');
+  // 같은 선택이 한 번 더 와도 (두 번 누르기·늦게 온 같은 메시지) 다시 바꾸지 않음, 표가 없는 key 도 마찬가지
+  for (const again of [`ascend:hp:5:${t}`, 'ascend:hp:5']) {
+    d = await pick(c, smith, again);
+    assert.match(d.text, /이미 처리했거나 지난 선택이다/, again);
+    assert.equal(p.data.bonusHp, 11_000, again);
+    assert.equal(p.data.exp, 250_000_000, again);
+  }
+  // 할 수 있는 만큼 모두는 한 번 더 묻고, 묻는 동안에는 아무것도 바꾸지 않음
+  d = await pick(c, smith, `ascend:hp:all:${tokenOf(d)}`);
+  assert.match(d.text, /500번 바꾸면 경험치 2억 5,000만을\(를\) 바치고 체력 \+50,000을\(를\) 얻는다\.\n\n바꾸겠는가\?/);
+  assert.deepEqual(keys(d), [`ascend:hp:500:${tokenOf(d)}:yes`, 'ascend:hp']);
+  assert.equal(p.data.exp, 250_000_000);
+  d = await pick(c, smith, 'ascend:hp');
+  // 체력 → 능력치는 늘 한 번 더 묻는다: 순수 체력 17,530 에서 150 을 팔아도 승급 조건(17,000)은 채움
+  d = await pick(c, smith, 'ascend:stat');
+  t = tokenOf(d);
+  d = await pick(c, smith, `ascend:stat:1:${t}`);
+  assert.match(d.text, /^1번 바꾸면 최대 체력 150을\(를\) 바치고 능력치 \+1을\(를\) 얻는다\./);
+  assert.match(d.text, /판 체력은 경험치로만 다시 살 수 있다/);
+  assert.equal(p.data.statPoints, 0, '묻기만 함');
+  const yes = d.options[0]!.key;
+  assert.equal(yes, `ascend:stat:1:${tokenOf(d)}:yes`);
   mark = c.mark;
-  d = await pick(c, smith, 'ascend:stat:1');
+  d = await pick(c, smith, yes);
   s = await c.self((x) => x.statPoints === 1, mark);
   assert.equal(s.bonusHp, 11_000 - 150);
-  // 직업 기본 체력 아래로는 팔 수 없음
-  d = await pick(c, smith, 'ascend:stat:1000');
+  // "예" 가 두 번 와도 한 번만
+  d = await pick(c, smith, yes);
+  assert.match(d.text, /이미 처리했거나 지난 선택이다/);
+  assert.equal(p.data.statPoints, 1);
+  assert.equal(p.data.bonusHp, 11_000 - 150);
+  // 직업 기본 체력 아래로는 팔 수 없음 (할 수 없는 교환은 묻지 않고 이유를 바로)
+  d = await pick(c, smith, `ascend:stat:1000:${tokenOf(d)}`);
   assert.match(d.text, /직업 기본 체력\(3,980\) 아래로는 팔 수 없습니다/);
   assert.equal(p.data.statPoints, 1);
   // 필살 숙련도 99: 조건이 모자라 "예" 가 없음

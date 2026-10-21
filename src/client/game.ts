@@ -1002,7 +1002,7 @@ export class Game {
     if (e.repeat && !/^[0-9]$/.test(e.key)) return;
     if (/^[0-9]$/.test(e.key)) {
       const idx = this.panel.hotkeyIndex(e.key);
-      if (this.windows.pickByNumber(idx)) return;
+      if (this.windows.pickByNumber(idx, e.repeat)) return;
       this.useHotkey(idx);
       return;
     }

@@ -44,6 +44,11 @@ export class Win {
   }
 }
 
+/** 새 대화가 뜬 직후 선택을 받지 않는 시간: 앞 대화에서 빠르게 두 번 누른 것이 새 대화의 같은 자리 선택지를 누르지 않게 */
+const DIALOG_SETTLE_MS = 250;
+/** 선택지를 보낸 뒤 답(새 대화·닫힘·다른 창)이 이만큼 오지 않으면 다시 고를 수 있게 (서버가 오류 글만 보낸 경우 등) */
+const DIALOG_RETRY_MS = 2000;
+
 export class Windows {
   readonly dialog: Win;
   readonly shop: Win;
@@ -53,6 +58,12 @@ export class Windows {
   readonly invite: Win;
   /** 현재 대화 중인 NPC 엔티티 id */
   npcId: number | null = null;
+  /** 그린 대화의 차례 (답을 기다리다 다시 켤 때 그 사이 새 대화가 왔는지 봄) */
+  private dialogSeq = 0;
+  /** 지금 대화에서 이미 선택지를 보냈는지 (다음 대화가 올 때까지 다른 선택은 보내지 않음) */
+  private dialogPicked = false;
+  /** 이 시각(performance.now) 전에는 선택을 받지 않음 */
+  private dialogReadyAt = 0;
   /** 열려 있는 기술 배우기 창의 내용 (서버가 보낸 그대로, 상태가 바뀌면 다시 판정해 그림) */
   private learnData: { npc: number; name: string; classId: ClassId; list: LearnEntry[] } | null = null;
   /** 배운 기술을 목록에서 숨길지 */
@@ -113,26 +124,46 @@ export class Windows {
     this.game.panel.setInvMode('normal');
     // 전직·승급·2차 전직의 조건 줄("○ 순수 체력 …", "× 경험치 …")은 채움/모자람 색으로
     const paragraphs = text.split('\n').map((l) => h('p', { class: l.startsWith('○ ') ? 'cond-ok' : l.startsWith('× ') ? 'cond-bad' : undefined }, l));
+    // 선택지는 대화 하나에 한 번만 보냅니다: 고르면 다음 대화(또는 닫힘)가 올 때까지 모두 끄고,
+    // 새 대화가 뜬 직후의 누름도 받지 않아 두 번 누르기·숫자 키로 교환 같은 행동이 두 번 되지 않게 합니다
+    const seq = ++this.dialogSeq;
+    this.dialogPicked = false;
+    this.dialogReadyAt = performance.now() + DIALOG_SETTLE_MS;
+    const buttons: HTMLButtonElement[] = [];
+    const choose = (o: DialogOption) => {
+      if (this.dialogPicked || performance.now() < this.dialogReadyAt) return;
+      this.dialogPicked = true;
+      for (const b of buttons) b.disabled = true;
+      if (o.key === 'close') {
+        this.npcId = null;
+        this.dialog.el.classList.add('hidden');
+      }
+      this.game.net.send({ t: 'pick', npc, key: o.key });
+      window.setTimeout(() => {
+        if (this.dialogSeq !== seq) return;
+        this.dialogPicked = false;
+        for (const b of buttons) b.disabled = false;
+      }, DIALOG_RETRY_MS);
+    };
     const opts = h(
       'div',
       { class: 'dialog-options' },
-      ...options.map((o, i) =>
-        h(
+      ...options.map((o, i) => {
+        const b = h(
           'button',
           {
             class: 'btn option',
-            onclick: () => {
-              if (o.key === 'close') {
-                this.npcId = null;
-                this.dialog.el.classList.add('hidden');
-              }
-              this.game.net.send({ t: 'pick', npc, key: o.key });
+            // 두 번 누르기의 두 번째 누름(detail 2 이상)은 무시
+            onclick: (e: MouseEvent) => {
+              if (e.detail <= 1) choose(o);
             },
           },
           h('small', null, `${i + 1}. `),
           o.label,
-        ),
-      ),
+        );
+        buttons.push(b);
+        return b;
+      }),
     );
     const look = this.game.state.entities.get(npc)?.look;
     this.dialog.show(
@@ -146,13 +177,13 @@ export class Windows {
     );
   }
 
-  /** 대화창이 열려 있을 때 숫자키로 선택지 고르기 */
-  pickByNumber(n: number): boolean {
+  /** 대화창이 열려 있을 때 숫자키로 선택지 고르기 (누르고 있어 반복되는 키는 다시 고르지 않음) */
+  pickByNumber(n: number, repeat = false): boolean {
     if (!this.dialog.open) return false;
     const btns = this.dialog.body.querySelectorAll<HTMLButtonElement>('.dialog-options .btn');
     const b = btns[n];
     if (!b) return false;
-    b.click();
+    if (!repeat) b.click();
     return true;
   }
 

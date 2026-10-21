@@ -162,7 +162,9 @@
 - `welcome.data` (`ClientGameData`) += `skillTrees` (모든 트리), `progression` (`PublicProgression` = 조건 목록을 뺀 성장 규칙).
 - `{ t: 'learn', npc, name, classId, list: LearnEntry[] }` — `LearnEntry = { id, level, abilityLevel, price, learned, learnable, reason?, reqs }` (필요 레벨·어빌 순).
 - S2C: `{ t: 'abilityLevelUp', abilityLevel }`, `{ t: 'prof', id, prof }` (숙련도 한 칸), `{ t: 'design', abilities, skillTrees, progression }` (관리자가 설계를 바꾼 직후 모두에게, welcome 의 같은 항목을 바꿔 끼움), `gain` 에 `abilityExp?`.
-- 새 C2S 는 없습니다. 전직할 직업, 수인 계통, 교환 횟수는 모두 NPC 대화 선택지(`pick`)로 고릅니다. 선택지 key 는 서버만 해석하며 이렇게 씁니다: `rebirth:<직업>[:yes]`, `ascend` (메뉴), `ascend:hp|mp|stat` (횟수 고르기: 1·10·100·할 수 있는 만큼), `ascend:hp|mp|stat:<횟수>`, `ascend:do[:yes]`, `second[:<2차 직업>[:<계통>][:yes]]`, `beast[:<계통>[:yes]]`.
+- 새 C2S 는 없습니다. 전직할 직업, 수인 계통, 교환 횟수는 모두 NPC 대화 선택지(`pick`)로 고릅니다. 선택지 key 는 서버만 해석하며 이렇게 씁니다: `rebirth:<직업>[:yes]`, `ascend` (메뉴), `ascend:hp|mp|stat` (횟수 고르기: 1·10·100·할 수 있는 만큼), `ascend:hp|mp|stat:<횟수|all>:<표>[:yes]` (교환), `ascend:do[:yes]`, `second[:<2차 직업>[:<계통>][:yes]]`, `beast[:<계통>[:yes]]`.
+  - 교환의 표는 교환 메뉴·확인을 보낼 때마다 바뀌고 마지막 것만 받으므로, 같은 선택이 두 번 와도(두 번 누르기 등) 한 번만 바꿉니다. 할 수 있는 만큼 모두(`all`)와 체력 → 능력치는 한 번 더 묻고 `:yes` 로 바꾸며, 할 수 없는 교환은 묻지 않고 이유를 바로 보입니다.
+  - 화면은 대화마다 선택지를 한 번만 보냅니다: 고르면 다음 대화가 올 때까지 선택지를 끄고, 새 대화가 뜬 직후(0.25초)의 누름, 두 번 누르기의 두 번째 누름, 누르고 있는 숫자 키의 반복은 받지 않습니다.
 - 전직·승급·2차 전직 대화는 조건을 한 줄씩 `○ …`/`× … (지금 값)` 으로 보내고, 클라이언트가 채움/모자람 색으로 그립니다. "예" 선택지는 조건을 모두 채웠을 때만 나옵니다.
 - `NpcService` += `{ type: 'secondJob' }` (2차 직업 인도자). `class` 서비스: 1차 직업 길드장만 5레벨 직업 선택을 내놓고, 99레벨 1차 직업에게는 그 직업으로의 전직을 내놓으며, 그 직업인 사람에게 그 트리의 기술을 가르칩니다. 2차 직업 스승은 기술만 가르칩니다.
 

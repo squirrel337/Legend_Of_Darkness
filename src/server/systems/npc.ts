@@ -18,6 +18,7 @@ import {
 } from '../../shared/progression';
 import type { NpcService } from '../../shared/types';
 import type { DialogOption } from '../../shared/protocol';
+import type { CharacterData } from '../storage';
 import type { Npc } from '../world/Npc';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
@@ -422,16 +423,33 @@ function rebirthDialog(world: World, p: Player, npc: Npc, targetRaw: string | un
 
 type TradeKind = 'hp' | 'mp' | 'stat';
 
-/** 승급 장인: 'ascend' → 메뉴, 'ascend:hp|mp|stat[:<횟수>]' → 교환, 'ascend:do[:yes]' → 승급 */
+/** 교환 메뉴·확인을 보낼 때마다 새 표를 정합니다 (선택지 key 에 붙여, 지난 메뉴의 선택은 받지 않음) */
+function newTradeToken(p: Player): string {
+  p.tradeToken = (p.tradeToken + 1) % 1_000_000_000;
+  return String(p.tradeToken);
+}
+
+/**
+ * 승급 장인: 'ascend' → 메뉴, 'ascend:hp|mp|stat' → 횟수 고르기, 'ascend:do[:yes]' → 승급.
+ * 교환은 'ascend:hp|mp|stat:<횟수|all>:<표>[:yes]': 표는 마지막으로 보낸 교환 메뉴·확인의 것만 받아 같은 선택이 두 번 와도
+ * (두 번 누르기 등) 한 번만 바꿉니다. 할 수 있는 만큼 모두(all)와 체력 → 능력치는 한 번 더 묻고 ':yes' 로 바꿉니다.
+ */
 function ascendDialog(world: World, p: Player, npc: Npc, args: string[]): void {
   const gd = world.data;
   const asc = gd.progression.ascend;
   if (p.level < asc.level) return sendDialog(p, npc, `승급 장인의 일은 ${asc.level}레벨이 된 자만 맡길 수 있다. 더 수련하고 오게.`, [BACK]);
-  const [what, n] = args;
+  const [what, n, token, yes] = args;
   if (what === 'hp' || what === 'mp' || what === 'stat') {
     if (n === undefined) return tradeMenu(world, p, npc, what);
-    const times = Number(n);
-    const r = what === 'stat' ? tradeHpForStatOnData(p.data, gd, times) : tradeExpOnData(p.data, gd, what, times);
+    if (token !== String(p.tradeToken)) return tradeMenu(world, p, npc, what, '이미 처리했거나 지난 선택이다. 다시 골라 주게.');
+    const times = n === 'all' ? tradeLimits(p.data, gd)[what] : Number(n);
+    const trade = (d: CharacterData) => (what === 'stat' ? tradeHpForStatOnData(d, gd, times) : tradeExpOnData(d, gd, what, times));
+    if ((n === 'all' || what === 'stat') && yes !== 'yes') {
+      // 할 수 없는 교환은 묻지 않고 이유를 바로 (복사본으로 해 봄)
+      const trial = trade(structuredClone(p.data));
+      return trial.ok ? tradeConfirm(world, p, npc, what, times) : tradeMenu(world, p, npc, what, trial.msg);
+    }
+    const r = trade(p.data);
     if (r.ok) {
       p.recompute();
       p.markSelf();
@@ -471,34 +489,62 @@ function ascendMenu(world: World, p: Player, npc: Npc, note?: string): void {
   sendDialog(p, npc, lines.join('\n'), opts);
 }
 
-/** 교환 한 가지의 횟수 고르기: 1번, 10번, 100번, 할 수 있는 만큼 모두 */
+/** 교환 n 번으로 얻는 것 ("체력 +1,000") */
+function tradeGain(world: World, kind: TradeKind, n: number): string {
+  const asc = world.data.progression.ascend;
+  return kind === 'hp'
+    ? `체력 +${formatNumber(asc.expTrade.hp * n)}`
+    : kind === 'mp'
+      ? `마나 +${formatNumber(asc.expTrade.mp * n)}`
+      : `능력치 +${formatNumber(asc.hpToStat.stat * n)}`;
+}
+
+/** 교환 한 가지의 횟수 고르기: 1번, 10번, 100번, 할 수 있는 만큼 모두 (선택지 key 에는 이 메뉴의 표가 붙음) */
 function tradeMenu(world: World, p: Player, npc: Npc, kind: TradeKind, note?: string): void {
   const gd = world.data;
   const asc = gd.progression.ascend;
   const lim = tradeLimits(p.data, gd)[kind];
-  const gainOf = (n: number) =>
-    kind === 'hp'
-      ? `체력 +${formatNumber(asc.expTrade.hp * n)}`
-      : kind === 'mp'
-        ? `마나 +${formatNumber(asc.expTrade.mp * n)}`
-        : `능력치 +${formatNumber(asc.hpToStat.stat * n)}`;
   const desc =
     kind === 'stat'
       ? `최대 체력 ${formatNumber(asc.hpToStat.hp)}을(를) 바칠 때마다 능력치 포인트 ${formatNumber(asc.hpToStat.stat)}을(를) 주겠다. 순수 체력이 직업 기본 체력 아래로 내려가게는 팔 수 없다.`
-      : `경험치 ${bigNumber(asc.expTrade.exp)}을(를) 바칠 때마다 최대 ${gainOf(1)}.`;
+      : `경험치 ${bigNumber(asc.expTrade.exp)}을(를) 바칠 때마다 최대 ${tradeGain(world, kind, 1)}.`;
   const status =
     kind === 'stat'
       ? `순수 체력 ${formatNumber(pureVitals(p.data, gd).hp)} · 직업 기본 체력 ${formatNumber(classBaseVitals(p.data, gd).hp)} · 남은 능력치 포인트 ${formatNumber(p.data.statPoints)}`
       : `쌓인 경험치: ${bigNumber(p.data.exp)}`;
   const counts = [1, 10, 100].filter((n) => n <= lim);
   if (lim > 1 && !counts.includes(lim)) counts.push(lim);
-  const opts: DialogOption[] = counts.map((n) => ({
-    key: `ascend:${kind}:${n}`,
-    label: `${n === lim && n > 1 ? `${formatNumber(n)}번 모두` : `${formatNumber(n)}번`} (${gainOf(n)})`,
-  }));
+  const token = newTradeToken(p);
+  const opts: DialogOption[] = counts.map((n) => {
+    const all = n === lim && n > 1;
+    return {
+      key: `ascend:${kind}:${all ? 'all' : n}:${token}`,
+      label: `${all ? `${formatNumber(n)}번 모두` : `${formatNumber(n)}번`} (${tradeGain(world, kind, n)})`,
+    };
+  });
   opts.push({ key: 'ascend', label: '돌아가기' });
   const lines = [...(note ? [note, ''] : []), desc, status, lim > 0 ? `지금 ${formatNumber(lim)}번 할 수 있다.` : '지금은 할 수 없다.'];
   sendDialog(p, npc, lines.join('\n'), opts);
+}
+
+/** 할 수 있는 만큼 모두 바꾸기와 체력 → 능력치(판 체력은 경험치로만 다시 삼)는 한 번 더 묻습니다 */
+function tradeConfirm(world: World, p: Player, npc: Npc, kind: TradeKind, times: number): void {
+  if (!Number.isInteger(times) || times < 1) return tradeMenu(world, p, npc, kind, '지금은 할 수 없다.');
+  const asc = world.data.progression.ascend;
+  const cost = kind === 'stat' ? `최대 체력 ${formatNumber(asc.hpToStat.hp * times)}` : `경험치 ${bigNumber(asc.expTrade.exp * times)}`;
+  const lines = [`${formatNumber(times)}번 바꾸면 ${cost}을(를) 바치고 ${tradeGain(world, kind, times)}을(를) 얻는다.`];
+  if (kind === 'stat')
+    lines.push(
+      asc.expTrade.hp > 0
+        ? `판 체력은 경험치로만 다시 살 수 있다. (경험치 ${bigNumber(asc.expTrade.exp)}에 체력 +${formatNumber(asc.expTrade.hp)})`
+        : '판 체력은 다시 살 수 없다.',
+    );
+  lines.push('', '바꾸겠는가?');
+  const token = newTradeToken(p);
+  sendDialog(p, npc, lines.join('\n'), [
+    { key: `ascend:${kind}:${times}:${token}:yes`, label: '예, 바치겠습니다' },
+    { key: `ascend:${kind}`, label: '돌아가기' },
+  ]);
 }
 
 function ascendDo(world: World, p: Player, npc: Npc, yes: boolean): void {
