@@ -491,6 +491,13 @@ tbody tr.click:hover {
   opacity: 0.6;
 }
 
+/* 고칠 수 없는 값 (저장한 수인 계통의 id) */
+.dz input.dz-readonly {
+  opacity: 0.7;
+  cursor: not-allowed;
+  font-family: var(--mono);
+}
+
 .dz-spacer {
   flex: 1;
 }

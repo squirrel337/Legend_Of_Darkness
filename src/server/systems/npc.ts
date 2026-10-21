@@ -121,8 +121,8 @@ function mainOptions(world: World, p: Player, npc: Npc): DialogOption[] {
         break;
       case 'secondJob':
         opts.push({ key: 'second', label: '2차 전직' });
-        // 계통이 없는 수인 (이 체계 전에 수인이 된 캐릭터)
-        if (p.data.classId === 'beastkin' && !knownBeastType(world.data, p.data.beastType)) opts.push({ key: 'beast', label: '수인 계통 고르기' });
+        // 계통이 없는 수인 (이 체계 전에 수인이 된 캐릭터). 고른 id 가 지금 설정에 없어도 다시 고르게 하지 않음
+        if (p.data.classId === 'beastkin' && p.data.beastType === null) opts.push({ key: 'beast', label: '수인 계통 고르기' });
         break;
       case 'teleport':
         opts.push({ key: `tp:${i}`, label: s.label ?? '이동하기' });
@@ -642,8 +642,15 @@ function beastDialog(world: World, p: Player, npc: Npc, id: string | undefined, 
   const gd = world.data;
   const types = gd.progression.second.beastTypes;
   if (p.data.classId !== 'beastkin') return sendDialog(p, npc, '계통은 수인만 고른다.', [BACK]);
-  if (knownBeastType(gd, p.data.beastType))
-    return sendDialog(p, npc, `그대는 이미 ${beastTypeName(gd, p.data.beastType!)} 계통이다. 계통은 바꿀 수 없다.`, [BACK]);
+  if (p.data.beastType !== null)
+    return sendDialog(
+      p,
+      npc,
+      knownBeastType(gd, p.data.beastType)
+        ? `그대는 이미 ${beastTypeName(gd, p.data.beastType)} 계통이다. 계통은 바꿀 수 없다.`
+        : `그대가 고른 계통('${p.data.beastType}')이 지금은 없다. 계통은 바꿀 수 없으니 관리자에게 알리게.`,
+      [BACK],
+    );
   if (id === undefined)
     return sendDialog(p, npc, '그대는 아직 짐승의 계통을 정하지 않았군. 하나를 고르게. 한 번 고르면 바꿀 수 없다.', [
       ...types.map((t) => ({ key: `beast:${t.id}`, label: `${t.name} 계통` })),

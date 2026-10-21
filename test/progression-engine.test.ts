@@ -646,6 +646,13 @@ test('2차 전직: 수인은 계통(포유류·조류·파충류)을 고르고 �
   assert.ok(keys(d).includes('beast:reptile:yes'));
   await pick(c, g, 'beast:reptile:yes');
   assert.equal(p.data.beastType, 'reptile');
+  // 고른 계통의 id 가 지금 설정에 없어도(관리자가 id 를 바꾸거나 지움) 다시 고르게 하지 않음 (관리자가 고쳐 줌)
+  p.data.beastType = 'avian';
+  d = await talk(c, g);
+  assert.ok(!keys(d).includes('beast'), '계통 고르기를 내놓지 않음');
+  d = await pick(c, g, 'beast:mammal:yes');
+  assert.match(d.text, /고른 계통\('avian'\)이 지금은 없다/);
+  assert.equal(p.data.beastType, 'avian');
   c.close();
 });
 

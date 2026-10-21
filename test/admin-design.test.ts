@@ -460,3 +460,46 @@ test('서버가 켜진 뒤 누가 gamedata 파일을 직접 고쳤으면, 그 �
     fs.rmSync(gd2, RM_TMP);
   }
 });
+
+test('수인 계통 id: 고른 수인이 있는 계통은 id 를 지우거나 바꿀 수 없고(이름만 고침), 고른 수인이 없는 계통은 바꿀 수 있다', async () => {
+  // 구경꾼을 조류 수인으로
+  const d = srv.world.store.get('구경꾼')!;
+  const was = { classId: d.classId, beastType: d.beastType, abilityLevel: d.abilityLevel };
+  Object.assign(d, { classId: 'beastkin', abilityLevel: 1, beastType: 'bird' });
+  try {
+    const b = await bundle();
+    const renamed = (from: string, to: string) => {
+      const progression = clone(b.progression);
+      progression.second.beastTypes.find((t) => t.id === from)!.id = to;
+      const tree = clone(b.skillTrees.trees.beastkin);
+      for (const n of tree.nodes) if (n.beastType === from) n.beastType = to;
+      return { rev: b.rev, progression, skillTrees: { beastkin: tree } } satisfies DesignSaveBody;
+    };
+    // bird → avian (편집기가 하던 것처럼 수인 트리의 계통 전용 기술도 함께): 실시간 검사와 저장 모두 거절
+    const dry = await save('/design', { ...renamed('bird', 'avian'), dryRun: true });
+    assert.equal(dry.status, 200);
+    assert.equal(dry.json.ok, false);
+    const issue = dry.json.issues.find((i) => i.level === 'error' && i.where === 'progression.json(second.beastTypes)');
+    assert.match(issue?.msg ?? '', /조류\(bird\) 계통을 고른 수인이 있어\(구경꾼\).*이름만/, JSON.stringify(dry.json.issues));
+    const r = await save('/design', renamed('bird', 'avian'));
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.ok(srv.world.data.progression.second.beastTypes.some((t) => t.id === 'bird'), '반영하지 않음');
+    assert.equal(gdText('progression.json'), original.get('progression.json'));
+    // 이름만 바꾸기는 됨
+    const named = clone(b.progression);
+    named.second.beastTypes.find((t) => t.id === 'bird')!.name = '날짐승';
+    const ok = await save('/design/progression', { rev: b.rev, progression: named });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    // 고른 수인이 없는 계통(파충류)은 id 를 바꿀 수 있음
+    const b2 = await bundle();
+    const progression = clone(b2.progression);
+    progression.second.beastTypes.find((t) => t.id === 'reptile')!.id = 'scaly';
+    const tree = clone(b2.skillTrees.trees.beastkin);
+    for (const n of tree.nodes) if (n.beastType === 'reptile') n.beastType = 'scaly';
+    const ok2 = await save('/design', { rev: b2.rev, progression, skillTrees: { beastkin: tree } } satisfies DesignSaveBody);
+    assert.equal(ok2.status, 200, JSON.stringify(ok2.json));
+    assert.ok(srv.world.data.progression.second.beastTypes.some((t) => t.id === 'scaly'));
+  } finally {
+    Object.assign(d, was);
+  }
+});

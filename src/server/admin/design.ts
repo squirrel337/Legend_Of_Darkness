@@ -227,6 +227,34 @@ export class DesignApi {
     return out;
   }
 
+  /**
+   * 캐릭터가 이미 고른 수인 계통의 id 를 새 설계가 지우거나 바꾸면 오류 (계통 이름만 바꿀 수 있음).
+   * 계통 id 는 캐릭터 저장과 수인 트리 노드가 함께 쓰므로, 고른 수인이 있는 id 가 없어지면 그 수인은 계통 전용 기술을
+   * 더 배울 수 없게 됩니다 (다시 고르게 하지는 않음). 고른 캐릭터가 없는 id 는 지우거나 바꿔도 됩니다.
+   */
+  private beastTypeIssues(update: DesignUpdate): DesignIssue[] {
+    const next = update.progression;
+    const list = isObj(next) && isObj(next.second) && Array.isArray(next.second.beastTypes) ? next.second.beastTypes : null;
+    if (!list) return []; // 모양이 틀리면 설계 검사가 알려 줌
+    const ids = new Set(list.flatMap((b) => (isObj(b) && typeof b.id === 'string' ? [b.id] : [])));
+    const out: DesignIssue[] = [];
+    for (const t of this.world.data.progression.second.beastTypes) {
+      if (ids.has(t.id)) continue;
+      const users = this.world.store
+        .all()
+        .filter((d) => d.beastType === t.id)
+        .map((d) => d.name);
+      if (users.length === 0) continue;
+      const who = `${users.slice(0, 3).join(', ')}${users.length > 3 ? ` 외 ${users.length - 3}명` : ''}`;
+      out.push({
+        level: 'error',
+        where: 'progression.json(second.beastTypes)',
+        msg: `${t.name}(${t.id}) 계통을 고른 수인이 있어(${who}) 그 id 를 지우거나 바꿀 수 없습니다. 계통의 이름만 바꾸세요.`,
+      });
+    }
+    return out;
+  }
+
   // ───────────────────────── 저장 경로 ─────────────────────────
 
   /** PUT /design: 편집기가 바꾼 곳을 한 번에 */
@@ -339,13 +367,16 @@ export class DesignApi {
     const invalid = (issues: DesignIssue[]) =>
       failed(o.dryRun && o.softCheck ? 200 : 400, `검사에서 오류 ${issues.filter(isError).length}개가 나와 ${o.dryRun ? '저장할 수 없습니다' : '저장하지 않았습니다'}.`, rev, issues);
     if (o.dryRun) {
-      const issues = gd.checkUpdate(o.update);
+      const issues = [...gd.checkUpdate(o.update), ...this.beastTypeIssues(o.update)];
       if (issues.some(isError)) return invalid(issues);
       const trees = o.update.skillTrees ? normalizeSkillTrees(o.update.skillTrees) : gd.skillTrees;
       const prog = (o.update.progression as ProgressionConfig | undefined) ?? gd.progression;
       return reply(200, { ok: true, msg: '검사를 통과했습니다.', issues: [...issues, ...this.serverIssues(trees, prog), ...this.diskIssues()], rev } satisfies DesignSaveResult);
     }
 
+    // 고른 수인이 있는 계통 id 를 지우거나 바꾸면 반영하기 전에 거절
+    const beast = this.beastTypeIssues(o.update);
+    if (beast.length) return invalid([...gd.checkUpdate(o.update), ...beast]);
     // 검사와 반영을 한 번에 (오류가 하나라도 있으면 아무것도 바꾸지 않음)
     const before = this.snapshot();
     const oldTexts = this.texts();

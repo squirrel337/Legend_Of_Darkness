@@ -543,13 +543,21 @@ export function beastTypeName(gd: GameData, id: string): string {
   return gd.progression.second.beastTypes.find((b) => b.id === id)?.name ?? id;
 }
 
+/** 이미 계통을 고른 수인이 다시 고르려 할 때의 말 (고른 id 가 지금 설정에 없으면 관리자에게 알리라고) */
+export function beastTypeLocked(gd: GameData, id: string): string {
+  return knownBeastType(gd, id)
+    ? `이미 ${beastTypeName(gd, id)} 계통입니다. 계통은 바꿀 수 없습니다.`
+    : `이미 고른 계통('${id}')이 지금 설정에 없습니다. 계통은 바꿀 수 없으니 관리자에게 알려 주세요.`;
+}
+
 /**
  * 계통이 없는 수인(이 체계 전에 수인이 된 캐릭터, 관리자가 직업을 바꾼 캐릭터)이 계통을 한 번 고릅니다.
- * 이미 (지금 설정에 있는) 계통이 있으면 바꿀 수 없습니다.
+ * 이미 고른 계통이 있으면 바꿀 수 없습니다. 그 id 가 지금 설정에 없어도(관리자가 id 를 바꾸거나 지움) 다시 고르게 하지 않고,
+ * 관리자가 캐릭터의 계통을 고쳐 줍니다.
  */
 export function chooseBeastTypeOnData(data: CharacterData, gd: GameData, beastType: string): ProgressionResult {
   if (data.classId !== 'beastkin') return fail('계통은 수인만 고릅니다.');
-  if (knownBeastType(gd, data.beastType)) return fail(`이미 ${beastTypeName(gd, data.beastType!)} 계통입니다. 계통은 바꿀 수 없습니다.`);
+  if (data.beastType !== null) return fail(beastTypeLocked(gd, data.beastType));
   if (!knownBeastType(gd, beastType)) return fail('알 수 없는 계통입니다.');
   data.beastType = beastType;
   return ok(`${beastTypeName(gd, beastType)} 계통의 수인이 되었습니다.`);

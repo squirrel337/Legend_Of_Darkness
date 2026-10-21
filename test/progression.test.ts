@@ -593,6 +593,13 @@ test('2차 전직: 수인은 계통을 골라야 하고, 고른 계통은 바꿀
   assert.equal(old.beastType, 'reptile');
   assert.equal(chooseBeastTypeOnData(old, gd, 'bird').ok, false);
   assert.equal(chooseBeastTypeOnData(char({ classId: 'monk' }), gd, 'bird').ok, false, '수인이 아니면 고를 수 없음');
+  // 고른 계통의 id 가 지금 설정에서 없어졌어도(관리자가 id 를 바꾸거나 지움) 다시 고를 수 없음
+  const stale = normalizeCharacter({ name: '옛조류', classId: 'beastkin', level: 99, beastType: 'avian' });
+  assert.equal(stale.beastType, 'avian', '모르는 id 도 저장값 그대로 읽음');
+  const again2 = chooseBeastTypeOnData(stale, gd, 'mammal');
+  assert.equal(again2.ok, false);
+  assert.match(again2.msg, /지금 설정에 없습니다.*관리자/);
+  assert.equal(stale.beastType, 'avian');
 });
 
 // ───────────────────────── 어빌리티 ─────────────────────────
