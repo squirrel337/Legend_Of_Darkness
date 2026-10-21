@@ -675,6 +675,21 @@ export function proficiencyMultiplier(p: Player, abilityId: string): number {
   return profEffect(p.data.prof[abilityId] ?? 0, p.world.data.progression.proficiency);
 }
 
+// ───────────────────────── 잊기 ─────────────────────────
+
+/**
+ * 배운 기술·마법을 잊습니다 (원작의 기술 잊기: 길드장에게서 무료). 숙련도도 함께 지웁니다.
+ * 기술·마법은 각각 MAX_ABILITIES 개까지라, 여러 번 전직해 자리가 차면 쓰지 않는 것을 잊어 자리를 만듭니다.
+ * 다시 배우려면 그 트리의 조건을 처음(숙련도 0)부터 채워야 하고, 지금 직업의 트리가 아니면 그 직업이 되어야 배웁니다.
+ */
+export function forgetOnData(data: CharacterData, gd: GameData, abilityId: string): ProgressionResult {
+  const list = data.skills.includes(abilityId) ? data.skills : data.spells.includes(abilityId) ? data.spells : null;
+  if (!list) return fail('배우지 않은 기술입니다.');
+  list.splice(list.indexOf(abilityId), 1);
+  delete data.prof[abilityId];
+  return ok(`${gd.abilities.get(abilityId)?.name ?? abilityId}을(를) 잊었습니다.`);
+}
+
 // ───────────────────────── 배우기 (엔진 트랙) ─────────────────────────
 
 /**

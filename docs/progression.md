@@ -76,7 +76,7 @@
 - 2차 직업 트리의 첫 기술은 승급한 사람이면 반드시 배워 둔 1차 직업 기술을 선수과목으로 둡니다 (예: 쌍검 베기 ← 강타 50, 할퀴기 ← 정권 지르기 50).
 - 수인 기술은 공통(할퀴기·물어뜯기·야수화·포효·원초의 회복·야성의 폭풍)과 계통마다 다섯 개(포유류: 덮치기 … 야수왕의 일격, 조류: 급강하 … 천공의 사냥꾼, 파충류: 독니 … 대지의 포식자)입니다.
 - 길드장의 "기술/마법 배우기" 창은 기술마다 조건을 ✓/✗ 와 지금 값으로 보이고, 조건을 모두 채운 기술만 배우기 단추가 켜집니다. 골드·소지품·숙련도가 바뀌면 열린 창이 바로 다시 판정합니다.
-- 기술·마법은 각각 40개까지 배울 수 있습니다 (자리가 차면 더 배울 수 없음).
+- 기술·마법은 각각 40개까지 배울 수 있습니다. 자리가 차면 지금 직업의 길드장(평민은 수련장 관리인)에게서 쓰지 않는 것을 **잊어** 자리를 만듭니다 (원작의 기술 잊기, 무료). 잊으면 숙련도도 사라지고, 다시 배우려면 조건을 처음(숙련도 0)부터 채워야 하며 지금 직업의 것이 아니면 그 직업이 되어야 배웁니다. 잊기 확인에는 다시 배울 수 있는지, 그 기술을 선수과목으로 하는 아직 배우지 않은 기술, 승급 조건에 드는지를 보여 줍니다.
 - **숙련도**: 배우면 0 에서 시작해 쓸 때마다 확률로 1씩 올라 최대 100 입니다. 숙련도가 높을수록 오르기 어렵습니다 (기본: 오를 확률 = max(3%, 35% × (1 − 0.8 × 숙련도/100))).
   - 숙련도에 따라 위력(피해·회복·흡혈, 소환수의 체력·피해)과 상태 이상의 확률이 70%(숙련도 0)에서 115%(숙련도 100)까지 오릅니다.
   - 수련장의 허수아비를 쳐서 올릴 수 있습니다 (빗나가도 쓴 것으로 칩니다).
@@ -163,7 +163,7 @@
 - `welcome.data` (`ClientGameData`) += `skillTrees` (모든 트리), `progression` (`PublicProgression` = 조건 목록을 뺀 성장 규칙).
 - `{ t: 'learn', npc, name, classId, list: LearnEntry[] }` — `LearnEntry = { id, level, abilityLevel, price, learned, learnable, reason?, reqs }` (필요 레벨·어빌 순).
 - S2C: `{ t: 'abilityLevelUp', abilityLevel }`, `{ t: 'prof', id, prof }` (숙련도 한 칸), `{ t: 'design', abilities, skillTrees, progression }` (관리자가 설계를 바꾼 직후 모두에게, welcome 의 같은 항목을 바꿔 끼움), `gain` 에 `abilityExp?`.
-- 새 C2S 는 없습니다. 전직할 직업, 수인 계통, 교환 횟수는 모두 NPC 대화 선택지(`pick`)로 고릅니다. 선택지 key 는 서버만 해석하며 이렇게 씁니다: `rebirth:<직업>[:yes]`, `ascend` (메뉴), `ascend:hp|mp|stat` (횟수 고르기: 1·10·100·할 수 있는 만큼), `ascend:hp|mp|stat:<횟수|all>:<표>[:yes]` (교환), `ascend:do[:yes]`, `second[:<2차 직업>[:<계통>][:yes]]`, `beast[:<계통>[:yes]]`.
+- 새 C2S 는 없습니다. 전직할 직업, 수인 계통, 교환 횟수는 모두 NPC 대화 선택지(`pick`)로 고릅니다. 선택지 key 는 서버만 해석하며 이렇게 씁니다: `rebirth:<직업>[:yes]`, `ascend` (메뉴), `ascend:hp|mp|stat` (횟수 고르기: 1·10·100·할 수 있는 만큼), `ascend:hp|mp|stat:<횟수|all>:<표>[:yes]` (교환), `ascend:do[:yes]`, `second[:<2차 직업>[:<계통>][:yes]]`, `beast[:<계통>[:yes]]`, `forget[:skill|spell[:@<쪽>|:<기술>[:yes]]]` (잊기).
   - 교환의 표는 교환 메뉴·확인을 보낼 때마다 바뀌고 마지막 것만 받으므로, 같은 선택이 두 번 와도(두 번 누르기 등) 한 번만 바꿉니다. 할 수 있는 만큼 모두(`all`)와 체력 → 능력치는 한 번 더 묻고 `:yes` 로 바꾸며, 할 수 없는 교환은 묻지 않고 이유를 바로 보입니다.
   - 화면은 대화마다 선택지를 한 번만 보냅니다: 고르면 다음 대화가 올 때까지 선택지를 끄고, 새 대화가 뜬 직후(0.25초)의 누름, 두 번 누르기의 두 번째 누름, 누르고 있는 숫자 키의 반복은 받지 않습니다.
 - 전직·승급·2차 전직 대화는 조건을 한 줄씩 `○ …`/`× … (지금 값)` 으로 보내고, 클라이언트가 채움/모자람 색으로 그립니다. "예" 선택지는 조건을 모두 채웠을 때만 나옵니다.
@@ -184,7 +184,7 @@ tradeLimits(data, gd) · tradeExpOnData(data, gd, 'hp' | 'mp', times) · tradeHp
 checkSecondJob(data, gd, target, beastType | null) · secondJobOnData(data, gd, target, beastType | null) · chooseBeastTypeOnData(data, gd, beastType)
 abilityExpShare(data, gd, amount) · addAbilityExpToData(data, gd, amount) · gainAbilityExp(p, amount)   // 처치 경험치는 gainExp(p, exp, { fromKill: true })
 rollProficiencyOnData(data, gd, abilityId, roll) · gainProficiency(p, abilityId) · proficiencyMultiplier(p, abilityId)
-learnFromTree(data, gd, abilityId, { free? })
+learnFromTree(data, gd, abilityId, { free? }) · forgetOnData(data, gd, abilityId)
 // ProgressionResult = { ok, msg, check?: ConditionCheck }
 ```
 
@@ -225,4 +225,4 @@ learnFromTree(data, gd, abilityId, { free? })
 - 수인 계통: 지금 있던 수인 기술 다섯을 포유류 갈래로 두고, 조류·파충류 갈래를 새로 만들었습니다 (같은 레벨·가격 자리, 비슷한 피해).
 - 전직하면 1레벨로 입을 수 없는 장비(레벨 제한)도 직업 제한 장비처럼 벗겨 소지품(가득하면 창고)으로 옮깁니다. 장비는 그대로 가지므로 "장비 유지"와 어긋나지 않고, 서버의 장비 규칙(입을 때 레벨·직업 확인)과도 맞습니다. 입은 채로 두기를 바라면 `rebirthOnData` 의 `unequipUnwearable` 을 직업 제한만 보게 바꾸면 됩니다.
 - 이 체계 전에 5레벨에 2차 직업을 고른 옛 캐릭터가 2차 직업 트리의 첫 단계 기술(어빌 5, 1차 직업 기술이 선수과목)을 아직 배우지 않았다면, 그 1차 직업 기술을 배울 길이 없어 막힙니다. 관리자 페이지에서 그 1차 직업 기술을 배우게 하고 숙련도를 맞춰 주면 됩니다.
-- 여러 번 전직해 여러 직업의 트리를 모두 배우려 하면 40개 자리를 넘깁니다 (예: 마법사 → 성직자 → 바드의 마법이 모두 44개). 자리가 차면 더 배울 수 없고, 플레이어가 스스로 잊는 방법(원작의 기술 잊기)은 아직 없습니다 (관리자 페이지에서 잊게 할 수는 있음).
+- 여러 번 전직해 여러 직업의 트리를 모두 배우려 하면 40개 자리를 넘깁니다 (예: 마법사 → 성직자 → 바드의 마법이 모두 44개). 그때는 길드장에게서 쓰지 않는 것을 잊고 배웁니다 (`forgetOnData`, 관리자 페이지에서도 잊게 할 수 있음).

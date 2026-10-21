@@ -2,6 +2,7 @@
 // 부활, 창고, 이동, 능력치 초기화. 성장 체계의 규칙은 progression.ts, 대화 선택지 key 는 docs/progression.md 8.4
 import {
   CLASS_FALLBACK_NAMES,
+  MAX_ABILITIES,
   NPC_TALK_RANGE,
   dirTowards,
   formatNumber,
@@ -43,6 +44,7 @@ import {
   checkSecondJob,
   chooseBeastTypeOnData,
   classBaseVitals,
+  forgetOnData,
   knownBeastType,
   learnEntries,
   learnFromTree,
@@ -102,6 +104,8 @@ function mainOptions(world: World, p: Player, npc: Npc): DialogOption[] {
         else if (p.data.classId === 'peasant' && isFirstClass(s.classId))
           opts.push({ key: `class:${s.classId}`, label: `${className(world, s.classId)}의 길 걷기 (직업 선택)` });
         else if (p.data.classId === s.classId) opts.push({ key: `learn:${s.classId}`, label: '기술/마법 배우기' });
+        // 원작의 기술 잊기: 내 길드(평민은 수련장)에서, 배운 것이 있으면
+        if (p.data.classId === s.classId && p.data.skills.length + p.data.spells.length > 0) opts.push({ key: 'forget', label: '기술/마법 잊기' });
         // 99레벨 1차 직업: 이 길드장의 직업으로 전직 (무도가는 무도 사범에게 환골탈태)
         if (rebirthOffered(p.data, world.data, s.classId))
           opts.push({
@@ -281,6 +285,8 @@ export function pickOption(world: World, p: Player, npcId: unknown, keyRaw: unkn
     }
     case 'rebirth':
       return rebirthDialog(world, p, npc, arg, arg2 === 'yes');
+    case 'forget':
+      return forgetDialog(world, p, npc, parts.slice(1));
     case 'ascend':
       if (!service(npc, 'ascend')) return;
       return ascendDialog(world, p, npc, parts.slice(1));
@@ -425,6 +431,95 @@ function rebirthDialog(world: World, p: Player, npc: Npc, targetRaw: string | un
     `다시 태어난 것을 축하하네. 이제 그대는 ${p.data.level}레벨 ${tName}이다. 배운 기술과 마법은 그대로 쓸 수 있고, ${tName}의 기술은 나에게 배울 수 있다.`,
     [{ key: `learn:${target}`, label: '기술/마법 배우기' }, CLOSE],
   );
+}
+
+/** 잊기 목록 한 쪽의 기술 수 (숫자 키 1~0 에 다음·앞 쪽·돌아가기까지 들어가게) */
+const FORGET_PAGE = 7;
+
+/**
+ * 기술·마법 잊기 (원작처럼 길드에서, 무료, 숙련도도 사라짐): 'forget' → 기술/마법 고르기,
+ * 'forget:skill|spell[:@<쪽>]' → 목록, 'forget:skill|spell:<기술>' → 다시 배울 수 있는지와 함께 확인, ':yes' → 잊기.
+ * 지금 직업의 길드장(평민은 수련장 관리인)만 합니다.
+ */
+function forgetDialog(world: World, p: Player, npc: Npc, args: string[], note?: string): void {
+  const gd = world.data;
+  if (!npc.def.services.some((s) => s.type === 'class' && s.classId === p.data.classId))
+    return sendDialog(p, npc, '잊는 일은 그대가 속한 길드에서 하게.', [BACK]);
+  const [kindRaw, arg, yes] = args;
+  const listOf = (k: 'skill' | 'spell') => (k === 'skill' ? p.data.skills : p.data.spells);
+  const kindName = (k: 'skill' | 'spell') => (k === 'skill' ? '기술' : '마법');
+  const head = note ? [note, ''] : [];
+  if (kindRaw !== 'skill' && kindRaw !== 'spell') {
+    const kinds = (['skill', 'spell'] as const).filter((k) => listOf(k).length > 0);
+    if (kinds.length === 0) return sendDialog(p, npc, [...head, '그대는 아직 배운 기술도 마법도 없다.'].join('\n'), [BACK]);
+    const text = [
+      ...head,
+      `배운 것을 잊으면 숙련도도 함께 사라진다. 기술과 마법은 각각 ${MAX_ABILITIES}개까지 배울 수 있으니, 자리가 모자라면 쓰지 않는 것을 잊게.`,
+      '다시 배우려면 조건을 처음부터 채워야 하고, 지금 직업의 것이 아니면 그 직업이 되어야 배울 수 있다.',
+    ];
+    return sendDialog(p, npc, text.join('\n'), [
+      ...kinds.map((k) => ({ key: `forget:${k}`, label: `${kindName(k)} 잊기 (${listOf(k).length}/${MAX_ABILITIES})` })),
+      BACK,
+    ]);
+  }
+  const kind = kindRaw;
+  const list = listOf(kind);
+  const backToList: DialogOption = { key: `forget:${kind}`, label: '돌아가기' };
+  const nameOf = (id: string) => gd.abilities.get(id)?.name ?? id;
+  if (arg === undefined || arg.startsWith('@')) {
+    if (list.length === 0) return forgetDialog(world, p, npc, [], note);
+    const pages = Math.ceil(list.length / FORGET_PAGE);
+    const page = Math.max(0, Math.min(pages - 1, Math.floor(Number(arg?.slice(1) ?? 0)) || 0));
+    const opts: DialogOption[] = list.slice(page * FORGET_PAGE, (page + 1) * FORGET_PAGE).map((id) => {
+      const cls = gd.abilities.get(id)?.classId;
+      const other = cls && cls !== 'monster' && cls !== p.data.classId && cls !== 'peasant' ? ` · ${className(world, cls)}` : '';
+      return { key: `forget:${kind}:${id}`, label: `${nameOf(id)} (숙련 ${p.data.prof[id] ?? 0}${other})` };
+    });
+    if (page + 1 < pages) opts.push({ key: `forget:${kind}:@${page + 1}`, label: '다음 쪽' });
+    if (page > 0) opts.push({ key: `forget:${kind}:@${page - 1}`, label: '앞 쪽' });
+    opts.push({ key: 'forget', label: '돌아가기' });
+    const text = [...head, `어느 ${kindName(kind)}을(를) 잊겠는가? (${list.length}/${MAX_ABILITIES}${pages > 1 ? ` · ${page + 1}/${pages}쪽` : ''})`];
+    return sendDialog(p, npc, text.join('\n'), opts);
+  }
+  const id = arg;
+  if (!list.includes(id)) return forgetDialog(world, p, npc, [kind], '그것은 배우지 않았다.');
+  if (yes !== 'yes') {
+    const lines = [`${nameOf(id)}을(를) 잊겠는가? 숙련도 ${p.data.prof[id] ?? 0}도 함께 사라진다.`, relearnNote(world, p, id), ...forgetWarnings(world, p, id)];
+    return sendDialog(p, npc, lines.join('\n'), [{ key: `forget:${kind}:${id}:yes`, label: `예, ${nameOf(id)}을(를) 잊겠습니다` }, backToList]);
+  }
+  const r = forgetOnData(p.data, gd, id);
+  if (r.ok) {
+    p.markAbilities();
+    p.markSelf();
+    p.notice(r.msg, 'info');
+  }
+  forgetDialog(world, p, npc, [kind], r.msg);
+}
+
+/** 잊은 기술을 다시 배울 수 있는지 (잊기 확인에 붙임) */
+function relearnNote(world: World, p: Player, id: string): string {
+  const at = world.data.nodeOf(id);
+  if (!at) return '어느 스킬트리에도 없는 기술이라 다시 배울 수 없다.';
+  if (at.classId === 'peasant') return '다시 배우려면 수련장 관리인에게서 조건을 채워 처음(숙련도 0)부터 배워야 한다.';
+  if (at.classId === p.data.classId) return '다시 배우려면 이 길드에서 조건을 채워 처음(숙련도 0)부터 배워야 한다.';
+  return `${className(world, at.classId)}의 기술이라 그 직업이 되기 전에는 다시 배울 수 없다.`;
+}
+
+/** 잊으면 막히는 것: 아직 배우지 않은 (지금 직업·평민·이어 갈 2차 직업 트리의) 기술의 선수과목, 지금 직업의 승급 조건 */
+function forgetWarnings(world: World, p: Player, id: string): string[] {
+  const gd = world.data;
+  const d = p.data;
+  const out: string[] = [];
+  const trees = [d.classId, 'peasant' as const, ...(isFirstClass(d.classId) ? secondClassesOf(d.classId, gd.progression.second.from) : [])];
+  const learned = (x: string) => d.skills.includes(x) || d.spells.includes(x);
+  const blocked = trees.flatMap((c) => gd.treeOf(c).nodes.filter((n) => !learned(n.ability) && n.requires.some((r) => r.ability === id)).map((n) => n.ability));
+  if (blocked.length)
+    out.push(`아직 배우지 않은 ${blocked.slice(0, 3).map((x) => gd.abilities.get(x)?.name ?? x).join(', ')}${blocked.length > 3 ? ` 외 ${blocked.length - 3}개` : ''}의 선수과목이다.`);
+  if (isFirstClass(d.classId) && !d.ascended) {
+    const need = gd.progression.ascend.conditions[d.classId].find((c) => c.type === 'skillProf' && c.ability === id);
+    if (need && need.type === 'skillProf') out.push(`승급 조건(${gd.abilities.get(id)?.name ?? id} 숙련도 ${need.min})에 필요한 기술이다.`);
+  }
+  return out;
 }
 
 type TradeKind = 'hp' | 'mp' | 'stat';

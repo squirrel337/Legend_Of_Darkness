@@ -22,6 +22,7 @@ import {
   checkSecondJob,
   chooseBeastTypeOnData,
   classBaseVitals,
+  forgetOnData,
   learnFromTree,
   payConditions,
   proficiencyMultiplier,
@@ -754,6 +755,30 @@ test('배우기: 지금 직업의 트리만 (전직 전 직업의 기술은 못 
   assert.equal(countItem(d, 'mat_wolf_pelt'), 3);
   assert.equal(d.prof.w_whirl, 0);
   assert.equal(learnFromTree(d, t, 'mon_poison', { free: true }).ok, false, '몬스터 기술은 운영자도 못 배움');
+});
+
+test('잊기: 배운 기술·마법을 숙련도와 함께 지우고, 40개 자리가 찼어도 하나 잊으면 다시 배울 수 있다 (다시 배우면 숙련도 0)', () => {
+  const d = readyWarrior();
+  d.spells.push('z_fire1');
+  d.prof.z_fire1 = 55;
+  const r = forgetOnData(d, gd, 'w_strike');
+  assert.equal(r.ok, true, r.msg);
+  assert.match(r.msg, /강타을\(를\) 잊었습니다/);
+  assert.ok(!d.skills.includes('w_strike'));
+  assert.equal(d.prof.w_strike, undefined, '숙련도도 사라짐');
+  assert.equal(forgetOnData(d, gd, 'w_strike').ok, false, '이미 잊음');
+  assert.equal(forgetOnData(d, gd, 'z_fire1').ok, true, '전직 전 직업의 마법도 잊을 수 있음');
+  assert.deepEqual(d.spells, []);
+  // 마법 40개가 찬 마법사: 하나 잊으면 그 자리에 새 마법을 배움
+  const node = gd.treeOf('wizard').nodes.find((n) => n.requires.length === 0 && n.items.length === 0)!;
+  const w = char({ classId: 'wizard', level: 99, gold: 1_000_000, stats: stats(255, 255, 255, 255, 255) });
+  w.spells = Array.from({ length: 40 }, (_, i) => `old_spell_${i}`);
+  for (const id of w.spells) w.prof[id] = 100;
+  assert.match(learnFromTree(w, gd, node.ability).msg, /더 배울 자리가 없습니다/);
+  assert.equal(forgetOnData(w, gd, 'old_spell_0').ok, true);
+  const again = learnFromTree(w, gd, node.ability);
+  assert.equal(again.ok, true, again.msg);
+  assert.equal(w.prof[node.ability], 0);
 });
 
 test('배우기: 2차 직업 기술은 레벨이 아니라 어빌로, 수인 계통 전용 기술은 그 계통만', () => {

@@ -631,6 +631,60 @@ test('배우기: 그 트리를 가르치는 길드장에게서만 (다른 길드
   }
 });
 
+test('잊기(원작의 기술 잊기): 내 길드장에게서 무료로, 확인에 다시 배울 수 있는지와 막히는 기술을 보이고, 숙련도도 함께 사라진다', async () => {
+  const { c, p } = fighter;
+  become(p, 'warrior', 99, { w_strike: 77, z_fire1: 40 });
+  assert.ok(p.data.spells.includes('z_fire1'), '운영자가 가르친 다른 직업의 마법');
+  p.data.skills = p.data.skills.filter((id) => id === 'w_strike' || id === 'first_aid');
+  const gold = p.data.gold;
+  // 다른 길드장은 잊기를 내놓지 않고, 억지로 골라도 거절
+  const rogueMaster = npcEntity('rogue_master');
+  near(p, rogueMaster);
+  let d = await talk(c, rogueMaster);
+  assert.ok(!keys(d).includes('forget'));
+  d = await pick(c, rogueMaster, 'forget:skill:w_strike:yes');
+  assert.match(d.text, /그대가 속한 길드에서/);
+  assert.ok(p.data.skills.includes('w_strike'));
+  const master = npcEntity('warrior_master');
+  near(p, master);
+  d = await talk(c, master);
+  assert.ok(keys(d).includes('forget'), keys(d).join(','));
+  d = await pick(c, master, 'forget');
+  assert.deepEqual(keys(d), ['forget:skill', 'forget:spell', 'back']);
+  d = await pick(c, master, 'forget:skill');
+  const opt = d.options.find((o) => o.key === 'forget:skill:w_strike')!;
+  assert.match(opt.label, /^강타 \(숙련 77\)$/);
+  d = await pick(c, master, 'forget:skill:w_strike');
+  assert.match(d.text, /강타을\(를\) 잊겠는가\? 숙련도 77도 함께 사라진다/);
+  assert.match(d.text, /이 길드에서 조건을 채워 처음\(숙련도 0\)부터/);
+  assert.match(d.text, /아직 배우지 않은 .*회오리 베기.*의 선수과목이다/);
+  assert.ok(p.data.skills.includes('w_strike'), '묻기만 함');
+  const mark = c.mark;
+  d = await pick(c, master, 'forget:skill:w_strike:yes');
+  assert.ok(!p.data.skills.includes('w_strike'));
+  assert.equal(p.data.prof.w_strike, undefined);
+  assert.equal(p.data.gold, gold, '무료');
+  assert.match(d.text, /강타을\(를\) 잊었습니다/);
+  const ab = await c.waitFor('abilities', () => true, mark);
+  assert.ok(!ab.skills.includes('w_strike'));
+  // 같은 "예" 가 한 번 더 와도 아무 일 없음
+  d = await pick(c, master, 'forget:skill:w_strike:yes');
+  assert.match(d.text, /그것은 배우지 않았다/);
+  // 다른 직업의 마법: 그 직업이 되기 전에는 다시 배울 수 없다고 알림
+  d = await pick(c, master, 'forget:spell:z_fire1');
+  assert.match(d.text, /마법사의 기술이라 그 직업이 되기 전에는 다시 배울 수 없다/);
+  // 많으면 쪽으로 나눔 (한 쪽에 7개 + 다음 쪽)
+  p.data.skills.push(...Array.from({ length: 9 }, (_, i) => `test_skill_${i}`));
+  d = await pick(c, master, 'forget:skill');
+  assert.equal(d.options.filter((o) => /^forget:skill:[^@]/.test(o.key)).length, 7);
+  assert.ok(keys(d).includes('forget:skill:@1'));
+  assert.match(d.text, /1\/2쪽/);
+  d = await pick(c, master, 'forget:skill:@1');
+  assert.ok(keys(d).includes('forget:skill:@0'));
+  assert.equal(d.options.filter((o) => /^forget:skill:[^@]/.test(o.key)).length, p.data.skills.length - 7);
+  p.data.skills = p.data.skills.filter((id) => !id.startsWith('test_skill_'));
+});
+
 /** 2차 직업 인도자 (데이터에 아직 없을 수 있으므로 시험용으로 마을에 세움) */
 let guide: Npc | null = null;
 function secondJobGuide(): Npc {
