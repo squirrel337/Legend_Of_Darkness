@@ -7,6 +7,7 @@ import {
   abilityExpToNext,
   abilityExpTotal,
   abilityHours,
+  abilityPower,
   abilityVitals,
   bigNumber,
   CONDITION_TYPES,
@@ -643,15 +644,31 @@ export function renderGrowth(ctx: Ctx): HTMLElement {
           field('어빌마다 필요량 배율', pctInput('ab.growth', ab.expGrowth, (v) => setP((x) => (x.ability.expGrowth = v)), 1, 2), '어빌 L → L+1 = 첫 필요량 × 배율^(L−1)'),
           field('어빌이 오를 때 최대 체력', numInput('ab.hp', ab.hpPerLevel, (v) => setP((x) => (x.ability.hpPerLevel = v ?? 0)), { min: 0, max: 100_000 }, err)),
           field('어빌이 오를 때 최대 마나', numInput('ab.mp', ab.mpPerLevel, (v) => setP((x) => (x.ability.mpPerLevel = v ?? 0)), { min: 0, max: 100_000 }, err)),
+          field('어빌 1 의 위력', pctInput('ab.pmin', ab.powerMin, (v) => setP((x) => (x.ability.powerMin = v)), 0.1, 10), '2차 전직 직후의 2차 직업 위력'),
+          field(`어빌 ${ab.maxLevel} 의 위력`, pctInput('ab.pmax', ab.powerMax, (v) => setP((x) => (x.ability.powerMax = v)), 0.1, 10), '그 사이는 어빌에 따라 직선'),
         ),
         h('div', { class: 'dz-out' }, `어빌 ${ab.maxLevel} 이면 최대 체력 `, h('b', null, `+${fmtNum(top.hp)}`), ', 최대 마나 ', h('b', null, `+${fmtNum(top.mp)}`), ` (어빌 1 은 +0)`),
+        h(
+          'p',
+          { class: 'dz-hint' },
+          `2차 직업 위력은 2차 직업 캐릭터가 주는 피해(평타·기술·마법·희생, 소환수의 체력·피해)와 회복에 숙련도 배율과 함께 곱합니다: 어빌 1 에 ${pct(ab.powerMin)}%, 어빌 ${ab.maxLevel} 에 ${pct(ab.powerMax)}%. 2차 직업 기술이 열리기 전(어빌 1)에도 이어받은 1차 직업보다 세게 하려면 100% 보다 크게 둡니다.`,
+        ),
         h(
           'table',
           { class: 'dz-matrix wide' },
           h(
             'thead',
             null,
-            h('tr', null, h('th', null, '어빌'), h('th', null, '그 어빌로 오르는 한 칸'), h('th', null, '어빌 1 부터 모을 어빌 경험치'), h('th', null, '몬스터 경험치로 치면'), h('th', null, '걸리는 시간')),
+            h(
+              'tr',
+              null,
+              h('th', null, '어빌'),
+              h('th', null, '그 어빌로 오르는 한 칸'),
+              h('th', null, '어빌 1 부터 모을 어빌 경험치'),
+              h('th', null, '몬스터 경험치로 치면'),
+              h('th', null, '걸리는 시간'),
+              h('th', null, '위력'),
+            ),
           ),
           h(
             'tbody',
@@ -667,6 +684,7 @@ export function renderGrowth(ctx: Ctx): HTMLElement {
                 h('td', null, bigNumber(total)),
                 h('td', null, ab.expRatio > 0 ? bigNumber(total / ab.expRatio) : '—'),
                 h('td', null, hours(l)),
+                h('td', null, `${pct(abilityPower(l, ab))}%`),
               );
             }),
           ),

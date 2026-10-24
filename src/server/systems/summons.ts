@@ -22,8 +22,9 @@ function removeSummon(m: Monster, fx: 'death' | 'warp'): void {
 }
 
 /**
- * 소환수의 체력과 피해에 배율을 곱합니다 (소환 기술의 숙련도: 숙련도 0 → 70%, 최대 → 115%, docs/progression.md).
- * 다른 직업의 피해·회복 기술처럼 소환사의 소환도 숙련도에 따라 세집니다.
+ * 소환수의 체력과 피해에 배율을 곱합니다: 소환 기술의 숙련도(숙련도 0 → 70%, 최대 → 115%) × 2차 직업 위력
+ * (어빌 1 → 105%, 어빌 99 → 115%, docs/progression.md). 다른 직업의 피해·회복 기술처럼 소환사의 소환도
+ * 숙련도와 어빌에 따라 세집니다. 소환수가 쓰는 마법은 그대로입니다.
  */
 function scaleSummon(m: Monster, power: number): void {
   const s = m.stats;
@@ -32,7 +33,7 @@ function scaleSummon(m: Monster, power: number): void {
   m.hp = s.hp;
 }
 
-/** 소환 효과: 시전자 곁에 소환수를 부릅니다. power 는 소환 기술의 숙련도 배율. 부른 수를 돌려줍니다 */
+/** 소환 효과: 시전자 곁에 소환수를 부릅니다. power 는 소환 기술의 숙련도 배율 × 2차 직업 위력. 부른 수를 돌려줍니다 */
 export function summonCreatures(world: World, p: Player, e: SummonEffect, now = Date.now(), power = 1): number {
   const map = p.map;
   const def = world.data.monsters.get(e.monster);

@@ -637,13 +637,13 @@ function checkCondition(out: IssueList, refs: DesignRefs, w: string, c: unknown,
 }
 
 /** progression.json 의 ability 항목 (파일에 쓰는 순서) */
-const ABILITY_KEYS = ['maxLevel', 'expRatio', 'expBase', 'expGrowth', 'hpPerLevel', 'mpPerLevel'] as const;
+const ABILITY_KEYS = ['maxLevel', 'expRatio', 'expBase', 'expGrowth', 'hpPerLevel', 'mpPerLevel', 'powerMin', 'powerMax'] as const;
 
 /**
- * 나중에 생긴 ability 항목의 기본값 (어빌 표). 이 항목이 생기기 전의 progression.json(손으로 고친 파일,
+ * 나중에 생긴 ability 항목의 기본값 (어빌 표, 2차 직업 위력). 이 항목이 생기기 전의 progression.json(손으로 고친 파일,
  * 관리자 페이지의 판 기록)은 이 값을 채워 읽고 경고합니다. 관리자 페이지에서 한 번 저장하면 파일에 적힙니다.
  */
-export const ABILITY_ADDED_DEFAULTS: Readonly<Record<string, number>> = { expBase: 1_000_000, expGrowth: 1.05 };
+export const ABILITY_ADDED_DEFAULTS: Readonly<Record<string, number>> = { expBase: 1_000_000, expGrowth: 1.05, powerMin: 1.05, powerMax: 1.15 };
 
 /** 옛 progression.json 에 없는 ability 항목을 기본값으로 채운 복사본과 그 경고 (모양이 틀린 값은 검사가 알리도록 그대로) */
 export function upgradeProgression(raw: unknown): { progression: unknown; issues: DesignIssue[] } {
@@ -712,12 +712,18 @@ export function checkProgression(raw: unknown, refs: DesignRefs): DesignIssue[] 
     const base = intField(out, 'ability', ab, 'expBase', 1, MAX_EXP_GRANT);
     const growth = numField(out, 'ability', ab, 'expGrowth', 1, 2);
     if (abMax !== undefined && base !== undefined && growth !== undefined) {
-      const total = abilityExpTotal(abMax, { maxLevel: abMax, expRatio: ratio ?? 0, expBase: base, expGrowth: growth, hpPerLevel: 0, mpPerLevel: 0 });
+      const total = abilityExpTotal(abMax, { maxLevel: abMax, expRatio: ratio ?? 0, expBase: base, expGrowth: growth, hpPerLevel: 0, mpPerLevel: 0, powerMin: 1, powerMax: 1 });
       if (!(total <= MAX_EXP_GRANT))
         out.error('ability', `어빌 1 → ${abMax} 에 필요한 어빌 경험치가 ${Number.isFinite(total) ? bigNumber(total) : '끝없이'} 로 너무 큽니다 (1,000조까지). expBase 나 expGrowth 를 낮춰 주세요.`);
     }
     intField(out, 'ability', ab, 'hpPerLevel', 0, 100_000);
     intField(out, 'ability', ab, 'mpPerLevel', 0, 100_000);
+    // 2차 직업 위력: 어빌 1 → 어빌 최대로 직선
+    const lo = numField(out, 'ability', ab, 'powerMin', 0.1, 10);
+    const hi = numField(out, 'ability', ab, 'powerMax', 0.1, 10);
+    if (lo !== undefined && hi !== undefined && hi < lo) out.error('ability', 'powerMax(어빌 최대의 위력)는 powerMin(어빌 1 의 위력) 이상이어야 합니다.');
+    else if (lo !== undefined && lo < 1)
+      out.warn('ability', `powerMin 이 ${Math.round(lo * 100)}% 라 2차 전직 직후(어빌 1)에 이어받은 1차 직업보다 약해질 수 있습니다 (2차 직업 기술이 열리기 전에는 1차 직업과 같은 기술로 싸움).`);
   }
 
   // 전직
@@ -1155,6 +1161,8 @@ function canonProgression(c: ProgressionConfig): ProgressionConfig {
       expGrowth: c.ability.expGrowth,
       hpPerLevel: c.ability.hpPerLevel,
       mpPerLevel: c.ability.mpPerLevel,
+      powerMin: c.ability.powerMin,
+      powerMax: c.ability.powerMax,
     },
     proficiency: {
       max: c.proficiency.max,

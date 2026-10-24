@@ -30,7 +30,7 @@ import type { Monster } from '../world/Monster';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
 import { dropToGround } from './ground';
-import { gainExp, gainProficiency, proficiencyMultiplier } from './progression';
+import { gainExp, gainProficiency, proficiencyMultiplier, secondJobPower } from './progression';
 import { dismissSummons, summonCreatures, summonDied } from './summons';
 
 // 테스트에서 Math.random 을 바꿔 끼울 수 있도록 호출할 때마다 찾습니다
@@ -247,7 +247,8 @@ export function physicalAttack(world: World, attacker: Creature, target: Creatur
   if (isPlayer(attacker)) {
     const d = attacker.derived;
     base = physicalBase(d, attacker.level, randInt(d.dmgMin, d.dmgMax)) * o.mult + (o.bonus ?? 0);
-    base *= o.power ?? 1;
+    // 숙련도 배율(기술만)과 2차 직업 위력(평타도)
+    base *= (o.power ?? 1) * secondJobPower(attacker);
     if (o.hideBonus && o.wasHidden) base *= 1 + o.hideBonus;
     const might = attacker.statuses.get('might');
     if (might) base *= 1 + might.potency / 100;
@@ -277,7 +278,7 @@ function statValue(c: Creature, stat: string | undefined, fallback: 'int' | 'wis
   return (c as Monster).stats.int;
 }
 
-/** 마법 공격 한 번. power 는 플레이어 기술의 숙련도 배율 */
+/** 마법 공격 한 번. power 는 플레이어 기술의 숙련도 배율 (플레이어는 2차 직업 위력도 곱함) */
 export function magicAttack(
   world: World,
   caster: Creature,
@@ -288,6 +289,7 @@ export function magicAttack(
 ): number {
   const magicPct = isPlayer(caster) ? caster.derived.magic : 0;
   let base = magicBase(e.base, e.ratio, statValue(caster, e.stat, 'int'), caster.level, magicPct) * power;
+  if (isPlayer(caster)) base *= secondJobPower(caster);
   const focus = caster.statuses.get('focus');
   if (focus) base *= 1 + focus.potency / 100;
   base *= 0.9 + rand() * 0.2;
@@ -663,6 +665,8 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
   const { def, caster } = ctx;
   const map = caster.map!;
   const power = ctx.power ?? 1;
+  /** 2차 직업 위력 (회복·희생·소환수에 숙련도 배율과 함께. 물리·마법 피해는 physicalAttack·magicAttack 이 곱함) */
+  const boost = isPlayer(caster) ? secondJobPower(caster) : 1;
   let list = targets;
   for (const e of def.effects) {
     if (e.type === 'dash') {
@@ -674,8 +678,8 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
       continue;
     }
     if (e.type === 'summon') {
-      // 소환은 대상과 상관없이 한 번 (플레이어만 소환수를 거느립니다). 소환수의 체력·피해에 숙련도 배율
-      if (isPlayer(caster)) summonCreatures(world, caster, e, Date.now(), power);
+      // 소환은 대상과 상관없이 한 번 (플레이어만 소환수를 거느립니다). 소환수의 체력·피해에 숙련도 배율과 2차 직업 위력
+      if (isPlayer(caster)) summonCreatures(world, caster, e, Date.now(), power * boost);
       continue;
     }
     for (const t of list) {
@@ -708,7 +712,7 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
           break;
         case 'heal': {
           const magicPct = isPlayer(caster) ? caster.derived.magic : 0;
-          let amt = magicBase(e.base, e.ratio, statValue(caster, e.stat, 'wis'), caster.level, magicPct) * power;
+          let amt = magicBase(e.base, e.ratio, statValue(caster, e.stat, 'wis'), caster.level, magicPct) * power * boost;
           const focus = caster.statuses.get('focus');
           if (focus) amt *= 1 + focus.potency / 100;
           healCreature(caster, t, amt, false);
@@ -739,7 +743,7 @@ function runEffects(world: World, ctx: CastContext, targets: Creature[], wasHidd
           caster.hp = Math.max(1, caster.hp - cost);
           if (isPlayer(caster)) caster.markVitals();
           map.broadcast({ t: 'dmg', id: caster.id, v: cost, k: 'dot', hp: caster.hpPct });
-          applyDamage(world, caster, t, cost * e.mult * power * elementMultiplier(el, t.defenseElement), 'crit');
+          applyDamage(world, caster, t, cost * e.mult * power * boost * elementMultiplier(el, t.defenseElement), 'crit');
           break;
         }
       }

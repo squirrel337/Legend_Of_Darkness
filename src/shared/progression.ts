@@ -184,6 +184,14 @@ export interface AbilityLevelConfig {
   hpPerLevel: number;
   /** 어빌 레벨이 오를 때마다 늘어나는 최대 마나 (15) */
   mpPerLevel: number;
+  /**
+   * 2차 직업의 위력 배율 (어빌 1, 기본 1.05): 2차 직업 캐릭터가 주는 피해(평타·기술·마법·희생, 소환수의 체력·피해)와
+   * 회복에 숙련도 배율과 함께 곱합니다. 2차 직업 기술은 어빌 5 부터 열리므로, 2차 전직 직후(어빌 1)에도
+   * 이어받은 1차 직업 99레벨보다 세게 합니다
+   */
+  powerMin: number;
+  /** 어빌 maxLevel 의 위력 배율 (기본 1.15). 그 사이는 어빌에 따라 직선으로 오릅니다 */
+  powerMax: number;
 }
 
 /** 숙련도: 배운 기술·마법마다 0 ~ max, 쓸 때마다 확률로 1씩 오름 */
@@ -354,6 +362,18 @@ export function abilityHours(level: number, c: AbilityLevelConfig, expPerMin: nu
   if (total <= 0) return 0;
   const perMin = expPerMin * c.expRatio;
   return perMin > 0 ? total / perMin / 60 : Infinity;
+}
+
+/**
+ * 2차 직업의 위력 배율: 어빌 1 은 powerMin, 어빌 maxLevel 은 powerMax, 그 사이는 직선 (2차 직업이 아니면(어빌 0) 1).
+ * 2차 직업 캐릭터가 주는 피해(평타·기술·마법·희생, 소환수의 체력·피해)와 회복에 곱합니다. 중독·출혈·재생의 틱과
+ * 해로운 상태의 확률은 그대로입니다 (숙련도 배율과 달리)
+ */
+export function abilityPower(abilityLevel: number, c: AbilityLevelConfig): number {
+  if (abilityLevel < 1) return 1;
+  if (c.maxLevel <= 1) return c.powerMin;
+  const t = Math.min(1, (Math.floor(abilityLevel) - 1) / (c.maxLevel - 1));
+  return c.powerMin + (c.powerMax - c.powerMin) * t;
 }
 
 /** 걸리는 시간(시간 단위)을 글자로: 1시간 미만은 분, 10시간 미만은 소수 한 자리 (예: "52분", "8.9시간", "284시간") */

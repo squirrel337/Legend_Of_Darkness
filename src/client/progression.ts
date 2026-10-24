@@ -3,6 +3,7 @@
 // 스킬트리 창(K)의 탭·칸 배치·선수과목 선, HUD·캐릭터 창의 성장 글씨. 규칙은 docs/progression.md
 import { CLASS_IDS, formatNumber, type ClassId } from '../shared/constants';
 import {
+  abilityPower,
   bigNumber,
   isFirstClass,
   isSecondClass,
@@ -525,6 +526,12 @@ export function abilityExpText(self: Pick<SelfState, 'abilityLevel' | 'abilityEx
   if (self.abilityLevel < 1) return '';
   if (self.abilityExpNext <= 0) return '어빌 만렙';
   return `${bigNumber(self.abilityExp)} / ${bigNumber(self.abilityExpNext)}`;
+}
+
+/** 2차 직업 위력 (능력치 칸 G): "105%" (어빌 1) … "115%" (어빌 99). 2차 직업이 아니면 빈 글자 */
+export function secondPowerText(self: Pick<SelfState, 'abilityLevel'>, prog: Pick<PublicProgression, 'ability'>): string {
+  if (self.abilityLevel < 1) return '';
+  return `${Math.round(abilityPower(self.abilityLevel, prog.ability) * 1000) / 10}%`;
 }
 
 /** 어빌 경험치 막대의 설명: "어빌 경험치 1,234 / 5,678" (큰 수는 "5,680만 / 1억 1,360만", 만렙이면 "어빌 99 (만렙)") */

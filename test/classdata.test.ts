@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ASSAIL_COOLDOWN_MS, SKILL_GCD_MS, STATUS_INFO, type ClassId, type StatusId } from '../src/shared/constants';
+import { ASSAIL_COOLDOWN_MS, SKILL_GCD_MS, SPELL_GCD_MS, STATUS_INFO, type ClassId, type StatusId } from '../src/shared/constants';
 import {
   CRIT_MULT,
   acMagicMultiplier,
@@ -18,7 +18,7 @@ import {
   physicalBase,
   type DerivedStats,
 } from '../src/shared/formulas';
-import { DEFAULT_SECOND_FROM, profEffect } from '../src/shared/progression';
+import { abilityPower, DEFAULT_SECOND_FROM, profEffect, type SecondClassId } from '../src/shared/progression';
 import { tileInfo } from '../src/shared/tiles';
 import type { AbilityDef, ItemDef, LootEntry } from '../src/shared/types';
 import { loadConfig } from '../src/server/config';
@@ -71,12 +71,13 @@ const kitsOf = (cls: ClassId): Kit[] => {
 };
 /** 기술을 배우는 레벨: 2차 직업 기술은 스킬트리의 필요 어빌 (2차 직업 캐릭터는 늘 99레벨) */
 const needOf = (a: AbilityDef): number => gd.nodeOf(a.id)?.node.abilityLevel ?? gd.nodeOf(a.id)?.node.level ?? a.level;
+/** 2차 직업이 2차 전직해 온 1차 직업 */
+const originOf = (cls: ClassId): ClassId => DEFAULT_SECOND_FROM[cls as SecondClassId][0]!;
 /**
  * 실제 2차 직업 캐릭터의 기술 묶음: 99레벨에서 이어받은 1차 직업의 기술 전부(승급하려면 배워 둠) + 어빌 abilityLevel 까지 연 2차 직업 기술
  */
 function secondKit(kit: Kit, abilityLevel: number): Kit {
-  const first = DEFAULT_SECOND_FROM[kit.cls as keyof typeof DEFAULT_SECOND_FROM][0]!;
-  return { label: `${kit.label}@어빌${abilityLevel}`, cls: kit.cls, list: [...abilitiesOf(first), ...kit.list.filter((a) => needOf(a) <= abilityLevel)] };
+  return { label: `${kit.label}@어빌${abilityLevel}`, cls: kit.cls, list: [...abilitiesOf(originOf(kit.cls)), ...kit.list.filter((a) => needOf(a) <= abilityLevel)] };
 }
 /** 숙련도 0(새로 배움)과 100(최대, 이 체계 전에 배운 기술)의 위력 배율 */
 const PROF_EFFECTS = [profEffect(0, gd.progression.proficiency), profEffect(100, gd.progression.proficiency)];
@@ -86,19 +87,25 @@ const gearOf = (cls: ClassId, slot: 'weapon' | 'armor'): ItemDef[] =>
 
 // ───────────────────────── 밸런스 모델 ─────────────────────────
 // 같은 레벨 몬스터 하나를 상대로 한 초당 기대 피해. 능력치는 직업 비율대로 자동 분배하고, 레벨에 맞는 최고 장비를 입힙니다.
-// 평타와 피해 기술은 각자의 재사용 대기마다 씁니다 (평타와 기술의 대기는 따로 돌아감). 명중률·치명타·대상 AC를 반영하고,
-// 중독/출혈은 유지율만큼 더합니다. buffed 는 자기 강화(광폭·야수화·신속)와 대상 약화(표식·저주)를 유지율만큼,
-// 은신 기습은 은신 재사용 대기마다 한 번 반영한 값입니다. eff 는 숙련도 배율로, 게임처럼 기술의 피해와 해로운 상태의
-// 확률에만 곱합니다 (평타는 그대로).
+// 평타는 기술과 따로 자기 간격마다 칩니다. 기술·마법은 게임처럼 공용 대기(GCD: 기술 0.25초, 마법 0.5초)를 함께 쓰므로,
+// 재사용 대기마다 쓰되 1초에 쓰는 공용 대기가 1초를 넘지 않게, 공용 대기 1초당 피해가 큰 것부터 씁니다
+// (마법사처럼 마법이 많으면 공용 대기에 걸려 다 쓰지 못함). 명중률·치명타·대상 AC를 반영하고, 중독/출혈은 유지율만큼 더합니다.
+// buffed 는 자기 강화(광폭·야수화·신속)와 대상 약화(표식·저주)를 유지율만큼(거는 데 드는 공용 대기도 빼고), 은신 기습은
+// 은신 재사용 대기마다 한 번 반영한 값입니다. eff 는 숙련도 배율로, 게임처럼 기술의 피해와 해로운 상태의 확률에만 곱합니다
+// (평타는 그대로). power 는 2차 직업 위력으로, 게임처럼 평타·기술·마법 피해에 곱합니다 (중독·출혈의 틱은 그대로).
 
 const OLD_PHYSICAL: ClassId[] = ['warrior', 'rogue', 'monk'];
 const NEW_PHYSICAL: ClassId[] = ['beastkin', 'archer', 'gladiator'];
 
-function derivedAt(cls: ClassId, level: number): DerivedStats {
-  const d = charOf(cls, 1);
-  setLevelOnData(d, cfg, level);
-  autoAllocateOnData(d, gd, cfg);
-  return computeDerived({ cls: gd.classes.get(cls)!, level, stats: d.stats, bonusHp: 0, bonusMp: 0, equipment: bestGearFor(d, gd) });
+/**
+ * cls 직업 level 레벨의 능력치(statsFrom 직업 비율로 자동 분배)와 cls 의 최고 장비. 2차 직업은 2차 전직해도 능력치가 그대로이므로
+ * statsFrom 에 이어받은 1차 직업을 줍니다
+ */
+function derivedAt(cls: ClassId, level: number, statsFrom: ClassId = cls): DerivedStats {
+  const s = charOf(statsFrom, 1);
+  setLevelOnData(s, cfg, level);
+  autoAllocateOnData(s, gd, cfg);
+  return computeDerived({ cls: gd.classes.get(cls)!, level, stats: s.stats, bonusHp: 0, bonusMp: 0, equipment: bestGearFor(charOf(cls, level), gd) });
 }
 
 const monsterAt = (level: number) => monsterStats({ id: 'x', name: 'x', level, look: { body: 'rat', color: '#000000' } });
@@ -106,72 +113,118 @@ const monsterAt = (level: number) => monsterStats({ id: 'x', name: 'x', level, l
 interface Dps {
   base: number;
   buffed: number;
+  /** 1초에 쓰는 공용 대기 (초, 기본 경우): 게임처럼 1 을 넘을 수 없음 */
+  gcd: number;
+}
+interface DpsOpts {
+  /** 능력치를 분배할 직업 (2차 직업은 이어받은 1차 직업) */
+  statsFrom?: ClassId;
+  /** 2차 직업 위력 (평타·기술·마법 피해에 곱함) */
+  power?: number;
 }
 const dpsCache = new Map<string, Dps>();
 
 /** 직업(수인은 계통 묶음)의 초당 기대 피해. cls 만 주면 그 직업의 기술 전부. eff 는 기술의 숙련도 배율 */
-function dpsOf(who: ClassId | Kit, level: number, eff = 1): Dps {
+function dpsOf(who: ClassId | Kit, level: number, eff = 1, o: DpsOpts = {}): Dps {
   const kit = typeof who === 'string' ? { label: who, cls: who, list: abilitiesOf(who) } : who;
   const cls = kit.cls;
-  const key = `${kit.label}:${level}:${eff}`;
+  const power = o.power ?? 1;
+  const key = `${kit.label}:${level}:${eff}:${o.statsFrom ?? cls}:${power}`;
   const cached = dpsCache.get(key);
   if (cached) return cached;
-  const d = derivedAt(cls, level);
+  const d = derivedAt(cls, level, o.statsFrom ?? cls);
   const m = monsterAt(level);
   const roll = (d.dmgMin + d.dmgMax) / 2;
   const hit = hitChance(d.dex, level, m.dex, level, d.hit);
-  /** 초당 rate 배율만큼 치는 물리 공격의 초당 기대 피해 */
-  const phys = (rate: number, critBonus: number, ac: number): number =>
-    physicalBase(d, level, roll) * rate * hit * (1 + (CRIT_MULT - 1) * critChance(d.dex, critBonus)) * acMultiplier(ac);
-  const strikes: { rate: number; critBonus: number }[] = [{ rate: 1000 / ASSAIL_COOLDOWN_MS, critBonus: 0 }];
-  let magic = 0; // AC 적용 전 마법 피해/초
-  const dots = new Map<StatusId, number>();
+  /** 물리 배수 mult 인 공격 한 번의 기대 피해 */
+  const phys = (mult: number, critBonus: number, ac: number): number =>
+    physicalBase(d, level, roll) * mult * hit * (1 + (CRIT_MULT - 1) * critChance(d.dex, critBonus)) * acMultiplier(ac);
+  /** 피해를 주는 기술 하나: 한 번 쓸 때의 물리 배수·마법 피해(숙련도 배율 포함), 공용 대기·재사용 대기(초), 거는 중독·출혈 */
+  interface Use {
+    gcd: number;
+    cd: number;
+    mult: number;
+    critBonus: number;
+    magic: number;
+    dot?: { status: StatusId; perSec: number };
+  }
+  const uses: Use[] = [];
   let might = 1;
   let speed = 1;
   let mark = 1;
   let curse = 0;
+  /** 강화·약화만 거는 기술을 유지하는 데 드는 공용 대기 (초/초) */
+  let buffGcd = 0;
   const mine = kit.list.filter((a) => a.level <= level);
   const hideCd = mine.find((a) => a.effects.some((e) => e.type === 'status' && e.status === 'hide'))?.cooldownMs;
-  let ambush: { rate: number; critBonus: number } | null = null;
+  let ambush: { mult: number; critBonus: number; perSec: number } | null = null;
   for (const a of mine) {
-    const cd = Math.max(a.cooldownMs, SKILL_GCD_MS) / 1000;
+    const gcd = (a.kind === 'spell' ? SPELL_GCD_MS : SKILL_GCD_MS) / 1000;
+    const u: Use = { gcd, cd: Math.max(a.cooldownMs / 1000, gcd), mult: 0, critBonus: 0, magic: 0 };
+    let damage = false;
+    let buff = false;
     for (const e of a.effects) {
       if (e.type === 'physical') {
         const total = e.mult * (e.hits ?? 1) * eff;
-        strikes.push({ rate: total / cd, critBonus: e.critBonus ?? 0 });
+        u.mult += total;
+        u.critBonus = e.critBonus ?? 0;
+        damage = true;
         if (hideCd !== undefined && e.hideBonus) {
-          const rate = (total * e.hideBonus) / (Math.max(hideCd, a.cooldownMs) / 1000);
-          if (!ambush || rate > ambush.rate) ambush = { rate, critBonus: e.critBonus ?? 0 };
+          const perSec = 1 / (Math.max(hideCd, a.cooldownMs) / 1000);
+          if (!ambush || total * e.hideBonus * perSec > ambush.mult * ambush.perSec) ambush = { mult: total * e.hideBonus, critBonus: e.critBonus ?? 0, perSec };
         }
       } else if (e.type === 'magic') {
-        magic += (magicBase(e.base, e.ratio, d[e.stat ?? 'int'], level, d.magic) * eff) / cd;
+        u.magic += magicBase(e.base, e.ratio, d[e.stat ?? 'int'], level, d.magic) * eff;
+        damage = true;
       } else if (e.type === 'status') {
         const chance = STATUS_INFO[e.status].kind === 'debuff' ? Math.min(1, (e.chance ?? 1) * eff) : (e.chance ?? 1);
         const up = Math.min(1, e.durationMs / Math.max(1, a.cooldownMs)) * chance;
         const pot = e.potency ?? STATUS_INFO[e.status].potency;
-        if (e.status === 'poison' || e.status === 'bleed') dots.set(e.status, Math.max(dots.get(e.status) ?? 0, (pot + level * 1.5) * up));
+        if (e.status === 'poison' || e.status === 'bleed') u.dot = { status: e.status, perSec: (pot + level * 1.5) * up };
         if (e.status === 'might' || e.status === 'beast') might *= 1 + (pot / 100) * up;
         if (e.status === 'haste') speed *= up / Math.max(0.5, 1 - pot / 100) + (1 - up);
         if (e.status === 'mark') mark = Math.max(mark, 1 + (pot / 100) * up);
         if (e.status === 'curse') curse = Math.max(curse, pot * up);
+        if (['might', 'beast', 'haste', 'mark', 'curse'].includes(e.status)) buff = true;
       }
     }
+    if (damage) uses.push(u);
+    else if (buff) buffGcd += gcd / u.cd;
   }
-  const sum = (list: { rate: number; critBonus: number }[], ac: number) => list.reduce((s, x) => s + phys(x.rate, x.critBonus, ac), 0);
-  const dot = [...dots.values()].reduce((s, v) => s + v, 0);
-  const base = sum(strikes, m.ac) + magic * acMagicMultiplier(m.ac) + dot;
-  const buffedStrikes = ambush ? [...strikes, ambush] : strikes;
-  const buffed = (sum(buffedStrikes, m.ac + curse) * might + magic * acMagicMultiplier(m.ac + curse)) * speed * mark + dot;
-  const out = { base, buffed };
+  /** 공용 대기 budget 초 안에서, 공용 대기 1초당 피해가 큰 기술부터 재사용 대기마다 씀 */
+  const rotation = (ac: number, physMul: number, budget: number) => {
+    const value = (u: Use) => phys(u.mult, u.critBonus, ac) * physMul + u.magic * acMagicMultiplier(ac);
+    let left = budget;
+    let dps = 0;
+    const dots = new Map<StatusId, number>();
+    for (const u of [...uses].sort((x, y) => value(y) / y.gcd - value(x) / x.gcd)) {
+      const rate = Math.min(1 / u.cd, Math.max(0, left) / u.gcd);
+      left -= rate * u.gcd;
+      dps += rate * value(u);
+      // 덜 쓰면 중독·출혈도 그만큼 덜 걸림
+      if (u.dot && rate > 0) dots.set(u.dot.status, Math.max(dots.get(u.dot.status) ?? 0, u.dot.perSec * rate * u.cd));
+    }
+    return { dps, dot: [...dots.values()].reduce((x, v) => x + v, 0), used: budget - Math.max(0, left) };
+  };
+  const assail = (ac: number, physMul: number) => phys(1, 0, ac) * physMul * (1000 / ASSAIL_COOLDOWN_MS);
+  const b = rotation(m.ac, 1, 1);
+  const f = rotation(m.ac + curse, might, Math.max(0, 1 - buffGcd));
+  const amb = ambush ? phys(ambush.mult, ambush.critBonus, m.ac + curse) * might * ambush.perSec : 0;
+  const out: Dps = {
+    base: (assail(m.ac, 1) + b.dps) * power + b.dot,
+    buffed: (assail(m.ac + curse, might) + f.dps + amb) * speed * mark * power + f.dot,
+    gcd: b.used,
+  };
   dpsCache.set(key, out);
   return out;
 }
 
 /**
  * 소환사가 부를 수 있는 소환수를 모두 불렀을 때의 초당 기대 피해 (근접 + 마법). 소환수는 소환자 레벨(2차 직업은 99)로 나오고,
- * 부를 수 있는 것은 어빌 abilityLevel 까지 연 소환 기술. eff 는 소환 기술의 숙련도 배율 (게임처럼 소환수의 피해에 곱함)
+ * 부를 수 있는 것은 어빌 abilityLevel 까지 연 소환 기술. 게임처럼 근접 피해에 소환 기술의 숙련도 배율 eff 와 2차 직업 위력 power 를
+ * 곱하고, 소환수가 쓰는 마법은 그대로
  */
-function petDpsAt(level: number, abilityLevel = 99, eff = 1): number {
+function petDpsAt(level: number, abilityLevel = 99, eff = 1, power = 1): number {
   const m = monsterAt(level);
   let dps = 0;
   for (const a of abilitiesOf('summoner')) {
@@ -181,7 +234,7 @@ function petDpsAt(level: number, abilityLevel = 99, eff = 1): number {
       const def = gd.monsters.get(e.monster)!;
       const s = monsterStats({ ...def, level });
       const hit = hitChance(s.dex, level, m.dex, level, 0);
-      let one = (((s.dmg[0] + s.dmg[1]) / 2) * eff * hit * acMultiplier(m.ac)) / ((def.attackMs ?? 1400) / 1000);
+      let one = (((s.dmg[0] + s.dmg[1]) / 2) * eff * power * hit * acMultiplier(m.ac)) / ((def.attackMs ?? 1400) / 1000);
       for (const sp of def.spells ?? []) {
         const sd = gd.abilities.get(sp.id)!;
         // 몬스터 마법은 재사용 대기가 끝난 뒤 1초마다 chance 확률로 씁니다
@@ -192,6 +245,26 @@ function petDpsAt(level: number, abilityLevel = 99, eff = 1): number {
     }
   }
   return dps;
+}
+
+/** 2차 직업 위력 (어빌 L) */
+const powerAt = (L: number) => abilityPower(L, gd.progression.ability);
+
+/**
+ * 실제 2차 직업 캐릭터의 초당 기대 피해 (어빌 L, 99레벨): 이어받은 1차 직업의 기술 전부 + 어빌로 연 2차 직업 기술,
+ * 2차 전직 전의 능력치 그대로, 자기 최고 장비, 2차 직업 위력, 소환사는 부를 수 있는 소환수까지
+ */
+function secondDps(kit: Kit, L: number, eff: number): Dps {
+  const power = powerAt(L);
+  const v = dpsOf(secondKit(kit, L), 99, eff, { statsFrom: originOf(kit.cls), power });
+  if (kit.cls !== 'summoner') return v;
+  const pets = petDpsAt(99, L, eff, power);
+  return { base: v.base + pets, buffed: v.buffed + pets, gcd: v.gcd };
+}
+
+/** 2차 직업(수인은 계통마다)이 이어받은 1차 직업 99레벨(같은 숙련도)의 몇 배인지 */
+function upliftOf(kit: Kit, L: number, eff: number, k: 'base' | 'buffed'): number {
+  return secondDps(kit, L, eff)[k] / dpsOf(originOf(kit.cls), 99, eff)[k];
 }
 
 test('새 직업이 포함된 게임 데이터가 오류 없이 로드되고, 시작 장비를 바로 입을 수 있다', () => {
@@ -341,7 +414,8 @@ test('소환수를 모두 불러도 다른 직업 한 명의 몫을 넘지 않�
     }
   assert.ok(power <= 2, `소환수 전체의 공격 ${power.toFixed(2)}마리 몫 (2 이하)`);
   assert.ok(hp <= 7, `소환수 전체의 체력 ${hp.toFixed(2)}마리 몫 (7 이하)`);
-  // 소환사는 늘 99레벨이라 소환수도 99레벨로 나오고, 어빌이 오를수록 부를 수 있는 것이 늘어남. 숙련도는 양쪽에 같게
+  // 소환사는 늘 99레벨이라 소환수도 99레벨로 나오고, 어빌이 오를수록 부를 수 있는 것이 늘어남. 숙련도는 양쪽에 같게,
+  // 2차 직업 위력은 소환수와 다른 2차 직업 모두에 곱하므로 빼고 견줌
   for (const eff of PROF_EFFECTS)
     for (const L of ABILITY_STEPS) {
       const pets = petDpsAt(99, L, eff);
@@ -362,40 +436,55 @@ test('1차 물리 직업은 숙련도 0(새로 배움)·100(최대) 모두 어�
       }
 });
 
-test('2차 직업은 99레벨에서 어빌로 큰다 (1차 직업 기술 전부 + 어빌로 연 2차 직업 기술, 숙련도 0·100): 어빌이 오를수록 세지고, 어빌 99 에는 이어받은 1차 직업보다 세되 너무 앞서지 않는다', () => {
+/** 어빌 중간 (2차 직업 기술의 절반쯤이 열린 때) */
+const MID_ABILITY = 45;
+
+test('밸런스 모델은 게임처럼 공용 대기를 지킨다: 기술·마법을 합쳐 1초에 1초 넘게 쓰지 않고, 공격 마법이 많은 마법사는 공용 대기에 걸린다', () => {
   for (const eff of PROF_EFFECTS) {
-    const oldBest = (k: keyof Dps) => Math.max(...OLD_PHYSICAL.map((c) => dpsOf(c, 99, eff)[k]));
-    // 물리 2차 직업 (수인은 계통마다 따로: 어느 계통을 골라도 같은 범위 안)
-    for (const kit of NEW_PHYSICAL.flatMap(kitsOf)) {
-      const first = dpsOf(DEFAULT_SECOND_FROM[kit.cls as keyof typeof DEFAULT_SECOND_FROM][0]!, 99, eff);
-      let prev: Dps = { base: 0, buffed: 0 };
-      for (const L of ABILITY_STEPS) {
-        const v = dpsOf(secondKit(kit, L), 99, eff);
-        const at = `${kit.label} 어빌 ${L} (숙련 배율 ${eff})`;
-        for (const k of ['base', 'buffed'] as const) assert.ok(v[k] >= prev[k] - 1e-9, `${at}: 어빌이 올랐는데 약해짐 (${k} ${prev[k].toFixed(0)} → ${v[k].toFixed(0)})`);
-        prev = v;
-        // 2차 전직 직후(어빌 1)에도 이어받은 1차 직업 99레벨보다 크게 약해지지 않음
-        if (L === 1) assert.ok(v.base >= 0.75 * first.base, `${at}: ${v.base.toFixed(0)} / 1차 직업 ${first.base.toFixed(0)}`);
-      }
-      const top = prev;
-      const at = `${kit.label} 어빌 99 (숙련 배율 ${eff})`;
+    for (const c of [...gd.classes.keys()].filter((x) => x !== 'peasant')) assert.ok(dpsOf(c, 99, eff).gcd <= 1 + 1e-9, c);
+    for (const kit of NEW_CLASSES.flatMap(kitsOf)) assert.ok(secondDps(kit, 99, eff).gcd <= 1 + 1e-9, kit.label);
+    // 재사용 대기만 보면 마법사는 1초에 마법을 10번 넘게 쓰는 셈이라, 마법사의 마법을 이어받는 소환사가 늘 약해 보였음
+    assert.ok(dpsOf('wizard', 99, eff).gcd > 0.99, `마법사 공용 대기 ${dpsOf('wizard', 99, eff).gcd.toFixed(2)}초/초`);
+  }
+});
+
+test('2차 직업은 이어받은 1차 직업 99레벨보다 늘 세다 (숙련도 0·100, 같은 능력치, 각자 최고 장비, 소환사는 소환수까지): 2차 전직 직후(어빌 1)에도 5% 이상, 어빌이 오를수록 더, 어빌 99 에는 1.3배 이상', () => {
+  // 2차 직업 기술은 어빌 5 부터 열리므로 어빌 1 의 차이는 장비와 2차 직업 위력뿐 (2차 전직은 능력치·기술·숙련도를 바꾸지 않음)
+  assert.ok(Math.min(...NEW_CLASSES.flatMap((c) => abilitiesOf(c).map(needOf))) > 1);
+  for (const eff of PROF_EFFECTS)
+    for (const kit of NEW_CLASSES.flatMap(kitsOf))
       for (const k of ['base', 'buffed'] as const) {
-        assert.ok(top[k] >= 1.2 * first[k], `${at}(${k}): ${top[k].toFixed(0)} / 1차 직업 ${first[k].toFixed(0)}`);
-        assert.ok(top[k] <= 2 * oldBest(k), `${at}(${k}): ${top[k].toFixed(0)} / 가장 센 1차 직업 ${oldBest(k).toFixed(0)}`);
+        const r = (L: number) => upliftOf(kit, L, eff, k);
+        const at = (L: number) => `${kit.label} 어빌 ${L} (숙련 배율 ${eff}, ${k}): 1차 직업 99레벨의 ${r(L).toFixed(3)}배`;
+        assert.ok(r(1) >= 1.05, at(1));
+        for (let i = 1; i < ABILITY_STEPS.length; i++) assert.ok(r(ABILITY_STEPS[i]!) > r(ABILITY_STEPS[i - 1]!), `어빌이 올랐는데 세지지 않음: ${at(ABILITY_STEPS[i]!)}`);
+        assert.ok(r(MID_ABILITY) >= 1.15, at(MID_ABILITY));
+        assert.ok(r(99) >= 1.3, at(99));
       }
+});
+
+test('어느 2차 직업도 다른 2차 직업을 크게 앞서지 않는다: 1차 직업 대비 배율이 서로 1.25배 안 (어빌 45·99), 물리 2차 직업끼리의 초당 피해도 비슷', () => {
+  const kits = NEW_CLASSES.flatMap(kitsOf);
+  for (const eff of PROF_EFFECTS) {
+    for (const L of [MID_ABILITY, 99]) {
+      const up = kits.map((kit) => upliftOf(kit, L, eff, 'base'));
+      const list = kits.map((kit, i) => `${kit.label} ${up[i]!.toFixed(2)}`).join(' / ');
+      assert.ok(Math.max(...up) <= 1.25 * Math.min(...up), `어빌 ${L} (숙련 배율 ${eff}): ${list}`);
     }
-    // 궁사는 멀리서 쏘는 만큼 검투사보다 약함 (어빌 99)
-    const arch = dpsOf(secondKit(kitsOf('archer')[0]!, 99), 99, eff);
-    const glad = dpsOf(secondKit(kitsOf('gladiator')[0]!, 99), 99, eff);
-    for (const k of ['base', 'buffed'] as const) assert.ok(arch[k] <= 0.9 * glad[k], `궁사 ${arch[k].toFixed(0)} / 검투사 ${glad[k].toFixed(0)} (${k}, 숙련 배율 ${eff})`);
-    // 바드·소환사(마법 + 소환수): 어빌이 오를수록 세지고, 어빌 99 에는 2차 전직 직후보다 확실히 셈
-    for (const cls of ['bard', 'summoner'] as const) {
-      const kit = kitsOf(cls)[0]!;
-      const dps = (L: number) => dpsOf(secondKit(kit, L), 99, eff).base + (cls === 'summoner' ? petDpsAt(99, L, eff) : 0);
-      for (let i = 1; i < ABILITY_STEPS.length; i++)
-        assert.ok(dps(ABILITY_STEPS[i]!) >= dps(ABILITY_STEPS[i - 1]!) - 1e-9, `${cls} 어빌 ${ABILITY_STEPS[i]} (숙련 배율 ${eff})`);
-      assert.ok(dps(99) >= 1.2 * dps(1), `${cls}: 어빌 99 ${dps(99).toFixed(0)} / 어빌 1 ${dps(1).toFixed(0)}`);
+    // 강화를 넣은 배율은 공격 강화가 없는 무도가에서 온 수인이 크게 나오므로, 물리 2차 직업은 초당 피해 자체로도 비교
+    const phys = NEW_PHYSICAL.flatMap(kitsOf);
+    for (const k of ['base', 'buffed'] as const) {
+      const v = phys.map((kit) => secondDps(kit, 99, eff)[k]);
+      const list = phys.map((kit, i) => `${kit.label} ${v[i]!.toFixed(0)}`).join(' / ');
+      assert.ok(Math.min(...v) >= (k === 'base' ? 0.8 : 0.7) * Math.max(...v), `어빌 99 (숙련 배율 ${eff}, ${k}): ${list}`);
+      // 물리 2차 직업은 가장 센 1차 물리 직업의 2배를 넘지 않음
+      const oldBest = Math.max(...OLD_PHYSICAL.map((c) => dpsOf(c, 99, eff)[k]));
+      assert.ok(Math.max(...v) <= 2 * oldBest, `${list} / 가장 센 1차 물리 직업 ${oldBest.toFixed(0)}`);
     }
+    // 궁사는 멀리서 쏘는 만큼 어빌로 얻는 몫이 근접 2차 직업(검투사·수인)보다 작음
+    const arch = upliftOf(kitsOf('archer')[0]!, 99, eff, 'base');
+    for (const kit of [...kitsOf('gladiator'), ...kitsOf('beastkin')])
+      assert.ok(arch <= upliftOf(kit, 99, eff, 'base'), `궁사 ${arch.toFixed(2)} / ${kit.label} ${upliftOf(kit, 99, eff, 'base').toFixed(2)} (숙련 배율 ${eff})`);
   }
 });
 

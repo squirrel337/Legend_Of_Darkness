@@ -10,7 +10,7 @@ import { DEFAULT_AUTO_SETTINGS } from '../src/shared/autohunt';
 import type { ClassId } from '../src/shared/constants';
 import { abilityExpToNext } from '../src/shared/progression';
 import { startServer, type RunningServer } from '../src/server/app';
-import { applyDamage, monsterUseAbility, playerUseAbility, removeStatus } from '../src/server/systems/combat';
+import { applyDamage, monsterUseAbility, playerAssail, playerUseAbility, removeStatus } from '../src/server/systems/combat';
 import { rebirthOnData } from '../src/server/systems/progression';
 import type { NpcDef } from '../src/shared/types';
 import type { MapInstance } from '../src/server/world/MapInstance';
@@ -248,12 +248,69 @@ test('숙련도 배율: 소환수의 체력·피해도 소환 기술의 숙련�
   assert.ok(Math.abs(f100.maxHp / hp0 - 1.15 / 0.7) < 0.02, `${hp0} → ${f100.maxHp}`);
   assert.equal(f100.hp, f100.maxHp);
   assert.ok(Math.abs(f100.stats.dmg[1] / dmg0[1]! - 1.15 / 0.7) < 0.1, `${dmg0} → ${f100.stats.dmg}`);
-  // 기준 (같은 레벨의 그 몬스터) 의 70% · 115%
+  // 기준 (같은 레벨의 그 몬스터) 의 70% · 115%, 소환사는 2차 직업이라 2차 직업 위력(어빌 1 은 105%)도 곱함
+  assert.equal(p.data.abilityLevel, 1);
   const base = new Monster(0, data().monsters.get('spirit_fox')!, p.level);
-  assert.ok(Math.abs(hp0 / base.maxHp - 0.7) < 0.01);
-  assert.ok(Math.abs(f100.maxHp / base.maxHp - 1.15) < 0.01);
+  assert.ok(Math.abs(hp0 / base.maxHp - 0.7 * 1.05) < 0.01, `${hp0} / ${base.maxHp}`);
+  assert.ok(Math.abs(f100.maxHp / base.maxHp - 1.15 * 1.05) < 0.01);
   for (const m of [...p.summons]) despawn(m);
   p.summons.clear();
+});
+
+test('2차 직업 위력: 같은 능력치·장비로 어빌 1 은 105%, 어빌 99 는 115% 의 피해(평타·기술·마법)와 회복, 1차 직업은 100%', async () => {
+  const { p } = fighter;
+  const tr = training();
+  become(p, 'gladiator', 99, { g_twin: 100, first_aid: 100 });
+  // 맨손(장비 없음)·같은 능력치로 견줌. 피해·회복량이 커야 반올림의 영향이 작음
+  for (const slot of Object.keys(p.data.equipment) as (keyof typeof p.data.equipment)[]) p.data.equipment[slot] = null;
+  p.data.stats = { str: 255, int: 200, wis: 3, con: 200, dex: 3 };
+  place(p, tr, 3, 12, 1);
+  const target = spawn(tr, 'goblin', 4, 12, 10_000_000);
+  const hit = (fn: () => void): number => {
+    const before = target.hp;
+    withRandom(HIT, fn);
+    return before - target.hp;
+  };
+  const assail = () =>
+    hit(() => {
+      p.nextAssailAt = 0;
+      playerAssail(world(), p);
+    });
+  const heal = (): number => {
+    p.hp = 1;
+    withRandom(0.99, () => use(p, 'first_aid'));
+    return p.hp - 1;
+  };
+  const measure = (abilityLevel: number) => {
+    p.data.abilityLevel = abilityLevel;
+    p.recompute();
+    return { assail: assail(), twin: hit(() => use(p, 'g_twin')), heal: heal() };
+  };
+  const a1 = measure(1);
+  const a99 = measure(99);
+  for (const k of ['assail', 'twin', 'heal'] as const) {
+    assert.ok(a1[k] > 0, k);
+    assert.ok(Math.abs(a99[k] / a1[k] - 1.15 / 1.05) < 0.01, `${k}: 어빌 1 ${a1[k]} → 어빌 99 ${a99[k]}`);
+  }
+  // 1차 직업(전사)은 2차 직업 위력이 없음: 같은 능력치·맨손 평타가 어빌 1 검투사의 1/1.05
+  assert.ok(world().admin.setClass('테스트', p.name, 'warrior').ok);
+  assert.equal(p.data.abilityLevel, 0);
+  p.data.stats = { str: 255, int: 200, wis: 3, con: 200, dex: 3 };
+  p.recompute();
+  const w = assail();
+  assert.ok(Math.abs(a1.assail / w - 1.05) < 0.01, `전사 ${w} → 검투사 어빌 1 ${a1.assail}`);
+  // 마법도 같은 배율 (소환사의 정령탄)
+  become(p, 'summoner', 99, { s_bolt: 100 });
+  p.data.stats = { str: 255, int: 200, wis: 3, con: 200, dex: 3 };
+  const bolt = (abilityLevel: number) => {
+    p.data.abilityLevel = abilityLevel;
+    p.recompute();
+    return hit(() => use(p, 's_bolt', target.id));
+  };
+  const m1 = bolt(1);
+  const m99 = bolt(99);
+  assert.ok(m1 > 0 && Math.abs(m99 / m1 - 1.15 / 1.05) < 0.01, `정령탄: 어빌 1 ${m1} → 어빌 99 ${m99}`);
+  despawn(target);
 });
 
 test('어빌 경험치: 2차 직업이 몬스터를 잡으면 받은 경험치의 25% 를 함께 받고, 모이면 어빌 업 (1차 직업은 없음)', async () => {

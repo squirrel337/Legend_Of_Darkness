@@ -11,6 +11,7 @@ import {
   abilityExpToNext,
   abilityExpTotal,
   abilityHours,
+  abilityPower,
   abilityVitals,
   bigNumber,
   classTier,
@@ -111,7 +112,7 @@ test('progression.json 의 기본값은 설계 문서(원작 수치)와 같다',
     p.second.beastTypes.map((b) => b.name),
     ['포유류', '조류', '파충류'],
   );
-  assert.deepEqual(p.ability, { maxLevel: 99, expRatio: 0.25, expBase: 1_000_000, expGrowth: 1.05, hpPerLevel: 30, mpPerLevel: 15 });
+  assert.deepEqual(p.ability, { maxLevel: 99, expRatio: 0.25, expBase: 1_000_000, expGrowth: 1.05, hpPerLevel: 30, mpPerLevel: 15, powerMin: 1.05, powerMax: 1.15 });
   assert.deepEqual(p.proficiency, { max: 100, baseChance: 0.35, slowdown: 0.8, minChance: 0.03, effectMin: 0.7, effectMax: 1.15 });
 });
 
@@ -162,6 +163,10 @@ test('설계 검사는 없는 id, 선수과목 순환, 범위 밖 값, 알 수 �
   assert.ok(has(errorsOf((d) => (d.progression.ability.expGrowth = 2.5)), /expGrowth/));
   assert.ok(has(errorsOf((d) => (d.progression.ability.maxLevel = 999)), /어빌 1 → 999 에 필요한 어빌 경험치가 .*너무 큽니다/));
   assert.deepEqual(errorsOf((d) => (d.progression.ability.expGrowth = 1)), [], '배율 1 은 어빌마다 같은 양');
+  // 2차 직업 위력: 0.1~10, 어빌 최대의 위력은 어빌 1 의 위력 이상
+  assert.ok(has(errorsOf((d) => (d.progression.ability.powerMin = 0)), /powerMin/));
+  assert.ok(has(errorsOf((d) => (d.progression.ability.powerMax = 11)), /powerMax/));
+  assert.ok(has(errorsOf((d) => (d.progression.ability.powerMax = 1)), /powerMax\(어빌 최대의 위력\)는 powerMin\(어빌 1 의 위력\) 이상/));
   assert.ok(has(errorsOf((d) => d.progression.rebirth.conditions.warrior.push({ type: 'boss' } as never)), /알 수 없는 조건 종류 'boss'/));
   assert.ok(has(errorsOf((d) => d.progression.ascend.conditions.rogue.push({ type: 'skillProf', ability: 'nope', min: 100 })), /nope/));
   assert.ok(has(errorsOf((d) => delete (d.skillTrees.trees as Partial<SkillTreesConfig['trees']>).bard), /skilltrees\.json\(bard\).*트리가 없습니다/));
@@ -198,6 +203,9 @@ test('설계 검사는 성장이 막히는 설계를 경고한다: 숙련도가 
   // 둘 중 하나만 0 이면 오름
   assert.deepEqual(warningsOf((d) => (d.progression.proficiency.minChance = 0)), []);
   assert.ok(has(warningsOf((d) => (d.progression.ability.expRatio = 0)), /progression\.json\(ability\).*어빌 1 에 머뭅니다/));
+  // 2차 직업 위력이 100% 보다 낮으면 2차 전직 직후에 1차 직업보다 약해질 수 있음
+  assert.ok(has(warningsOf((d) => (d.progression.ability.powerMin = 0.95)), /progression\.json\(ability\).*powerMin 이 95% 라 .*약해질 수 있습니다/));
+  assert.deepEqual(warningsOf((d) => (d.progression.ability.powerMin = 1)), []);
   const noAsc = warningsOf((d) => (d.progression.second.conditions.archer = d.progression.second.conditions.archer.filter((c) => c.type !== 'ascended')));
   assert.ok(has(noAsc, /second\.conditions\.archer.*승급하지 않아도 궁사\(으\)로 2차 전직/), JSON.stringify(noAsc));
   assert.equal(noAsc.length, 1, '그 직업만');
@@ -220,19 +228,19 @@ test('잘못된 설계 파일이 있으면 서버가 어디가 틀렸는지 알�
   }
 });
 
-test('어빌 표 항목(expBase·expGrowth)이 생기기 전의 progression.json 과 판 기록도 기본값으로 채워 읽고 경고한다', () => {
+test('어빌 표·2차 직업 위력 항목(expBase·expGrowth·powerMin·powerMax)이 생기기 전의 progression.json 과 판 기록도 기본값으로 채워 읽고 경고한다', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-prog-old-'));
   try {
     fs.cpSync(DIR, tmp, { recursive: true });
     const old = readJson('progression.json') as ProgressionConfig;
-    const { expBase: _b, expGrowth: _g, ...ability } = old.ability;
-    void _b;
-    void _g;
+    const { expBase: _b, expGrowth: _g, powerMin: _p, powerMax: _q, ...ability } = old.ability;
+    void [_b, _g, _p, _q];
     const oldProg = { ...old, ability };
     fs.writeFileSync(path.join(tmp, 'progression.json'), JSON.stringify(oldProg));
     const loaded = GameData.load(tmp);
     assert.equal(loaded.progression.ability.expBase, 1_000_000);
     assert.equal(loaded.progression.ability.expGrowth, 1.05);
+    assert.deepEqual([loaded.progression.ability.powerMin, loaded.progression.ability.powerMax], [1.05, 1.15]);
     assert.ok(has(loaded.designWarnings, /progression\.json\(ability\).*생기기 전의 설계.*expBase 1000000, expGrowth 1\.05/), JSON.stringify(loaded.designWarnings));
     // 판 기록의 옛 설계로 되돌리기(applyDesign)도 같은 기본값으로
     const live = GameData.load(DIR);
@@ -385,6 +393,13 @@ test('숙련도·어빌리티 공식과 직업 단계', () => {
   assert.equal(abilityExpToNext(98, A), Math.round(1_000_000 * 1.05 ** 97));
   assert.ok(abilityExpToNext(50, A) > 10 * expToNext(50));
   assert.equal(abilityExpToNext(99, A), 0);
+  // 2차 직업 위력: 어빌 1 105% → 어빌 99 115% 직선, 2차 직업이 아니면(어빌 0) 1
+  assert.equal(abilityPower(0, A), 1);
+  assert.equal(abilityPower(1, A), 1.05);
+  assert.ok(Math.abs(abilityPower(50, A) - 1.1) < 1e-12);
+  assert.ok(Math.abs(abilityPower(99, A) - 1.15) < 1e-12);
+  assert.ok(Math.abs(abilityPower(500, A) - 1.15) < 1e-12, '최대 어빌에서 멈춤');
+  assert.equal(abilityPower(1, { ...A, maxLevel: 1 }), 1.05);
   assert.equal(abilityExpTotal(1, A), 0);
   assert.equal(abilityExpTotal(3, A), 2_050_000);
   assert.equal(abilityExpTotal(150, A), abilityExpTotal(99, A), '최대 어빌에서 멈춤');
