@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { STAT_KEYS } from '../src/shared/constants';
-import { expToNext, START_STAT } from '../src/shared/formulas';
+import { START_STAT } from '../src/shared/formulas';
 import { profGainChance, titleOf, type Condition, type SkillTreesConfig } from '../src/shared/progression';
 import { loadConfig } from '../src/server/config';
 import { GameData } from '../src/server/gamedata';
@@ -605,16 +605,16 @@ test('2차 전직: 수인은 계통을 골라야 하고, 고른 계통은 바꿀
 
 // ───────────────────────── 어빌리티 ─────────────────────────
 
-test('어빌리티: 몬스터 경험치의 25% 를 어빌 경험치로, expToNext 만큼 모이면 어빌 업, 오를 때마다 체력 +30·마나 +15', () => {
+test('어빌리티: 몬스터 경험치의 25% 를 어빌 경험치로, 어빌 표(100만 × 1.05^(어빌−1))만큼 모이면 어빌 업, 오를 때마다 체력 +30·마나 +15', () => {
   const d = readyRogue({ classId: 'archer', abilityLevel: 1, abilityExp: 0 });
   assert.equal(abilityExpShare(d, gd, 1000), 250);
   assert.equal(abilityExpShare(d, gd, 3), 0, '버림');
   assert.equal(abilityExpShare(readyRogue(), gd, 1000), 0, '1차 직업은 어빌 경험치가 없음');
   const pure0 = pureVitals(d, gd);
-  const need = expToNext(1) + expToNext(2);
+  const need = 1_000_000 + 1_050_000;
   assert.equal(addAbilityExpToData(d, gd, need - 1), 1);
   assert.equal(d.abilityLevel, 2);
-  assert.equal(d.abilityExp, expToNext(2) - 1);
+  assert.equal(d.abilityExp, 1_050_000 - 1);
   assert.equal(addAbilityExpToData(d, gd, 6), 1);
   assert.equal(d.abilityLevel, 3);
   assert.equal(d.abilityExp, 5);

@@ -8,10 +8,17 @@ import { test } from 'node:test';
 import { CLASS_IDS, MAX_ABILITIES, SKILL_GCD_MS, STAT_KEYS, type ClassId, type StatKey } from '../src/shared/constants';
 import { autoAllocate, START_STAT } from '../src/shared/formulas';
 import {
+  ABILITY_MILESTONES,
+  abilityExpToNext,
+  abilityExpTotal,
+  abilityHours,
+  bigNumber,
   classTier,
   FIRST_CLASSES,
+  formatHours,
   learnStatus,
   profGainChance,
+  REFERENCE_EXP_PER_MIN,
   rebirthName,
   SECOND_CLASSES,
   type FirstClassId,
@@ -414,6 +421,26 @@ test('길드장: 1차 직업 길드장은 전직(무도가는 환골탈태)을 �
   for (const n of treeNodes('beastkin').filter((x) => x.beastType)) assert.ok(beast.includes(nameOf(n.ability)), `수인 족장: ${nameOf(n.ability)}`);
 });
 
+// ───────────────────────── 어빌 속도 ─────────────────────────
+
+test('어빌은 원작처럼 긴 목표: 배율 1 로 어둠의 심연을 사냥하면 첫 2차 직업 기술(어빌 5)은 한 시간 안, 어빌 45 는 수십 시간, 99 는 수백 시간', () => {
+  // 사냥 속도는 리뷰에서 잰 분당 경험치 30만~50만 (그 25% 가 어빌 경험치)
+  const [slow, fast] = REFERENCE_EXP_PER_MIN;
+  const at = (L: number) => [abilityHours(L, P.ability, fast), abilityHours(L, P.ability, slow)] as const;
+  const show = (L: number) => `어빌 ${L}: ${at(L).map(formatHours).join(' ~ ')}`;
+  // 첫 2차 직업 기술: 느린 사냥으로도 한 시간 안, 빠른 사냥으로도 20분은 넘게 (곧바로 열리지 않음)
+  const firstSkill = Math.min(...SECOND_CLASSES.flatMap((c) => treeNodes(c).map(needOf)));
+  assert.equal(firstSkill, 5);
+  assert.ok(at(firstSkill)[1] <= 1 && at(firstSkill)[0] >= 1 / 3, show(firstSkill));
+  // 어빌 45: 수십 시간 (10시간 ~ 100시간)
+  assert.ok(at(45)[0] >= 10 && at(45)[1] <= 100, show(45));
+  // 어빌 99: 수백 시간 (200시간 ~ 1,000시간), 2차 전직 비용(10억, 약 34~55시간)보다 몇 배 긴 목표
+  assert.ok(at(99)[0] >= 200 && at(99)[1] <= 1000, show(99));
+  assert.ok(at(99)[0] >= 5 * (1_000_000_000 / fast / 60), show(99));
+  // 어빌이 오를수록 한 칸이 길어짐
+  for (let L = 2; L < P.ability.maxLevel; L++) assert.ok(abilityExpToNext(L, P.ability) >= abilityExpToNext(L - 1, P.ability), `어빌 ${L}`);
+});
+
 // ───────────────────────── 설계 문서 ─────────────────────────
 
 /** "14,000" → 14000, "1억" → 1억, "2억 5천만" → 2억 5천만 */
@@ -517,6 +544,23 @@ test('progression.json 의 수치는 설계 문서(docs/progression.md)의 표·
   }
   has(/몬스터 경험치의 일정 비율\(기본 25%\)/);
   assert.equal(P.ability.expRatio, 0.25);
+  // 4. 어빌 표와 걸리는 시간 (문서의 표가 지금 설정으로 계산한 값과 같은지)
+  has(/어빌 L → L\+1 에 필요한 어빌 경험치는 \*\*100만 × 1\.05\^\(L−1\)\*\*/);
+  assert.deepEqual([P.ability.expBase, P.ability.expGrowth], [koNumber('100만'), 1.05]);
+  const hoursTable = tableAfter(doc, '## 4.');
+  assert.deepEqual(
+    hoursTable.map((r) => Number(/^\d+/.exec(r[0]!)?.[0])),
+    [...ABILITY_MILESTONES],
+    '문서의 어빌 시간 표',
+  );
+  const [slow, fast] = REFERENCE_EXP_PER_MIN;
+  for (const [lv, total, time] of hoursTable) {
+    const L = Number(/^\d+/.exec(lv!)![0]);
+    const want = abilityExpTotal(L, P.ability);
+    const got = koNumber(total!.replace(/^약\s*/, ''));
+    assert.ok(Math.abs(got - want) <= want * 0.005, `어빌 ${L}: 문서 ${total} / 계산 ${bigNumber(want)}`);
+    assert.equal(time, `${formatHours(abilityHours(L, P.ability, fast))} ~ ${formatHours(abilityHours(L, P.ability, slow))}`, `어빌 ${L} 걸리는 시간`);
+  }
   has(/최대 체력 \+30, 최대 마나 \+15/);
   assert.deepEqual([P.ability.hpPerLevel, P.ability.mpPerLevel, P.ability.maxLevel], [30, 15, 99]);
   has(/max\(3%, 35% × \(1 − 0\.8 × 숙련도\/100\)\)/);

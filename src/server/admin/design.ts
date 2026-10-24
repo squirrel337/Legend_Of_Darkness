@@ -162,6 +162,7 @@ export class DesignApi {
       }),
       maxLevel: cfg.maxLevel,
       statCap: cfg.statCap,
+      expRate: cfg.expRate,
       warnings: [...gd.designWarnings, ...this.serverIssues(gd.skillTrees, gd.progression), ...this.diskIssues()],
     };
   }

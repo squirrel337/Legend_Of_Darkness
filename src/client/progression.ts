@@ -3,6 +3,7 @@
 // 스킬트리 창(K)의 탭·칸 배치·선수과목 선, HUD·캐릭터 창의 성장 글씨. 규칙은 docs/progression.md
 import { CLASS_IDS, formatNumber, type ClassId } from '../shared/constants';
 import {
+  bigNumber,
   isFirstClass,
   isSecondClass,
   learnStatus,
@@ -516,9 +517,19 @@ export function abilityExpPct(self: Pick<SelfState, 'abilityLevel' | 'abilityExp
   return Math.max(0, Math.min(100, (self.abilityExp / self.abilityExpNext) * 100));
 }
 
-/** 어빌 경험치 막대의 설명: "어빌 경험치 1,234 / 5,678" (만렙이면 "어빌 만렙") */
+/**
+ * 지금 어빌의 어빌 경험치 / 다음 어빌까지: "1,234 / 5,678", 큰 수는 한글 단위로 "5,680만 / 1억 1,360만"
+ * (어빌 표가 가팔라 뒤쪽 어빌은 한 칸이 1억을 넘습니다). 만렙이면 "어빌 만렙", 2차 직업이 아니면 빈 글자
+ */
+export function abilityExpText(self: Pick<SelfState, 'abilityLevel' | 'abilityExp' | 'abilityExpNext'>): string {
+  if (self.abilityLevel < 1) return '';
+  if (self.abilityExpNext <= 0) return '어빌 만렙';
+  return `${bigNumber(self.abilityExp)} / ${bigNumber(self.abilityExpNext)}`;
+}
+
+/** 어빌 경험치 막대의 설명: "어빌 경험치 1,234 / 5,678" (큰 수는 "5,680만 / 1억 1,360만", 만렙이면 "어빌 99 (만렙)") */
 export function abilityExpTitle(self: Pick<SelfState, 'abilityLevel' | 'abilityExp' | 'abilityExpNext'>): string {
   if (self.abilityLevel < 1) return '';
   if (self.abilityExpNext <= 0) return `어빌 ${self.abilityLevel} (만렙)`;
-  return `어빌 경험치 ${formatNumber(self.abilityExp)} / ${formatNumber(self.abilityExpNext)}`;
+  return `어빌 경험치 ${abilityExpText(self)}`;
 }

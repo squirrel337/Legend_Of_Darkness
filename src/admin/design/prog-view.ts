@@ -3,14 +3,19 @@
 import { h } from '../../client/ui/dom';
 import { type ClassId } from '../../shared/constants';
 import {
+  ABILITY_MILESTONES,
   abilityExpToNext,
+  abilityExpTotal,
+  abilityHours,
   abilityVitals,
   bigNumber,
   CONDITION_TYPES,
   describeCondition,
   FIRST_CLASSES,
+  formatHours,
   profEffect,
   profGainChance,
+  REFERENCE_EXP_PER_MIN,
   SECOND_CLASSES,
   type Condition,
   type ConditionType,
@@ -602,9 +607,17 @@ export function renderGrowth(ctx: Ctx): HTMLElement {
     return h('span', { class: 'dz-line' }, el, h('span', { class: 'dz-unit' }, '%'));
   };
   const top = abilityVitals(ab.maxLevel, ab);
-  let totalAbExp = 0;
-  for (let l = 1; l < ab.maxLevel; l++) totalAbExp += abilityExpToNext(l, ab);
-  const sample = [1, 10, 30, 50, 70, 90, ab.maxLevel - 1].filter((l, i, arr) => l >= 1 && l < ab.maxLevel && arr.indexOf(l) === i);
+  // 걸리는 시간: 심연 자동사냥의 분당 경험치(배율 1 에서 잰 값) × 지금 서버 배율
+  const rate = s.bundle.expRate;
+  const [slow, fast] = REFERENCE_EXP_PER_MIN.map((v) => v * rate) as [number, number];
+  const hours = (l: number) => {
+    const a = abilityHours(l, ab, fast);
+    const b = abilityHours(l, ab, slow);
+    const x = formatHours(a);
+    const y = formatHours(b);
+    return x === y ? x : `${x} ~ ${y}`;
+  };
+  const marks = [...ABILITY_MILESTONES.filter((l) => l < ab.maxLevel), ab.maxLevel].filter((l, i, arr) => l > 1 && arr.indexOf(l) === i);
   // 숙련도 0 → 최대까지 평균 몇 번 써야 하는지
   let uses = 0;
   for (let k = 0; k < pf.max; k++) {
@@ -626,6 +639,8 @@ export function renderGrowth(ctx: Ctx): HTMLElement {
           { class: 'dz-row2' },
           field('어빌 최대', numInput('ab.max', ab.maxLevel, (v) => setP((x) => (x.ability.maxLevel = v ?? 99)), { min: 1, max: 999 }, err)),
           field('어빌 경험치 비율', pctInput('ab.ratio', ab.expRatio, (v) => setP((x) => (x.ability.expRatio = v)), 0, 10), '몬스터를 잡아 받은 경험치 중 어빌 경험치로도 받는 몫'),
+          field('어빌 1 → 2 어빌 경험치', numInput('ab.base', ab.expBase, (v) => setP((x) => (x.ability.expBase = v ?? 1)), { min: 1, max: 1e15, big: true }, err), '첫 어빌 한 칸에 필요한 어빌 경험치'),
+          field('어빌마다 필요량 배율', pctInput('ab.growth', ab.expGrowth, (v) => setP((x) => (x.ability.expGrowth = v)), 1, 2), '어빌 L → L+1 = 첫 필요량 × 배율^(L−1)'),
           field('어빌이 오를 때 최대 체력', numInput('ab.hp', ab.hpPerLevel, (v) => setP((x) => (x.ability.hpPerLevel = v ?? 0)), { min: 0, max: 100_000 }, err)),
           field('어빌이 오를 때 최대 마나', numInput('ab.mp', ab.mpPerLevel, (v) => setP((x) => (x.ability.mpPerLevel = v ?? 0)), { min: 0, max: 100_000 }, err)),
         ),
@@ -633,16 +648,33 @@ export function renderGrowth(ctx: Ctx): HTMLElement {
         h(
           'table',
           { class: 'dz-matrix wide' },
-          h('thead', null, h('tr', null, h('th', null, '어빌'), h('th', null, '다음 어빌까지 어빌 경험치'), h('th', null, '몬스터 경험치로 치면'))),
+          h(
+            'thead',
+            null,
+            h('tr', null, h('th', null, '어빌'), h('th', null, '그 어빌로 오르는 한 칸'), h('th', null, '어빌 1 부터 모을 어빌 경험치'), h('th', null, '몬스터 경험치로 치면'), h('th', null, '걸리는 시간')),
+          ),
           h(
             'tbody',
             null,
-            ...sample.map((l) => {
-              const need = abilityExpToNext(l, ab);
-              return h('tr', null, h('th', null, `${l} → ${l + 1}`), h('td', null, bigNumber(need)), h('td', null, ab.expRatio > 0 ? bigNumber(need / ab.expRatio) : '—'));
+            ...marks.map((l) => {
+              const total = abilityExpTotal(l, ab);
+              const step = abilityExpToNext(l - 1, ab);
+              return h(
+                'tr',
+                null,
+                h('th', null, `${l}`),
+                h('td', null, bigNumber(step)),
+                h('td', null, bigNumber(total)),
+                h('td', null, ab.expRatio > 0 ? bigNumber(total / ab.expRatio) : '—'),
+                h('td', null, hours(l)),
+              );
             }),
-            h('tr', null, h('th', null, `1 → ${ab.maxLevel}`), h('td', null, bigNumber(totalAbExp)), h('td', null, ab.expRatio > 0 ? bigNumber(totalAbExp / ab.expRatio) : '—')),
           ),
+        ),
+        h(
+          'p',
+          { class: 'dz-hint' },
+          `걸리는 시간은 2차 전직 직후(어빌 1)부터, 만렙 장비로 어둠의 심연을 자동사냥해 분당 경험치 ${bigNumber(slow)}~${bigNumber(fast)}을(를) 받을 때입니다 (경험치 배율 1 에서 잰 분당 ${bigNumber(REFERENCE_EXP_PER_MIN[0])}~${bigNumber(REFERENCE_EXP_PER_MIN[1])} × 지금 서버 배율 ${rate}).`,
         ),
       ),
       card(
