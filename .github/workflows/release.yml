@@ -1,0 +1,42 @@
+name: Release
+
+# v 로 시작하는 태그(예: v1.0.0)를 올리면 검사·빌드를 거쳐 실행 꾸러미를 만들고 GitHub 릴리즈를 엽니다.
+# 릴리즈 설명은 docs/releases/<태그>.md 를 쓰고, 그 파일이 없으면 커밋 목록으로 만듭니다.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: 실행 꾸러미 만들기
+        run: |
+          NAME="legend-of-darkness-${GITHUB_REF_NAME}"
+          mkdir -p "release/${NAME}"
+          cp -r dist public gamedata docs package.json package-lock.json .env.example README.md "release/${NAME}/"
+          cd release
+          tar -czf "${NAME}.tar.gz" "${NAME}"
+          zip -qr "${NAME}.zip" "${NAME}"
+      - name: 릴리즈 만들기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "${NOTES}" ]; then SRC=(--notes-file "${NOTES}"); else SRC=(--generate-notes); fi
+          gh release create "${GITHUB_REF_NAME}" release/*.tar.gz release/*.zip \
+            --title "어둠의 전설 개인 서버 ${GITHUB_REF_NAME}" \
+            --verify-tag "${SRC[@]}"
