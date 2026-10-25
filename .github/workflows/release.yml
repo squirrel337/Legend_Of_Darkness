@@ -1,11 +1,20 @@
 name: Release
 
-# v 로 시작하는 태그(예: v1.0.0)를 올리면 검사·빌드를 거쳐 실행 꾸러미를 만들고 GitHub 릴리즈를 엽니다.
+# 검사·빌드를 거쳐 실행 꾸러미를 만들고 GitHub 릴리즈를 엽니다. 두 가지로 돌릴 수 있습니다.
+# - v 로 시작하는 태그(예: v1.0.0)를 올리면 그 태그의 커밋으로.
+# - Actions 탭의 Release → Run workflow 에서 브랜치와 태그 이름을 넣으면, 그 브랜치의 머리 커밋으로 빌드하고
+#   그 커밋에 태그를 새로 답니다 (이미 있는 태그는 받지 않습니다).
 # 릴리즈 설명은 docs/releases/<태그>.md 를 쓰고, 그 파일이 없으면 커밋 목록으로 만듭니다.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '새로 만들 릴리즈 태그 (예: v1.0.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,8 +22,20 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+      - name: 태그 확인
+        run: |
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "태그는 v1.0.0 같은 모양이어야 합니다: ${TAG}" >&2
+            exit 1
+          fi
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && git ls-remote --exit-code --tags origin "refs/tags/${TAG}" > /dev/null; then
+            echo "태그 ${TAG} 는 이미 있습니다. 새 태그 이름으로 돌리세요." >&2
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,7 +46,7 @@ jobs:
       - run: npm run build
       - name: 실행 꾸러미 만들기
         run: |
-          NAME="legend-of-darkness-${GITHUB_REF_NAME}"
+          NAME="legend-of-darkness-${TAG}"
           mkdir -p "release/${NAME}"
           cp -r dist public gamedata docs package.json package-lock.json .env.example README.md "release/${NAME}/"
           cd release
@@ -35,8 +56,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          NOTES="docs/releases/${TAG}.md"
           if [ -f "${NOTES}" ]; then SRC=(--notes-file "${NOTES}"); else SRC=(--generate-notes); fi
-          gh release create "${GITHUB_REF_NAME}" release/*.tar.gz release/*.zip \
-            --title "어둠의 전설 개인 서버 ${GITHUB_REF_NAME}" \
-            --verify-tag "${SRC[@]}"
+          # 태그를 올려 돌면 그 태그를 쓰고, Run workflow 로 돌면 지금 빌드한 커밋에 태그를 새로 답니다.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then WHERE=(--target "${GITHUB_SHA}"); else WHERE=(--verify-tag); fi
+          gh release create "${TAG}" release/*.tar.gz release/*.zip \
+            --title "어둠의 전설 개인 서버 ${TAG}" \
+            "${WHERE[@]}" "${SRC[@]}"
