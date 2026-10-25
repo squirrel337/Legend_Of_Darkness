@@ -5,6 +5,8 @@ name: Release
 # - Actions 탭의 Release → Run workflow 에서 브랜치와 태그 이름을 넣으면, 그 브랜치의 머리 커밋으로 빌드하고
 #   그 커밋에 태그를 새로 답니다 (이미 있는 태그는 받지 않습니다).
 # 릴리즈 설명은 docs/releases/<태그>.md 를 쓰고, 그 파일이 없으면 커밋 목록으로 만듭니다.
+# v1.1.0-beta.1 처럼 '-' 꼬리가 붙은 태그나 Run workflow 에서 프리릴리스를 고르면 프리릴리스(시험판)로 엽니다.
+# 이미 만든 릴리즈의 프리릴리스·정식 표시는 release-mark.yml 로 바꿉니다.
 on:
   push:
     tags:
@@ -15,6 +17,11 @@ on:
         description: '새로 만들 릴리즈 태그 (예: v1.0.0)'
         required: true
         type: string
+      prerelease:
+        description: '프리릴리스(시험판)로 만들기'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -55,11 +62,14 @@ jobs:
       - name: 릴리즈 만들기
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
           NOTES="docs/releases/${TAG}.md"
           if [ -f "${NOTES}" ]; then SRC=(--notes-file "${NOTES}"); else SRC=(--generate-notes); fi
           # 태그를 올려 돌면 그 태그를 쓰고, Run workflow 로 돌면 지금 빌드한 커밋에 태그를 새로 답니다.
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then WHERE=(--target "${GITHUB_SHA}"); else WHERE=(--verify-tag); fi
+          PRE=()
+          if [[ "${TAG}" == *-* || "${PRERELEASE}" == "true" ]]; then PRE=(--prerelease); fi
           gh release create "${TAG}" release/*.tar.gz release/*.zip \
             --title "어둠의 전설 개인 서버 ${TAG}" \
-            "${WHERE[@]}" "${SRC[@]}"
+            "${WHERE[@]}" "${SRC[@]}" "${PRE[@]}"
