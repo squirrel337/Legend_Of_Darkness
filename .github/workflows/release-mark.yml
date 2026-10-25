@@ -1,0 +1,45 @@
+name: Release mark
+
+# 이미 만든 릴리즈를 프리릴리스(시험판)로 두거나 정식 릴리즈로 바꿉니다. 꾸러미와 설명은 그대로 둡니다.
+# Actions 탭의 Release mark → Run workflow 에서 태그와 표시를 고릅니다.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '바꿀 릴리즈의 태그 (예: v1.0.0)'
+        required: true
+        type: string
+      mark:
+        description: '표시'
+        required: true
+        type: choice
+        options:
+          - 프리릴리스
+          - 정식
+        default: 프리릴리스
+
+permissions:
+  contents: write
+
+jobs:
+  mark:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      MARK: ${{ inputs.mark }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: 표시 바꾸기
+        run: |
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "태그는 v1.0.0 같은 모양이어야 합니다: ${TAG}" >&2
+            exit 1
+          fi
+          # 정식으로 바꾸면 그 릴리즈를 최신(Latest)으로 둡니다.
+          if [ "${MARK}" = "정식" ]; then
+            gh release edit "${TAG}" --prerelease=false --latest
+          else
+            gh release edit "${TAG}" --prerelease
+          fi
+          gh release view "${TAG}" --json tagName,isPrerelease,url
