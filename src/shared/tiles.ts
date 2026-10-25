@@ -42,9 +42,30 @@ export interface TileInfo {
     | 'torch'
     | 'flowers'
     | 'bones'
-    | 'stall';
+    | 'stall'
+    | 'sign'
+    | 'boulder'
+    | 'elm'
+    | 'stump'
+    | 'lamp'
+    | 'post'
+    | 'tallgrass';
   /** 바닥 무늬 */
-  pattern?: 'grass' | 'dirt' | 'cobble' | 'planks' | 'tiles' | 'cave' | 'sand' | 'marble' | 'ash' | 'swamp';
+  pattern?:
+    | 'grass'
+    | 'dirt'
+    | 'cobble'
+    | 'planks'
+    | 'tiles'
+    | 'cave'
+    | 'sand'
+    | 'marble'
+    | 'ash'
+    | 'swamp'
+    | 'flagstone'
+    | 'dais';
+  /** 낮은 벽 (허리 높이의 담). 지나갈 수 없는 것은 보통 벽과 같습니다 */
+  low?: boolean;
 }
 
 const T = (t: TileInfo): TileInfo => t;
@@ -63,9 +84,13 @@ export const TILESET: Record<string, TileInfo> = {
   v: T({ name: '늪', walkable: true, kind: 'floor', color: '#3f5a3a', color2: '#344b30', pattern: 'swamp' }),
   x: T({ name: '심연의 바닥', walkable: true, kind: 'floor', color: '#2e2438', color2: '#251d2e', pattern: 'tiles' }),
   k: T({ name: '뼈 무더기', walkable: true, kind: 'floor', color: '#4a4744', color2: '#3d3a37', pattern: 'tiles', shape: 'bones' }),
+  g: T({ name: '판석 광장', walkable: true, kind: 'floor', color: '#a39d8f', color2: '#8a8476', pattern: 'flagstone' }),
+  d: T({ name: '돌 단상', walkable: true, kind: 'floor', color: '#c2b79b', color2: '#8f8468', pattern: 'dais' }),
+  f: T({ name: '우거진 풀', walkable: true, kind: 'floor', color: '#4f7d3a', color2: '#5f8f44', pattern: 'grass', shape: 'tallgrass' }),
 
   '~': T({ name: '물', walkable: false, kind: 'liquid', color: '#2f6fa8', color2: '#4f8fc8' }),
   L: T({ name: '용암', walkable: false, kind: 'liquid', color: '#c2410c', color2: '#f59e0b' }),
+  U: T({ name: '성수', walkable: false, kind: 'liquid', color: '#3cc4e4', color2: '#d8b040' }),
   ' ': T({ name: '공허', walkable: false, kind: 'void', color: '#000000', color2: '#000000' }),
 
   '#': T({ name: '돌벽', walkable: false, kind: 'wall', color: '#8b8580', color2: '#6b6560' }),
@@ -74,10 +99,12 @@ export const TILESET: Record<string, TileInfo> = {
   K: T({ name: '동굴 벽', walkable: false, kind: 'wall', color: '#6b5a4b', color2: '#4e4136' }),
   X: T({ name: '심연의 벽', walkable: false, kind: 'wall', color: '#3d2f4d', color2: '#291f35' }),
   H: T({ name: '신전 벽', walkable: false, kind: 'wall', color: '#e2ddd2', color2: '#b8b2a5' }),
+  h: T({ name: '낮은 돌담', walkable: false, kind: 'wall', color: '#8f8a80', color2: '#6f6a60', low: true }),
 
   T: T({ name: '나무', walkable: false, kind: 'tree', color: '#4f7d3a', color2: '#2f5d24', shape: 'oak' }),
   P: T({ name: '전나무', walkable: false, kind: 'tree', color: '#4f7d3a', color2: '#1f4a2a', shape: 'pine' }),
   Y: T({ name: '고목', walkable: false, kind: 'tree', color: '#6e6a62', color2: '#3a332c', shape: 'deadtree' }),
+  E: T({ name: '활엽수', walkable: false, kind: 'tree', color: '#4f7d3a', color2: '#2f6a22', shape: 'elm' }),
 
   R: T({ name: '바위', walkable: false, kind: 'object', color: '#4f7d3a', color2: '#7d7a74', shape: 'rock' }),
   r: T({ name: '동굴 바위', walkable: false, kind: 'object', color: '#5b5048', color2: '#7a6a5c', shape: 'rock' }),
@@ -94,6 +121,11 @@ export const TILESET: Record<string, TileInfo> = {
   c: T({ name: '수정', walkable: false, kind: 'object', color: '#5b5048', color2: '#7fd6ff', shape: 'crystal' }),
   j: T({ name: '횃불', walkable: false, kind: 'object', color: '#4a4744', color2: '#ffb347', shape: 'torch' }),
   n: T({ name: '노점', walkable: false, kind: 'object', color: '#8d8a83', color2: '#c0392b', shape: 'stall' }),
+  N: T({ name: '게시판', walkable: false, kind: 'object', color: '#4f7d3a', color2: '#7a5530', shape: 'sign' }),
+  Q: T({ name: '바위 무더기', walkable: false, kind: 'object', color: '#4f7d3a', color2: '#6a6a66', shape: 'boulder' }),
+  u: T({ name: '그루터기', walkable: false, kind: 'object', color: '#4f7d3a', color2: '#6a4a2a', shape: 'stump' }),
+  l: T({ name: '가로등', walkable: false, kind: 'object', color: '#8d8a83', color2: '#2a2a2a', shape: 'lamp' }),
+  p: T({ name: '돌 말뚝', walkable: false, kind: 'object', color: '#4f7d3a', color2: '#9a9488', shape: 'post' }),
 };
 
 const BLOCKED: TileInfo = TILESET[' ']!;

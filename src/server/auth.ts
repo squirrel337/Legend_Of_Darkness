@@ -30,8 +30,36 @@ export async function verifyPassword(password: string, stored: string): Promise<
   if (![n, r, p].every((v) => Number.isInteger(v) && v > 0) || n > 1 << 20) return false;
   const salt = Buffer.from(parts[4]!, 'base64');
   const expected = Buffer.from(parts[5]!, 'base64');
-  const key = await scrypt(password, salt, n, r, p);
+  let key: Buffer;
+  try {
+    key = await scrypt(password, salt, n, r, p);
+  } catch {
+    return false; // 망가진 해시(잘못된 scrypt 설정값)는 틀린 비밀번호로 취급
+  }
   return key.length === expected.length && crypto.timingSafeEqual(key, expected);
+}
+
+/**
+ * 접속한 사람의 IP.
+ * 리버스 프록시를 믿는 설정(TRUST_PROXY)이면 X-Forwarded-For 의 **마지막** 값을 씁니다.
+ * (nginx 의 $proxy_add_x_forwarded_for 는 "클라이언트가 보낸 값, 실제 IP" 순서로 붙이므로
+ *  맨 앞 값은 클라이언트가 마음대로 꾸밀 수 있습니다)
+ */
+export function clientIp(
+  req: { headers: Record<string, string | string[] | undefined>; socket: { remoteAddress?: string } },
+  trustProxy: boolean,
+): string {
+  if (trustProxy) {
+    const raw = req.headers['x-forwarded-for'];
+    const joined = Array.isArray(raw) ? raw.join(',') : raw;
+    const parts = (joined ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last) return last;
+  }
+  return req.socket.remoteAddress ?? '?';
 }
 
 /** 문자열 비교를 일정한 시간에 수행합니다 */
@@ -61,6 +89,20 @@ export class RateLimiter {
     this.hits.set(key, arr);
     if (this.hits.size > 10000) this.prune(now);
     return true;
+  }
+
+  /** 기록하지 않고, 지금 허용되는지만 봅니다 */
+  peek(key: string, now = Date.now()): boolean {
+    const arr = (this.hits.get(key) ?? []).filter((t) => now - t < this.windowMs);
+    return arr.length < this.limit;
+  }
+
+  /** 시도 하나를 기록만 합니다 (실패 횟수 세기용) */
+  add(key: string, now = Date.now()): void {
+    const arr = (this.hits.get(key) ?? []).filter((t) => now - t < this.windowMs);
+    arr.push(now);
+    this.hits.set(key, arr);
+    if (this.hits.size > 10000) this.prune(now);
   }
 
   reset(key: string): void {

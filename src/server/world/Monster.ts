@@ -14,7 +14,8 @@ export class Monster extends Creature {
   mp = 0;
   homeX = 0;
   homeY = 0;
-  target: Player | null = null;
+  /** 노리는 대상. 야생 몬스터는 플레이어나 소환수, 소환수는 야생 몬스터 */
+  target: Creature | null = null;
   nextMoveAt = 0;
   nextAttackAt = 0;
   nextSpellAt = 0;
@@ -27,13 +28,21 @@ export class Monster extends Creature {
   dead = false;
   /** GM이 소환한 몬스터는 생성기 없이 존재 */
   spawner: Spawner | null = null;
+  /** 소환수면 주인 (플레이어 편에서 싸움) */
+  owner: Player | null = null;
+  /** 소환수가 사라지는 시각 (0 이면 없음) */
+  expireAt = 0;
+  private readonly lvl: number;
 
+  /** level 을 주면 그 레벨에 맞춰 능력치를 계산합니다 (소환수) */
   constructor(
     id: number,
     readonly def: MonsterDef,
+    level?: number,
   ) {
     super(id);
-    this.stats = monsterStats(def);
+    this.lvl = level ?? def.level;
+    this.stats = monsterStats(level !== undefined ? { ...def, level } : def);
     this.hp = this.stats.hp;
   }
 
@@ -41,7 +50,7 @@ export class Monster extends Creature {
     return this.def.name;
   }
   get level(): number {
-    return this.def.level;
+    return this.lvl;
   }
   get maxHp(): number {
     return this.stats.hp;
@@ -67,6 +76,10 @@ export class Monster extends Creature {
   get blocks(): boolean {
     return !this.dead;
   }
+  /** 플레이어가 부른 소환수인지 */
+  get isSummon(): boolean {
+    return this.owner !== null;
+  }
 
   snapshot(): MonsterSnapshot {
     return {
@@ -77,9 +90,10 @@ export class Monster extends Creature {
       dir: this.dir,
       name: this.def.name,
       def: this.def.id,
-      level: this.def.level,
+      level: this.lvl,
       hpPct: this.hpPct,
       statuses: this.visibleStatuses(),
+      ...(this.owner ? { ownerId: this.owner.id, ownerName: this.owner.name } : {}),
     };
   }
 

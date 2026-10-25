@@ -47,6 +47,12 @@ export const SAY_RANGE = 12;
 export const LOOT_OWNER_MS = 30_000;
 export const GROUND_ITEM_TTL_MS = 180_000;
 
+/** 관리자가 줄 수 있는 값의 상한 (서버를 멈추게 하는 비정상적인 수를 막음) */
+export const MAX_STAT_POINTS = 1_000_000;
+export const MAX_STAT_VALUE = 1_000_000;
+export const MAX_EXP_GRANT = 1e15;
+export const MAX_BONUS = 1_000_000_000;
+
 export const NAME_MIN = 2;
 export const NAME_MAX = 12;
 /** 캐릭터 이름: 한글/영문으로 시작, 한글/영문/숫자 2~12자 */
@@ -55,8 +61,31 @@ export const PASSWORD_MIN = 4;
 export const PASSWORD_MAX = 64;
 export const CHAT_MAX = 200;
 
-export type ClassId = 'peasant' | 'warrior' | 'rogue' | 'wizard' | 'priest' | 'monk';
-export const CLASS_IDS: readonly ClassId[] = ['peasant', 'warrior', 'rogue', 'wizard', 'priest', 'monk'];
+export type ClassId =
+  | 'peasant'
+  | 'warrior'
+  | 'rogue'
+  | 'wizard'
+  | 'priest'
+  | 'monk'
+  | 'summoner'
+  | 'bard'
+  | 'beastkin'
+  | 'archer'
+  | 'gladiator';
+export const CLASS_IDS: readonly ClassId[] = [
+  'peasant',
+  'warrior',
+  'rogue',
+  'wizard',
+  'priest',
+  'monk',
+  'summoner',
+  'bard',
+  'beastkin',
+  'archer',
+  'gladiator',
+];
 export function isClassId(v: unknown): v is ClassId {
   return typeof v === 'string' && (CLASS_IDS as readonly string[]).includes(v);
 }
@@ -148,7 +177,12 @@ export type StatusId =
   | 'curse'
   | 'poison'
   | 'sleep'
-  | 'paralyze';
+  | 'paralyze'
+  | 'haste'
+  | 'beast'
+  | 'bleed'
+  | 'mark'
+  | 'evade';
 
 export interface StatusInfo {
   name: string;
@@ -170,6 +204,11 @@ export const STATUS_INFO: Record<StatusId, StatusInfo> = {
   poison: { name: '중독', kind: 'debuff', color: '#5fbf3f', potency: 10, desc: '매초 체력이 감소합니다' },
   sleep: { name: '수면', kind: 'debuff', color: '#8fa8ff', potency: 0, desc: '움직일 수 없습니다. 피해를 받으면 깨어납니다' },
   paralyze: { name: '마비', kind: 'debuff', color: '#ffe14f', potency: 0, desc: '움직이거나 행동할 수 없습니다' },
+  haste: { name: '신속', kind: 'buff', color: '#7fffd4', potency: 25, desc: '평타와 기술을 더 빨리 씁니다 (재사용 대기 감소 %)' },
+  beast: { name: '야수화', kind: 'buff', color: '#d2691e', potency: 30, desc: '짐승의 힘을 깨워 물리 피해가 늘고 받는 피해가 조금 줄어듭니다' },
+  bleed: { name: '출혈', kind: 'debuff', color: '#c0392b', potency: 12, desc: '매초 체력이 감소합니다' },
+  mark: { name: '표식', kind: 'debuff', color: '#ff4f9a', potency: 20, desc: '받는 피해가 늘어납니다 (%)' },
+  evade: { name: '회피', kind: 'buff', color: '#b0e0ff', potency: 25, desc: '물리 공격을 피할 확률이 늘어납니다 (%)' },
 };
 
 export const STATUS_IDS = Object.keys(STATUS_INFO) as StatusId[];
@@ -193,6 +232,11 @@ export const CLASS_FALLBACK_NAMES: Record<ClassId, string> = {
   wizard: '마법사',
   priest: '성직자',
   monk: '무도가',
+  summoner: '소환사',
+  bard: '바드',
+  beastkin: '수인',
+  archer: '궁사',
+  gladiator: '검투사',
 };
 
 /** 헤어 색 팔레트 */

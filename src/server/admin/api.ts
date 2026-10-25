@@ -1,10 +1,12 @@
 // 웹 관리자 페이지용 REST API (/api/admin/...)
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { CLASS_IDS, EQUIP_SLOTS, STAT_KEYS } from '../../shared/constants';
-import { AdminSessions, RateLimiter, safeEqual } from '../auth';
+import { DESIGN_LIMITS } from '../../shared/design-edit';
+import { AdminSessions, clientIp, RateLimiter, safeEqual } from '../auth';
 import { log } from '../log';
 import type { World } from '../world/World';
 import type { AdminResult } from './AdminService';
+import { DesignApi } from './design';
 
 const MAX_BODY = 64 * 1024;
 
@@ -27,20 +29,27 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
   res.end(json);
 }
 
-async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+/** 본문 JSON 객체를 읽습니다. limit 바이트를 넘으면 413 */
+export async function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let tooBig = false;
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => {
+      if (tooBig) return;
       size += c.length;
-      if (size > MAX_BODY) {
+      if (size > limit) {
+        // 바로 끊으면 413 응답을 보낼 수 없으므로, 남은 본문은 읽어 버리고 응답 뒤 연결을 닫습니다 (계속 보내면 잠시 뒤 끊음)
+        tooBig = true;
+        chunks.length = 0;
         reject(new HttpError(413, '요청이 너무 큽니다.'));
-        req.destroy();
+        setTimeout(() => req.destroy(), 2000).unref();
         return;
       }
       chunks.push(c);
     });
     req.on('end', () => {
+      if (tooBig) return;
       if (chunks.length === 0) return resolve({});
       try {
         const v: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -67,8 +76,11 @@ export class AdminApi {
   readonly sessions = new AdminSessions();
   private readonly loginLimiter = new RateLimiter(10, 60_000);
   private readonly actions: Record<string, Action>;
+  /** "직업·스킬트리" 탭 (/design...) */
+  private readonly design: DesignApi;
 
   constructor(private readonly world: World) {
+    this.design = new DesignApi(world);
     const a = world.admin;
     this.actions = {
       setLevel: (b, actor, name) => a.setLevel(actor, name, int(b.level)),
@@ -84,6 +96,12 @@ export class AdminApi {
       learnAll: (_b, actor, name) => a.learnAll(actor, name),
       learnAbility: (b, actor, name) => a.learnAbility(actor, name, str(b.query)),
       forgetAbility: (b, actor, name) => a.forgetAbility(actor, name, str(b.id)),
+      // 성장 체계 (게임 안의 /전직횟수 /승급 /어빌 /숙련도 /계통 과 같음)
+      setRebirths: (b, actor, name) => a.setRebirths(actor, name, int(b.n)),
+      setAscended: (b, actor, name) => a.setAscended(actor, name, typeof b.on === 'boolean' ? b.on : null),
+      setAbilityLevel: (b, actor, name) => a.setAbilityLevel(actor, name, int(b.level)),
+      setProficiency: (b, actor, name) => a.setProficiency(actor, name, str(b.query) || 'all', optInt(b.value)),
+      setBeastType: (b, actor, name) => a.setBeastType(actor, name, b.type === null ? null : str(b.type)),
       giveGear: (_b, actor, name) => a.giveGear(actor, name),
       maxOut: (b, actor, name) => a.maxOut(actor, name, str(b.classId) || undefined),
       giveItem: (b, actor, name) => a.giveItem(actor, name, str(b.item), int(b.qty ?? 1)),
@@ -106,12 +124,7 @@ export class AdminApi {
   }
 
   private clientIp(req: IncomingMessage): string {
-    if (this.world.config.trustProxy) {
-      const fwd = req.headers['x-forwarded-for'];
-      const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
-      if (first) return first;
-    }
-    return req.socket.remoteAddress ?? '?';
+    return clientIp(req, this.world.config.trustProxy);
   }
 
   /** /api/admin 로 시작하는 요청을 처리합니다. 처리했으면 true */
@@ -120,8 +133,10 @@ export class AdminApi {
     try {
       await this.route(req, res, pathname.slice('/api/admin'.length) || '/');
     } catch (e) {
-      if (e instanceof HttpError) sendJson(res, e.status, { ok: false, msg: e.message });
-      else {
+      if (e instanceof HttpError) {
+        if (e.status === 413) res.setHeader('Connection', 'close');
+        sendJson(res, e.status, { ok: false, msg: e.message });
+      } else {
         log.error('관리자 API 오류:', e);
         sendJson(res, 500, { ok: false, msg: '서버 오류가 발생했습니다.' });
       }
@@ -163,6 +178,9 @@ export class AdminApi {
     if (path === '/announce' && method === 'POST') return sendJson(res, 200, admin.announce(actor, str((await readBody(req)).text)));
     if (path === '/save' && method === 'POST') return sendJson(res, 200, admin.saveAll(actor));
     if (path === '/audit' && method === 'GET') return sendJson(res, 200, { ok: true, entries: this.world.audit.list(200) });
+    // 직업·스킬트리 편집기: 모든 직업의 트리를 한 번에 보낼 수 있도록 본문 한계가 조금 더 큼
+    const designReply = await this.design.handle(method, path, () => readBody(req, DESIGN_LIMITS.body), actor);
+    if (designReply) return sendJson(res, designReply.status, designReply.body);
 
     const url = new URL(req.url ?? '/', 'http://x');
     if (path === '/characters' && method === 'GET') {
@@ -209,6 +227,7 @@ export class AdminApi {
         .map((a) => ({ id: a.id, name: a.name, kind: a.kind, classId: a.classId, level: a.level })),
       maps: [...d.maps.values()].map((m) => ({ id: m.id, name: m.name, spawn: m.spawn, levelRange: m.levelRange ?? null })),
       monsters: [...d.monsters.values()].map((m) => ({ id: m.id, name: m.name, level: m.level })),
+      beastTypes: d.progression.second.beastTypes,
       maxLevel: this.world.config.maxLevel,
       statCap: this.world.config.statCap,
     };

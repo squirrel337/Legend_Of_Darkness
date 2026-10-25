@@ -1,0 +1,23 @@
+# docker compose up -d --build 로 실행합니다.
+services:
+  lod:
+    build: .
+    container_name: legend-of-darkness
+    restart: unless-stopped
+    ports:
+      - "${PORT:-7777}:7777"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: "7777"
+      DATA_DIR: /app/data
+    volumes:
+      # 캐릭터와 설정, 직업·스킬트리 판 기록이 저장되는 곳 (컨테이너를 지워도 남습니다)
+      - lod-data:/app/data
+      # 게임 데이터: 관리자 페이지의 직업·스킬트리 탭이 저장하면 skilltrees.json·progression.json·abilities.json 을
+      # 고쳐 쓰므로, 이 폴더를 그대로 연결해 두어야 다시 빌드해도 고친 설계가 남습니다 (바꾼 줄은 git diff 로 보임).
+      # 컨테이너 안의 node 사용자(uid 1000)가 쓸 수 있어야 합니다. 저장이 거절되면: sudo chown -R 1000:1000 gamedata
+      - ./gamedata:/app/gamedata
+volumes:
+  lod-data:

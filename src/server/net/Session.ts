@@ -12,15 +12,16 @@ import {
 import { computeDerived, START_STAT } from '../../shared/formulas';
 import type { S2C } from '../../shared/protocol';
 import { validateName } from '../admin/AdminService';
-import { hashPassword, safeEqual, TokenBucket, verifyPassword, type RateLimiter } from '../auth';
+import { hashPassword, RateLimiter, safeEqual, TokenBucket, verifyPassword } from '../auth';
 import { log } from '../log';
-import { emptyEquipment, type CharacterData } from '../storage';
+import { emptyEquipment, nameKey, type CharacterData } from '../storage';
 import { addItem, learnOnData, setLevelOnData } from '../systems/character';
 import { handleChat } from '../systems/chat';
 import { playerAssail, playerUseAbility } from '../systems/combat';
 import { dropGold, dropItem, equipFromSlot, moveItem, pickup, unequip, useItem } from '../systems/inventory';
 import { ghostRecall, handleTurn, handleWalk } from '../systems/movement';
 import { buy, deposit, depositGold, learn, pickOption, sell, talkToNpc, withdraw, withdrawGold } from '../systems/npc';
+import { handleAuto } from '../systems/autohunt';
 import { allocateStat } from '../systems/progression';
 import type { Player, PlayerLink } from '../world/Player';
 import type { World } from '../world/World';
@@ -35,9 +36,26 @@ const STARTER_ITEMS: [string, number][] = [
 ];
 
 export interface SessionLimits {
+  /** IP 당 로그인 시도 */
   login: RateLimiter;
+  /** 캐릭터 당 비밀번호 실패 */
+  accountFail: RateLimiter;
+  /** IP 당 캐릭터 생성 */
   create: RateLimiter;
+  /** IP 당 초대 코드 실패 */
+  invite: RateLimiter;
 }
+
+export function defaultLimits(): SessionLimits {
+  return {
+    login: new RateLimiter(10, 60_000),
+    accountFail: new RateLimiter(8, 10 * 60_000),
+    create: new RateLimiter(10, 60 * 60_000),
+    invite: new RateLimiter(10, 60 * 60_000),
+  };
+}
+
+const LOGIN_TIMEOUT_MS = 3 * 60_000;
 
 export class Session implements PlayerLink {
   player: Player | null = null;
@@ -45,6 +63,7 @@ export class Session implements PlayerLink {
   private scheduled = false;
   private closed = false;
   private busy = false;
+  private loginTimer: NodeJS.Timeout | null = null;
   private readonly bucket = new TokenBucket(80, 40);
   private violations = 0;
 
@@ -57,6 +76,10 @@ export class Session implements PlayerLink {
 
   start(): void {
     this.send({ t: 'hello', version: PROTOCOL_VERSION, server: this.world.publicInfo() });
+    // 로그인하지 않고 오래 머무는 연결은 끊습니다
+    this.loginTimer = setTimeout(() => {
+      if (!this.player) this.close('로그인 시간이 지났습니다.');
+    }, LOGIN_TIMEOUT_MS);
     this.ws.on('message', (raw, isBinary) => {
       if (isBinary) return;
       void this.onMessage(raw.toString());
@@ -68,16 +91,23 @@ export class Session implements PlayerLink {
   send(msg: S2C): void {
     if (this.closed) return;
     this.queue.push(msg);
-    if (!this.scheduled) {
-      this.scheduled = true;
-      setImmediate(() => this.flush());
-    }
+    this.touch();
+  }
+
+  touch(): void {
+    if (this.closed || this.scheduled) return;
+    this.scheduled = true;
+    setImmediate(() => this.flush());
   }
 
   private flush(): void {
-    this.scheduled = false;
-    if (this.closed) return;
+    if (this.closed) {
+      this.scheduled = false;
+      return;
+    }
+    // 바뀐 상태 메시지를 먼저 대기열에 넣고(이때는 아직 예약 중이라 다시 예약되지 않음) 한 번에 보냅니다
     this.player?.flushDirty();
+    this.scheduled = false;
     if (this.queue.length === 0) return;
     const batch = this.queue;
     this.queue = [];
@@ -104,8 +134,14 @@ export class Session implements PlayerLink {
     }
   }
 
+  private loggedIn(): void {
+    if (this.loginTimer) clearTimeout(this.loginTimer);
+    this.loginTimer = null;
+  }
+
   private onClose(): void {
     this.closed = true;
+    this.loggedIn();
     if (this.player) {
       this.world.leaveGame(this.player);
       this.player = null;
@@ -146,11 +182,14 @@ export class Session implements PlayerLink {
   }
 
   private async login(msg: Record<string, unknown>): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.player) return;
     const name = typeof msg.name === 'string' ? msg.name.trim() : '';
     const password = typeof msg.password === 'string' ? msg.password : '';
     if (!name || !password || password.length > PASSWORD_MAX) return this.authFail('이름과 비밀번호를 입력하세요.');
+    // IP 당 시도 횟수 (성공해도 초기화하지 않음)
     if (!this.limits.login.hit(this.ip)) return this.authFail('로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.');
+    const key = nameKey(name);
+    if (!this.limits.accountFail.peek(key)) return this.authFail('이 캐릭터의 비밀번호를 너무 많이 틀렸습니다. 10분 뒤에 다시 시도하세요.');
     const data = this.world.store.get(name);
     this.busy = true;
     let ok = false;
@@ -159,20 +198,26 @@ export class Session implements PlayerLink {
     } finally {
       this.busy = false;
     }
-    if (this.closed) return;
-    if (!data || !ok) return this.authFail('캐릭터가 없거나 비밀번호가 틀렸습니다.');
+    if (this.closed || this.player) return;
+    // 비밀번호를 확인하는 동안 캐릭터가 삭제되었을 수도 있음
+    if (!data || this.world.store.get(name) !== data) return this.authFail('캐릭터가 없거나 비밀번호가 틀렸습니다.');
+    if (!ok) {
+      this.limits.accountFail.add(key);
+      return this.authFail('캐릭터가 없거나 비밀번호가 틀렸습니다.');
+    }
+    this.limits.accountFail.reset(key);
     if (data.banned) return this.authFail(`접속이 금지된 캐릭터입니다.${data.banReason ? ` (사유: ${data.banReason})` : ''}`);
     if (this.world.players.size >= this.world.config.maxPlayers && data.role === 'player' && !this.world.findPlayer(name)) {
       return this.authFail('서버 인원이 가득 찼습니다. 잠시 후 다시 시도하세요.');
     }
-    this.limits.login.reset(this.ip);
     const existing = this.world.findPlayer(name);
     if (existing) this.world.kick(existing, '다른 곳에서 같은 캐릭터로 접속했습니다.');
+    this.loggedIn();
     this.player = this.world.enterGame(this, data);
   }
 
   private async create(msg: Record<string, unknown>): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.player) return;
     const cfg = this.world.config;
     const name = typeof msg.name === 'string' ? msg.name.trim() : '';
     const password = typeof msg.password === 'string' ? msg.password : '';
@@ -181,35 +226,47 @@ export class Session implements PlayerLink {
     if (password.length < PASSWORD_MIN || password.length > PASSWORD_MAX) return this.authFail(`비밀번호는 ${PASSWORD_MIN}~${PASSWORD_MAX}자로 정하세요.`);
     if (cfg.registration === 'closed') return this.authFail('이 서버는 새 캐릭터 생성을 막아 두었습니다. 관리자에게 문의하세요.');
     if (cfg.registration === 'invite') {
+      if (!this.limits.invite.peek(this.ip)) return this.authFail('초대 코드를 너무 많이 틀렸습니다. 나중에 다시 시도하세요.');
       const code = typeof msg.invite === 'string' ? msg.invite : '';
-      if (!cfg.inviteCode || !safeEqual(code, cfg.inviteCode)) return this.authFail('초대 코드가 올바르지 않습니다.');
+      if (!cfg.inviteCode || !safeEqual(code, cfg.inviteCode)) {
+        this.limits.invite.add(this.ip);
+        return this.authFail('초대 코드가 올바르지 않습니다.');
+      }
     }
+    if (this.world.isReservedName(name)) return this.authFail('예약된 이름입니다. 다른 이름을 쓰세요.');
     if (this.world.store.has(name)) return this.authFail('이미 있는 이름입니다.');
+    if (this.world.players.size >= cfg.maxPlayers) return this.authFail('서버 인원이 가득 찼습니다. 잠시 후 다시 시도하세요.');
     if (!this.limits.create.hit(this.ip)) return this.authFail('캐릭터를 너무 많이 만들었습니다. 나중에 다시 시도하세요.');
     const gender = msg.gender === 'f' ? 'f' : 'm';
     const hairStyle = Number.isInteger(msg.hairStyle) ? Math.max(0, Math.min(HAIR_STYLES - 1, msg.hairStyle as number)) : 0;
     const hairColor = Number.isInteger(msg.hairColor) ? Math.max(0, Math.min(HAIR_COLORS.length - 1, msg.hairColor as number)) : 0;
+    // 만드는 동안(비밀번호 해시, 파일 저장) 다른 로그인/생성 요청은 받지 않습니다
     this.busy = true;
-    let hash: string;
     try {
-      hash = await hashPassword(password);
+      const hash = await hashPassword(password);
+      if (this.closed || this.player) return;
+      if (this.world.store.has(name)) return this.authFail('이미 있는 이름입니다.');
+      const data = newCharacter(this.world, name, hash, gender, hairStyle, hairColor);
+      const firstAdmin = cfg.firstCharacterAdmin && this.world.claimFirstAdmin();
+      if (firstAdmin) {
+        data.role = 'admin';
+        log.info(`첫 번째 캐릭터 ${name} 에게 관리자 권한을 주었습니다. (FIRST_CHARACTER_ADMIN=false 로 끌 수 있습니다)`);
+      }
+      data.lastIp = this.ip;
+      try {
+        await this.world.store.create(data);
+      } catch {
+        return this.authFail('이미 있는 이름입니다.');
+      }
+      log.info(`새 캐릭터: ${name} (${this.ip})`);
+      if (this.closed || this.player) return;
+      this.loggedIn();
+      this.player = this.world.enterGame(this, data);
+      this.player.notice(`${name}님, 어둠의 전설의 세계에 오신 것을 환영합니다!`, 'good');
+      if (firstAdmin) this.player.notice('서버의 첫 캐릭터라서 관리자 권한을 받았습니다. F2: 운영자 도구', 'good');
     } finally {
       this.busy = false;
     }
-    if (this.closed) return;
-    if (this.world.store.has(name)) return this.authFail('이미 있는 이름입니다.');
-    const first = this.world.store.size === 0;
-    const data = newCharacter(this.world, name, hash, gender, hairStyle, hairColor);
-    if (first && cfg.firstCharacterAdmin) {
-      data.role = 'admin';
-      log.info(`첫 번째 캐릭터 ${name} 에게 관리자 권한을 주었습니다. (FIRST_CHARACTER_ADMIN=false 로 끌 수 있습니다)`);
-    }
-    data.lastIp = this.ip;
-    await this.world.store.create(data);
-    log.info(`새 캐릭터: ${name} (${this.ip})`);
-    this.player = this.world.enterGame(this, data);
-    this.player.notice(`${name}님, 어둠의 전설의 세계에 오신 것을 환영합니다!`, 'good');
-    if (data.role === 'admin') this.player.notice('서버의 첫 캐릭터라서 관리자 권한을 받았습니다. F2: 운영자 도구', 'good');
   }
 
   private async dispatch(p: Player, t: string, m: Record<string, unknown>): Promise<void> {
@@ -220,7 +277,7 @@ export class Session implements PlayerLink {
       case 'turn':
         return handleTurn(p, m.dir);
       case 'attack':
-        return playerAssail(w, p);
+        return playerAssail(w, p, m.target);
       case 'ability':
         return playerUseAbility(w, p, m.id, m.target);
       case 'useItem':
@@ -265,6 +322,8 @@ export class Session implements PlayerLink {
         return ghostRecall(w, p);
       case 'groupReply':
         return w.groups.reply(p, m.accept === true);
+      case 'auto':
+        return handleAuto(w, p, m);
       case 'ping':
         return this.send({ t: 'pong', ts: Number(m.ts) || 0 });
     }
@@ -323,6 +382,14 @@ export function newCharacter(world: World, name: string, passwordHash: string, g
     deaths: 0,
     playTimeSec: 0,
     godMode: false,
+    cooldowns: {},
+    statusSave: [],
+    rebirths: 0,
+    ascended: false,
+    abilityLevel: 0,
+    abilityExp: 0,
+    beastType: null,
+    prof: {},
   };
   if (cfg.startLevel > 1) setLevelOnData(data, cfg, cfg.startLevel);
   for (const [id, qty] of STARTER_ITEMS) {

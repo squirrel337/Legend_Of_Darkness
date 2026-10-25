@@ -40,6 +40,18 @@ export type IconShape =
   | 'scale'
   | 'orb'
   | 'coin'
+  // 새 직업 무기
+  | 'bow'
+  | 'lute'
+  | 'book'
+  | 'gauntlet'
+  | 'dualsword'
+  // 새 기술 아이콘
+  | 'arrow'
+  | 'note'
+  | 'paw'
+  | 'swords'
+  | 'spirit'
   | 'slash'
   | 'burst'
   | 'bolt'
@@ -103,6 +115,11 @@ export interface ItemDef {
   classes?: ClassId[];
   /** 무기 피해 [최소, 최대] */
   dmg?: [number, number];
+  /**
+   * 무기 사거리 (칸, 없으면 1). 1보다 크면 원거리 무기(활):
+   * 평타가 사거리 안의 대상을 노리고, 물리 피해에 힘 대신 민첩이 주로 반영됩니다.
+   */
+  range?: number;
   /** AC (음수일수록 방어력이 높음) */
   ac?: number;
   bonus?: ItemBonus;
@@ -135,11 +152,23 @@ export type Targeting =
   /** 적 하나 + 그 주변 */
   | 'enemyArea'
   /** 앞으로 일직선 */
-  | 'line';
+  | 'line'
+  /** 자신 + 같은 맵, 사거리 안의 살아 있는 그룹원 전체 */
+  | 'party';
 
 export type AbilityEffect =
   /** 무기 기반 물리 피해 */
-  | { type: 'physical'; mult: number; bonus?: number; critBonus?: number; hideBonus?: number }
+  | {
+      type: 'physical';
+      mult: number;
+      bonus?: number;
+      critBonus?: number;
+      hideBonus?: number;
+      /** 같은 대상을 여러 번 (기본 1, 최대 5). 한 번마다 명중/치명타를 따로 판정 */
+      hits?: number;
+      /** 준 피해의 이 비율만큼 시전자 체력 회복 (0~1) */
+      lifesteal?: number;
+    }
   /** 능력치 기반 마법 피해 */
   | { type: 'magic'; base: number; ratio: number; stat?: StatKey }
   /** 회복 */
@@ -155,7 +184,13 @@ export type AbilityEffect =
   /** 자신의 체력을 소모해 큰 피해 */
   | { type: 'sacrifice'; hpPct: number; mult: number }
   /** 앞으로 돌진 */
-  | { type: 'dash'; distance: number };
+  | { type: 'dash'; distance: number }
+  /**
+   * 소환수를 부릅니다 (monster 는 summon: true 인 몬스터 id).
+   * 소환수는 시전자 레벨에 맞춰 강해지고, durationMs 뒤 사라집니다.
+   * 한 사람이 거느릴 수 있는 이 종류 소환수는 max 마리.
+   */
+  | { type: 'summon'; monster: string; durationMs: number; max: number; count?: number };
 
 export interface AbilityDef {
   id: string;
@@ -242,6 +277,8 @@ export interface MonsterDef {
   boss?: boolean;
   /** 움직이지도 공격하지도 않음 (수련용 허수아비) */
   passive?: boolean;
+  /** 소환수 전용 (맵에 생성되지 않고, 소환자의 레벨에 맞춰 강해짐) */
+  summon?: boolean;
   desc?: string;
 }
 
@@ -252,6 +289,8 @@ export interface HumanLook {
   /** 옷 색 */
   body: string;
   body2?: string;
+  /** 옷 모양 (직업 의상). 없으면 평민 옷 */
+  outfit?: ClassId;
   /** 손에 든 무기 모양 */
   weapon?: IconShape;
   weaponColor?: string;
@@ -262,10 +301,18 @@ export interface HumanLook {
 export type NpcService =
   | { type: 'shop'; label?: string; items: string[] }
   | { type: 'buy'; label?: string }
+  /**
+   * 길드장. 1차 직업이면 평민에게 5레벨 직업 선택과, 99레벨 1차 직업에게 이 직업으로 전직(무도가는 환골탈태)을 내놓고,
+   * 이 직업인 사람에게 이 직업 트리의 기술을 가르칩니다. 2차 직업 길드장(스승)은 직업 선택 없이 2차 직업 기술만 가르칩니다.
+   * classId 가 peasant 면 누구에게나 평민 트리(기본 기술)를 가르칩니다.
+   */
   | { type: 'class'; classId: ClassId }
   | { type: 'revive' }
   | { type: 'heal'; price?: number }
+  /** 승급 장인: 경험치 → 최대 체력·마나, 최대 체력 → 능력치, 승급 (progression.json 의 ascend) */
   | { type: 'ascend' }
+  /** 2차 직업 인도자: 승급한 1차 직업의 2차 전직 (수인은 계통을 고름, progression.json 의 second) */
+  | { type: 'secondJob' }
   | {
       type: 'teleport';
       label?: string;

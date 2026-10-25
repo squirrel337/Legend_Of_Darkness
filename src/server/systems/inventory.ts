@@ -7,13 +7,34 @@ import {
   ITEM_COOLDOWN_MS,
   isEquipSlot,
 } from '../../shared/constants';
+import { TokenBucket } from '../auth';
+import { nameKey } from '../storage';
+import type { MapInstance } from '../world/MapInstance';
 import type { Player } from '../world/Player';
 import { addItem, canFit, equipError, takeFromSlot } from './character';
 import { applyStatus, cleanseDebuffs, healCreature, restoreMana } from './combat';
-import { dropToGround } from './ground';
+import { dropBlockedReason, dropToGround } from './ground';
 import { gainExp } from './progression';
 
 const isSlot = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < INVENTORY_SIZE;
+
+/** 바닥에 버리기 속도/개수 제한 (맵을 아이템으로 도배해 남의 전리품을 밀어내지 못하게) */
+const dropBuckets = new WeakMap<Player, TokenBucket>();
+function canDrop(p: Player, map: MapInstance): boolean {
+  const blocked = dropBlockedReason(p.world, map, nameKey(p.name));
+  if (blocked) {
+    p.err(blocked);
+    return false;
+  }
+  let b = dropBuckets.get(p);
+  if (!b) {
+    b = new TokenBucket(8, 2);
+    dropBuckets.set(p, b);
+  }
+  if (b.take()) return true;
+  p.err('물건을 너무 빠르게 버리고 있습니다.');
+  return false;
+}
 
 /** 아이템을 주고, 소지품이 꽉 차면 발밑에 떨어뜨립니다 */
 export function giveItem(p: Player, itemId: string, qty: number): boolean {
@@ -92,23 +113,26 @@ export function useItem(p: Player, slot: unknown, now = Date.now()): void {
 }
 
 export function dropItem(p: Player, slot: unknown, qty: unknown): void {
-  if (!isSlot(slot) || !p.map) return;
-  if (p.isDead) return;
+  const map = p.map;
+  if (!isSlot(slot) || !map) return;
+  if (p.isDead || !p.data.inventory[slot] || !canDrop(p, map)) return;
   const n = typeof qty === 'number' && Number.isInteger(qty) && qty > 0 ? qty : 1;
   const taken = takeFromSlot(p.data, slot, n);
   if (!taken) return;
   p.markInv();
-  dropToGround(p.world, p.map, p.x, p.y, taken.item, taken.qty, null);
+  dropToGround(p.world, map, p.x, p.y, taken.item, taken.qty, null, nameKey(p.name));
 }
 
 export function dropGold(p: Player, amount: unknown): void {
-  if (!p.map || p.isDead) return;
+  const map = p.map;
+  if (!map || p.isDead) return;
   if (typeof amount !== 'number' || !Number.isInteger(amount) || amount <= 0) return;
   if (amount > p.data.gold) return p.err('골드가 부족합니다.');
+  if (!canDrop(p, map)) return;
   p.data.gold -= amount;
   p.markInv();
   p.markSelf();
-  dropToGround(p.world, p.map, p.x, p.y, null, amount, null);
+  dropToGround(p.world, map, p.x, p.y, null, amount, null, nameKey(p.name));
 }
 
 export function moveItem(p: Player, from: unknown, to: unknown): void {
@@ -165,9 +189,11 @@ export function pickup(p: Player, now = Date.now()): void {
         break;
       }
       if (left > 0) {
-        // 일부만 주웠으면 남은 수량으로 다시 놓습니다
+        // 일부만 주웠으면 남은 수량으로 다시 놓습니다 (소유권/소멸 시간/버린 사람은 그대로)
+        p.sys(`${def.name} ${it.qty - left}개를 주웠습니다. 소지품이 가득 차서 ${left}개는 남겨 두었습니다.`);
         map.remove(it);
-        dropToGround(p.world, map, it.x, it.y, it.itemId, left, it.owner);
+        it.qty = left;
+        map.add(it);
         picked++;
         continue;
       }

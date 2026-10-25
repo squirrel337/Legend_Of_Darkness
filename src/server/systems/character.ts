@@ -10,6 +10,7 @@ import {
   type StatKey,
 } from '../../shared/constants';
 import { autoAllocate, expToNext, START_STAT } from '../../shared/formulas';
+import { classTier } from '../../shared/progression';
 import type { AbilityDef, ItemDef } from '../../shared/types';
 import type { InvSlot } from '../../shared/protocol';
 import type { ServerConfig } from '../config';
@@ -94,8 +95,8 @@ export function removeItemQty(data: CharacterData, itemId: string, qty: number):
   return true;
 }
 
-/** 창고에 아이템을 넣습니다. 들어가지 못한 개수를 반환합니다. */
-export function addToStorage(data: CharacterData, def: ItemDef, qty: number): number {
+/** 창고에 아이템을 넣습니다. 들어가지 못한 개수를 반환합니다. force 면 칸 수 제한을 넘겨서라도 넣습니다. */
+export function addToStorage(data: CharacterData, def: ItemDef, qty: number, force = false): number {
   let left = qty;
   const max = stackSize(def);
   if (max > 1) {
@@ -108,7 +109,7 @@ export function addToStorage(data: CharacterData, def: ItemDef, qty: number): nu
       }
     }
   }
-  while (left > 0 && data.storage.length < STORAGE_SLOTS) {
+  while (left > 0 && (force || data.storage.length < STORAGE_SLOTS)) {
     const n = Math.min(left, max);
     data.storage.push({ item: def.id, qty: n });
     left -= n;
@@ -193,11 +194,19 @@ export function abilityAllowedFor(def: AbilityDef, classId: ClassId): boolean {
   return def.classId === 'peasant' || def.classId === classId;
 }
 
-export function learnOnData(data: CharacterData, def: AbilityDef): boolean {
+/** 기술·마법을 배운 것으로 적습니다. 숙련도는 prof (원작처럼 배우면 0 부터) */
+export function learnOnData(data: CharacterData, def: AbilityDef, prof = 0): boolean {
   const list = def.kind === 'skill' ? data.skills : data.spells;
   if (list.includes(def.id) || list.length >= MAX_ABILITIES) return false;
   list.push(def.id);
+  data.prof[def.id] = prof;
   return true;
+}
+
+/** 배우지 않은 기술의 숙련도 항목을 지웁니다 (기술을 잊게 한 뒤에) */
+export function pruneProf(data: CharacterData): void {
+  const learned = new Set([...data.skills, ...data.spells]);
+  for (const id of Object.keys(data.prof)) if (!learned.has(id)) delete data.prof[id];
 }
 
 /** 장비를 벗겨 소지품(꽉 차면 창고)으로 옮깁니다 */
@@ -207,11 +216,30 @@ export function unequipToBag(data: CharacterData, gd: GameData, slot: EquipSlot)
   const def = gd.items.get(id);
   data.equipment[slot] = null;
   if (!def) return true;
-  if (addItem(data, def, 1) > 0) addToStorage(data, def, 1);
+  // 소지품이 가득 차면 창고로 (창고도 가득 차면 칸 수를 넘겨서라도 보관해 아이템을 잃지 않게 함)
+  if (addItem(data, def, 1) > 0) addToStorage(data, def, 1, true);
   return true;
 }
 
-/** 직업 변경: 다른 직업의 기술/마법과 못 쓰는 장비를 정리합니다 */
+/**
+ * 지금 직업·레벨로 입을 수 없는 장비(다른 직업 전용, 레벨 제한이 더 높음)를 벗겨 소지품(꽉 차면 창고)으로 옮깁니다.
+ * 직업 변경·전직(1레벨로 돌아감)·2차 전직 뒤에 부릅니다. 옮긴 개수를 돌려줍니다
+ */
+export function unequipUnwearable(data: CharacterData, gd: GameData): number {
+  let n = 0;
+  for (const s of EQUIP_SLOTS) {
+    const id = data.equipment[s];
+    const def = id ? gd.items.get(id) : undefined;
+    if (def && equipError(data, def) !== null && unequipToBag(data, gd, s)) n++;
+  }
+  return n;
+}
+
+/**
+ * 직업 변경 (평민의 5레벨 직업 선택과 관리자 명령): 다른 직업의 기술/마법과 못 쓰는 장비를 정리합니다.
+ * 전직·2차 전직은 기술을 그대로 가지므로 이 함수를 쓰지 않습니다 (progression.ts).
+ * 2차 직업이 되면 어빌리티 레벨이 1 이상, 아니면 0 이 되고, 수인이 아니면 계통을 지웁니다.
+ */
 export function setClassOnData(data: CharacterData, gd: GameData, classId: ClassId): void {
   data.classId = classId;
   const keep = (id: string) => {
@@ -220,11 +248,14 @@ export function setClassOnData(data: CharacterData, gd: GameData, classId: Class
   };
   data.skills = data.skills.filter(keep);
   data.spells = data.spells.filter(keep);
-  for (const s of EQUIP_SLOTS) {
-    const id = data.equipment[s];
-    const def = id ? gd.items.get(id) : undefined;
-    if (def?.classes && def.classes.length > 0 && !def.classes.includes(classId)) unequipToBag(data, gd, s);
+  pruneProf(data);
+  if (classTier(classId) === 2) data.abilityLevel = Math.max(1, data.abilityLevel);
+  else {
+    data.abilityLevel = 0;
+    data.abilityExp = 0;
   }
+  if (classId !== 'beastkin') data.beastType = null;
+  unequipUnwearable(data, gd);
 }
 
 /** 직업과 레벨에 맞는 가장 좋은 장비 목록 (관리자 지급용) */

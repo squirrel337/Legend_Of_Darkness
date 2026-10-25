@@ -2,12 +2,12 @@
 import type http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { AdminApi } from './admin/api';
-import { RateLimiter } from './auth';
+import { clientIp } from './auth';
 import type { ServerConfig } from './config';
 import { GameData } from './gamedata';
 import { createHttpServer } from './http';
 import { log } from './log';
-import { Session } from './net/Session';
+import { defaultLimits, Session } from './net/Session';
 import { AuditLog, CharacterStore } from './storage';
 import { World } from './world/World';
 
@@ -25,6 +25,10 @@ export async function startServer(cfg: ServerConfig): Promise<RunningServer> {
   log.info(
     `게임 데이터: 맵 ${data.maps.size}, 아이템 ${data.items.size}, 기술/마법 ${data.abilities.size}, 몬스터 ${data.monsters.size}, NPC ${data.npcs.size}`,
   );
+  if (data.designWarnings.length > 0) {
+    const shown = data.designWarnings.slice(0, 5).map((i) => `${i.where}: ${i.msg}`);
+    log.warn(`성장 체계 설계 경고 ${data.designWarnings.length}개 — ${shown.join(' / ')}${data.designWarnings.length > 5 ? ' …' : ''}`);
+  }
   const store = new CharacterStore(cfg.dataDir);
   store.load((id) => data.items.has(id));
   const audit = new AuditLog(cfg.dataDir);
@@ -32,16 +36,29 @@ export async function startServer(cfg: ServerConfig): Promise<RunningServer> {
   const api = new AdminApi(world);
   const server = createHttpServer(world, api);
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
-  const limits = { login: new RateLimiter(10, 60_000), create: new RateLimiter(10, 60 * 60_000) };
+  const limits = defaultLimits();
   const perIp = new Map<string, number>();
+  // 응답 없는 연결 정리 (30초마다 ping, 다음 차례까지 pong 이 없으면 끊음)
+  const alive = new WeakMap<object, boolean>();
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (alive.get(ws) === false) {
+        ws.terminate();
+        continue;
+      }
+      alive.set(ws, false);
+      try {
+        ws.ping();
+      } catch {
+        /* 이미 닫힘 */
+      }
+    }
+  }, 30_000);
 
   wss.on('connection', (ws, req) => {
-    let ip = req.socket.remoteAddress ?? '?';
-    if (cfg.trustProxy) {
-      const fwd = req.headers['x-forwarded-for'];
-      const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
-      if (first) ip = first;
-    }
+    alive.set(ws, true);
+    ws.on('pong', () => alive.set(ws, true));
+    const ip = clientIp(req, cfg.trustProxy);
     const count = (perIp.get(ip) ?? 0) + 1;
     if (count > cfg.maxConnectionsPerIp) {
       ws.close(4001, 'too many connections');
@@ -76,12 +93,14 @@ export async function startServer(cfg: ServerConfig): Promise<RunningServer> {
     async close() {
       if (closing) return;
       closing = true;
+      clearInterval(heartbeat);
       world.stop();
       for (const p of [...world.players.values()]) {
         p.send({ t: 'kick', reason: '서버 점검으로 접속이 종료됩니다.' });
         world.leaveGame(p);
       }
       await store.flush();
+      await audit.flush();
       for (const c of wss.clients) c.terminate();
       await new Promise<void>((r) => wss.close(() => r()));
       await new Promise<void>((r) => server.close(() => r()));

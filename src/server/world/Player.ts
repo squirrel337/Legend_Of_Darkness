@@ -7,6 +7,7 @@ import {
   type StatusId,
 } from '../../shared/constants';
 import { computeDerived, expToNext, type DerivedStats } from '../../shared/formulas';
+import { abilityExpToNext, titleOf } from '../../shared/progression';
 import type { ClassDef, HumanLook, ItemDef } from '../../shared/types';
 import type { PlayerSnapshot, S2C, SelfState } from '../../shared/protocol';
 import { TokenBucket } from '../auth';
@@ -15,12 +16,17 @@ import { Creature } from './entities';
 import type { World } from './World';
 import type { Npc } from './Npc';
 import type { Group } from '../systems/groups';
+import type { AutoRun } from '../systems/autohunt';
+import { vitalsBonus } from '../systems/progression';
+import type { Monster } from './Monster';
 
 /** 플레이어와 연결된 네트워크 세션 */
 export interface PlayerLink {
   readonly ip: string;
   send(msg: S2C): void;
   close(reason: string): void;
+  /** 바뀐 상태를 곧 보내도록 예약 */
+  touch(): void;
 }
 
 export class Player extends Creature {
@@ -38,8 +44,15 @@ export class Player extends Creature {
   readonly msgBucket = new TokenBucket(60, 30);
   group: Group | null = null;
   pendingInviteFrom: string | null = null;
+  pendingInviteAt = 0;
+  /** 거느린 소환수 */
+  readonly summons = new Set<Monster>();
+  /** 자동사냥 상태 (꺼져 있으면 null) */
+  auto: AutoRun | null = null;
   lastWhisperFrom: string | null = null;
   talkingTo: Npc | null = null;
+  /** 승급 장인 교환 선택지의 표: 교환 메뉴·확인을 보낼 때마다 바뀌어, 지난 메뉴의 선택(두 번 누름 등)은 받지 않습니다 */
+  tradeToken = 0;
   readonly loginAt = Date.now();
   saveDirty = false;
 
@@ -59,6 +72,14 @@ export class Player extends Creature {
     this.y = data.y;
     this.dir = data.dir;
     this.moveBucket = new TokenBucket(3, 1000 / (WALK_MS * 0.8));
+    // 저장된 재사용 대기와 상태 효과를 되살립니다 (다시 접속해서 초기화하지 못하게)
+    const now = Date.now();
+    for (const [ability, until] of Object.entries(data.cooldowns)) if (until > now) this.cooldowns.set(ability, until);
+    if (!data.ghost) {
+      for (const st of data.statusSave) {
+        if (st.until > now) this.statuses.set(st.id, { ...st, sourceId: id, nextTickAt: now + 1000 });
+      }
+    }
     this.recompute(false);
   }
 
@@ -131,12 +152,14 @@ export class Player extends Creature {
     this.cls = this.world.data.classes.get(this.data.classId) ?? this.world.data.classes.get('peasant')!;
     const statuses: { id: StatusId; potency: number }[] = [];
     for (const s of this.statuses.values()) statuses.push({ id: s.id, potency: s.potency });
+    // 승급 장인에게 산 체력·마나 + 어빌리티 레벨 보너스
+    const bonus = vitalsBonus(this.data, this.world.data);
     this.derived = computeDerived({
       cls: this.cls,
       level: this.data.level,
       stats: this.data.stats,
-      bonusHp: this.data.bonusHp,
-      bonusMp: this.data.bonusMp,
+      bonusHp: bonus.hp,
+      bonusMp: bonus.mp,
       equipment: this.equippedDefs(),
       statuses,
     });
@@ -159,6 +182,8 @@ export class Player extends Creature {
       body: armor?.icon.color ?? '#8a7a66',
     };
     if (armor?.icon.color2) look.body2 = armor.icon.color2;
+    // 직업 전용 갑옷이면 그 직업의 의상으로 그립니다
+    if (armor?.classes?.length) look.outfit = armor.classes[0];
     if (weapon) {
       look.weapon = weapon.icon.shape;
       look.weaponColor = weapon.icon.color;
@@ -190,6 +215,7 @@ export class Player extends Creature {
     const d = this.derived;
     const now = Date.now();
     const maxLevel = this.world.config.maxLevel;
+    const prog = this.world.data.progression;
     return {
       id: this.id,
       name: this.name,
@@ -218,6 +244,7 @@ export class Player extends Creature {
         magic: d.magic,
         offense: d.offense,
         defense: d.defense,
+        range: d.range,
       },
       bonusHp: this.data.bonusHp,
       bonusMp: this.data.bonusMp,
@@ -229,6 +256,14 @@ export class Player extends Creature {
       mapId: this.map?.id ?? this.data.mapId,
       kills: this.data.kills,
       deaths: this.data.deaths,
+      rebirths: this.data.rebirths,
+      ascended: this.data.ascended,
+      title: titleOf(this.data.ascended, prog),
+      abilityLevel: this.data.abilityLevel,
+      abilityExp: Math.floor(this.data.abilityExp),
+      abilityExpNext: abilityExpToNext(this.data.abilityLevel, prog.ability),
+      beastType: this.data.beastType,
+      prof: { ...this.data.prof },
     };
   }
 
@@ -251,17 +286,21 @@ export class Player extends Creature {
   markSelf(): void {
     this.dirtySelf = true;
     this.saveDirty = true;
+    this.link.touch();
   }
   markInv(): void {
     this.dirtyInv = true;
     this.saveDirty = true;
+    this.link.touch();
   }
   markAbilities(): void {
     this.dirtyAbilities = true;
     this.saveDirty = true;
+    this.link.touch();
   }
   markVitals(): void {
     this.dirtyVitals = true;
+    this.link.touch();
   }
 
   /** 바뀐 상태를 클라이언트로 보냅니다 (세션이 메시지를 내보내기 직전에 호출) */
@@ -292,6 +331,13 @@ export class Player extends Creature {
       this.data.y = this.y;
       this.data.dir = this.dir;
     }
+    const now = Date.now();
+    const cds: Record<string, number> = {};
+    for (const [ability, until] of this.cooldowns) if (until > now) cds[ability] = until;
+    this.data.cooldowns = cds;
+    this.data.statusSave = [...this.statuses.values()]
+      .filter((st) => st.until > now)
+      .map((st) => ({ id: st.id, until: st.until, potency: st.potency, sourceLevel: st.sourceLevel }));
     return this.data;
   }
 

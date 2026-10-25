@@ -9,6 +9,10 @@ import {
   isClassId,
   isRole,
   isStatKey,
+  MAX_BONUS,
+  MAX_EXP_GRANT,
+  MAX_STAT_POINTS,
+  MAX_STAT_VALUE,
   NAME_REGEX,
   PASSWORD_MAX,
   PASSWORD_MIN,
@@ -17,6 +21,7 @@ import {
   type StatKey,
 } from '../../shared/constants';
 import { computeDerived, expToNext, type DerivedStats } from '../../shared/formulas';
+import { classTier } from '../../shared/progression';
 import { applyRuntimeSettings, runtimeSettingsOf, saveSettings, type RuntimeSettings } from '../config';
 import { hashPassword } from '../auth';
 import { log } from '../log';
@@ -28,13 +33,14 @@ import {
   autoAllocateOnData,
   bestGearFor,
   learnOnData,
+  pruneProf,
   resetStatsOnData,
   setClassOnData,
   setLevelOnData,
   unequipToBag,
 } from '../systems/character';
 import { cleanseDebuffs, revivePlayer } from '../systems/combat';
-import { onLevelUp } from '../systems/progression';
+import { onLevelUp, vitalsBonus } from '../systems/progression';
 import { Monster } from '../world/Monster';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
@@ -80,7 +86,7 @@ export class AdminService {
     if (!res.ok) return res;
     if (p) {
       p.recompute();
-      if (p.data.level > before) onLevelUp(p, p.data.level - before);
+      if (p.data.level > before) onLevelUp(p, p.data.level - before, { byAdmin: true });
       p.markInv();
       p.markAbilities();
       p.markSelf();
@@ -111,7 +117,7 @@ export class AdminService {
   }
 
   addExp(actor: string, name: string, amount: number): AdminResult {
-    if (!Number.isFinite(amount) || amount <= 0) return fail('경험치 값이 올바르지 않습니다.');
+    if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_EXP_GRANT) return fail('경험치 값이 올바르지 않습니다. (1 ~ 1000조)');
     return this.edit(actor, 'addExp', name, (d, p) => {
       const lv = addExpToData(d, this.cfg, Math.floor(amount));
       if (p) p.send({ t: 'gain', exp: Math.floor(amount), gold: 0 });
@@ -120,7 +126,7 @@ export class AdminService {
   }
 
   setStat(actor: string, name: string, stat: StatKey | 'all', value: number): AdminResult {
-    if (!Number.isInteger(value) || value < 1 || value > 1_000_000) return fail('능력치 값은 1 이상의 정수여야 합니다.');
+    if (!Number.isInteger(value) || value < 1 || value > MAX_STAT_VALUE) return fail(`능력치 값은 1 ~ ${MAX_STAT_VALUE} 사이의 정수여야 합니다.`);
     if (stat !== 'all' && !isStatKey(stat)) return fail('능력치 이름이 올바르지 않습니다. (힘/지능/지혜/건강/민첩/all)');
     return this.edit(actor, 'setStat', name, (d) => {
       const keys = stat === 'all' ? STAT_KEYS : [stat];
@@ -134,9 +140,9 @@ export class AdminService {
   }
 
   addStatPoints(actor: string, name: string, n: number): AdminResult {
-    if (!Number.isInteger(n) || n === 0) return fail('포인트 값이 올바르지 않습니다.');
+    if (!Number.isInteger(n) || n === 0 || Math.abs(n) > MAX_STAT_POINTS) return fail(`포인트 값은 ±${MAX_STAT_POINTS} 이내의 정수여야 합니다.`);
     return this.edit(actor, 'addStatPoints', name, (d) => {
-      d.statPoints = Math.max(0, d.statPoints + n);
+      d.statPoints = Math.min(MAX_STAT_POINTS, Math.max(0, d.statPoints + n));
       return ok(`${d.name}의 능력치 포인트: ${d.statPoints}`);
     });
   }
@@ -155,12 +161,14 @@ export class AdminService {
     });
   }
 
+  /** 승급 장인에게 산 체력·마나. 체력을 팔거나 바치면 음수가 될 수 있으므로 음수도 받습니다 */
   setBonus(actor: string, name: string, hp: number, mp: number): AdminResult {
-    if (!Number.isInteger(hp) || !Number.isInteger(mp) || hp < 0 || mp < 0) return fail('보너스 값은 0 이상의 정수여야 합니다.');
+    if (!Number.isInteger(hp) || !Number.isInteger(mp) || Math.abs(hp) > MAX_BONUS || Math.abs(mp) > MAX_BONUS)
+      return fail(`보너스 값은 ±${MAX_BONUS} 이내의 정수여야 합니다.`);
     return this.edit(actor, 'setBonus', name, (d) => {
       d.bonusHp = hp;
       d.bonusMp = mp;
-      return ok(`${d.name}의 승급 보너스: 체력 +${hp}, 마나 +${mp}`);
+      return ok(`${d.name}의 승급 보너스: 체력 ${hp >= 0 ? '+' : ''}${hp}, 마나 ${mp >= 0 ? '+' : ''}${mp}`);
     });
   }
 
@@ -199,7 +207,70 @@ export class AdminService {
       d.skills = d.skills.filter((s) => s !== abilityId);
       d.spells = d.spells.filter((s) => s !== abilityId);
       if (d.skills.length + d.spells.length === before) return fail('배우지 않은 기술입니다.');
+      pruneProf(d);
       return ok(`${d.name}의 기술 ${abilityId}을(를) 지웠습니다.`);
+    });
+  }
+
+  // ───────────────────────── 성장 체계 (어빌·숙련도·승급·전직) ─────────────────────────
+
+  /** 2차 직업의 어빌리티 레벨 (1 ~ 어빌 최대). 어빌 경험치는 0 으로 */
+  setAbilityLevel(actor: string, name: string, level: number): AdminResult {
+    const max = this.world.data.progression.ability.maxLevel;
+    if (!Number.isInteger(level) || level < 1 || level > max) return fail(`어빌 레벨은 1 ~ ${max} 사이의 정수여야 합니다.`);
+    return this.edit(actor, 'setAbilityLevel', name, (d, p) => {
+      if (classTier(d.classId) !== 2) return fail(`${d.name}은(는) 2차 직업이 아니라 어빌이 없습니다.`);
+      const up = level > d.abilityLevel;
+      d.abilityLevel = level;
+      d.abilityExp = 0;
+      if (p && up) p.send({ t: 'abilityLevelUp', abilityLevel: level });
+      return ok(`${d.name}의 어빌을 ${level}(으)로 설정했습니다.`);
+    });
+  }
+
+  /** 숙련도: 배운 기술·마법 하나(이름이나 id) 또는 'all'(배운 것 전부). value 를 주지 않으면 최대 */
+  setProficiency(actor: string, name: string, query: string, value?: number): AdminResult {
+    const max = this.world.data.progression.proficiency.max;
+    const v = value ?? max;
+    if (!Number.isInteger(v) || v < 0 || v > max) return fail(`숙련도는 0 ~ ${max} 사이의 정수여야 합니다.`);
+    const all = query === 'all';
+    const a = all ? undefined : this.world.data.findAbility(query);
+    if (!all && (!a || a.classId === 'monster')) return fail(`'${query}' 기술을 찾을 수 없습니다.`);
+    return this.edit(actor, 'setProficiency', name, (d) => {
+      if (a && !d.skills.includes(a.id) && !d.spells.includes(a.id)) return fail(`${d.name}은(는) ${a.name}을(를) 배우지 않았습니다.`);
+      const ids = a ? [a.id] : [...d.skills, ...d.spells];
+      for (const id of ids) d.prof[id] = v;
+      return ok(a ? `${d.name}의 ${a.name} 숙련도를 ${v}(으)로 설정했습니다.` : `${d.name}이(가) 배운 기술·마법 ${ids.length}개의 숙련도를 ${v}(으)로 설정했습니다.`);
+    });
+  }
+
+  /** 승급 여부 (칭호·2차 전직 조건). on 이 null 이면 뒤집습니다 */
+  setAscended(actor: string, name: string, on: boolean | null): AdminResult {
+    return this.edit(actor, 'setAscended', name, (d) => {
+      d.ascended = on === null ? !d.ascended : on;
+      const title = this.world.data.progression.ascend.title;
+      return ok(d.ascended ? `${d.name}을(를) 승급한 것으로 했습니다. (칭호: ${title})` : `${d.name}의 승급을 취소했습니다.`);
+    });
+  }
+
+  /** 전직(환골탈태) 횟수 */
+  setRebirths(actor: string, name: string, n: number): AdminResult {
+    if (!Number.isInteger(n) || n < 0 || n > 1_000_000) return fail('전직 횟수는 0 ~ 1,000,000 사이의 정수여야 합니다.');
+    return this.edit(actor, 'setRebirths', name, (d) => {
+      d.rebirths = n;
+      return ok(`${d.name}의 전직 횟수를 ${n}(으)로 설정했습니다.`);
+    });
+  }
+
+  /** 수인 계통 (id 또는 이름). null 이면 지워서 2차 직업 인도자에게서 다시 고르게 합니다 */
+  setBeastType(actor: string, name: string, type: string | null): AdminResult {
+    const types = this.world.data.progression.second.beastTypes;
+    const t = type === null ? null : types.find((b) => b.id === type || b.name === type);
+    if (type !== null && !t) return fail(`계통은 ${types.map((b) => b.name).join('/')} 중 하나여야 합니다.`);
+    return this.edit(actor, 'setBeastType', name, (d) => {
+      if (d.classId !== 'beastkin') return fail(`${d.name}은(는) 수인이 아닙니다.`);
+      d.beastType = t ? t.id : null;
+      return ok(t ? `${d.name}의 계통을 ${t.name}(으)로 바꿨습니다.` : `${d.name}의 계통을 지웠습니다. (2차 직업 인도자에게서 다시 고름)`);
     });
   }
 
@@ -216,7 +287,7 @@ export class AdminService {
     });
   }
 
-  /** 한 번에 최고 상태로: 만렙 + 능력치 최대 + 모든 기술 + 최고 장비 + 완전 회복 */
+  /** 한 번에 최고 상태로: 만렙 + 능력치 최대 + 모든 기술(숙련도 최대) + 2차 직업은 어빌 최대 + 최고 장비 + 완전 회복 */
   maxOut(actor: string, name: string, classId?: string): AdminResult {
     const p = this.world.findPlayer(name);
     const data = p?.data ?? this.world.store.get(name);
@@ -235,12 +306,16 @@ export class AdminService {
         return ok('능력치 포인트 정리');
       }),
       this.learnAll(actor, name),
+      // 배운 기술·마법은 (이전 직업의 것도) 숙련도 최대, 2차 직업은 어빌도 최대
+      this.setProficiency(actor, name, 'all'),
+      ...(classTier(data.classId) === 2 ? [this.setAbilityLevel(actor, name, this.world.data.progression.ability.maxLevel)] : []),
       this.giveGear(actor, name),
       this.heal(actor, name),
     ];
     const bad = steps.find((s) => !s.ok && !s.msg.includes('부활'));
     if (bad) return bad;
-    return ok(`${data.name}을(를) 최고 상태로 만들었습니다! (레벨 ${this.cfg.maxLevel}, 능력치 ${this.cfg.statCap}, 모든 기술, 최고 장비)`);
+    const ab = data.abilityLevel > 0 ? `, 어빌 ${data.abilityLevel}` : '';
+    return ok(`${data.name}을(를) 최고 상태로 만들었습니다! (레벨 ${this.cfg.maxLevel}${ab}, 능력치 ${this.cfg.statCap}, 모든 기술과 숙련도 최대, 최고 장비)`);
   }
 
   // ───────────────────────── 아이템/골드 ─────────────────────────
@@ -451,6 +526,7 @@ export class AdminService {
   spawnMonster(actor: Player, query: string, count: number): AdminResult {
     const def = this.world.data.findMonster(query);
     if (!def) return fail(`'${query}' 몬스터를 찾을 수 없습니다.`);
+    if (def.summon) return fail('소환수는 소환할 수 없습니다.');
     const map = actor.map;
     if (!map) return fail('맵에 있지 않습니다.');
     if (map.safe) return fail('안전 지대(마을)에는 몬스터를 소환할 수 없습니다.');
@@ -476,7 +552,8 @@ export class AdminService {
     if (!map) return fail('맵에 있지 않습니다.');
     let n = 0;
     for (const m of [...map.monsters]) {
-      if (m.def.passive) continue;
+      // 허수아비와 플레이어의 소환수는 남겨 둡니다
+      if (m.def.passive || m.owner) continue;
       m.dead = true;
       map.remove(m, 'death');
       m.spawner?.onDeath(m, Date.now());
@@ -499,12 +576,13 @@ export class AdminService {
     const equipment = EQUIP_SLOTS.map((s) => (d.equipment[s] ? this.world.data.items.get(d.equipment[s]!) : undefined)).filter(
       (x): x is NonNullable<typeof x> => !!x,
     );
+    const bonus = vitalsBonus(d, this.world.data);
     return computeDerived({
       cls: this.world.data.classes.get(d.classId)!,
       level: d.level,
       stats: d.stats,
-      bonusHp: d.bonusHp,
-      bonusMp: d.bonusMp,
+      bonusHp: bonus.hp,
+      bonusMp: bonus.mp,
       equipment,
     });
   }

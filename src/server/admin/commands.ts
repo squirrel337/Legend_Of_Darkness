@@ -1,5 +1,6 @@
 // 채팅 명령어 (/로 시작). 일반 명령어와 운영자(GM/관리자) 명령어
-import { CLASS_FALLBACK_NAMES, ROLE_NAMES, formatNumber, type ClassId, type Role, type StatKey } from '../../shared/constants';
+import { CLASS_FALLBACK_NAMES, CLASS_IDS, ROLE_NAMES, formatNumber, type ClassId, type Role, type StatKey } from '../../shared/constants';
+import { nameKey } from '../storage';
 import { ghostRecall } from '../systems/movement';
 import type { Player } from '../world/Player';
 import type { World } from '../world/World';
@@ -38,11 +39,17 @@ const STAT_ALIASES: Record<string, StatKey | 'all'> = {
   all: 'all',
 };
 
+/** 평민을 뺀 직업 이름 목록 (사용법 안내용) */
+const CLASS_LIST = CLASS_IDS.filter((c) => c !== 'peasant').map((c) => CLASS_FALLBACK_NAMES[c]);
+
+/** 예전 직업 이름 (궁사의 옛 이름 '궁수'도 받음) */
+const CLASS_ALIASES: Record<string, ClassId> = { 궁수: 'archer' };
+
 export function parseClass(s: string | undefined): ClassId | null {
   if (!s) return null;
   const v = s.trim().toLowerCase();
   for (const [id, name] of Object.entries(CLASS_FALLBACK_NAMES)) if (v === id || v === name) return id as ClassId;
-  return null;
+  return CLASS_ALIASES[v] ?? null;
 }
 
 function parseRole(s: string | undefined): Role | null {
@@ -70,12 +77,44 @@ function report(p: Player, r: AdminResult): void {
   else p.err(r.msg);
 }
 
-/** 첫 인자가 캐릭터 이름이면 대상, 아니면 자기 자신 */
+/** 사용자에게 그대로 보여 줄 명령어 오류 */
+class CommandError extends Error {}
+
+/** 이름 인자의 앞쪽 @ 를 떼어 냅니다 */
+const nm = (s: string | undefined): string => (s ?? '').replace(/^@/, '');
+
+function exists(ctx: Ctx, name: string): boolean {
+  return !!ctx.world.findPlayer(name) || ctx.world.store.has(name);
+}
+
+/**
+ * 대상 캐릭터를 고릅니다.
+ *  - `@이름` 으로 쓰면 반드시 그 캐릭터 (없으면 오류)
+ *  - 첫 인자가 있는 캐릭터 이름이면 그 캐릭터
+ *  - 아니면 자기 자신
+ */
 function split(ctx: Ctx, args: string[], minRest: number): { target: string; rest: string[] } {
-  if (args.length > minRest && args[0] && (ctx.world.findPlayer(args[0]) || ctx.world.store.has(args[0]))) {
-    return { target: args[0], rest: args.slice(1) };
+  const first = args[0];
+  if (first?.startsWith('@')) {
+    const name = first.slice(1);
+    if (!name || !exists(ctx, name)) throw new CommandError(`'${name}' 캐릭터를 찾을 수 없습니다.`);
+    guard(ctx, name);
+    return { target: name, rest: args.slice(1) };
+  }
+  if (args.length > minRest && first && exists(ctx, first)) {
+    guard(ctx, first);
+    return { target: first, rest: args.slice(1) };
   }
   return { target: ctx.p.name, rest: args };
+}
+
+const RANK: Record<Role, number> = { player: 0, gm: 1, admin: 2 };
+
+/** 운영자(GM)는 자기와 같거나 높은 권한의 다른 캐릭터를 대상으로 할 수 없습니다. 관리자는 제한이 없습니다. */
+function guard(ctx: Ctx, name: string): void {
+  if (ctx.p.isAdmin || nameKey(name) === nameKey(ctx.p.name)) return;
+  const role = ctx.world.findPlayer(name)?.data.role ?? ctx.world.store.get(name)?.role ?? 'player';
+  if (RANK[role] >= RANK[ctx.p.data.role]) throw new CommandError('나와 같거나 높은 권한의 캐릭터에게는 쓸 수 없습니다.');
 }
 
 const COMMANDS: Command[] = [
@@ -90,6 +129,7 @@ const COMMANDS: Command[] = [
       p.sys('──── 명령어 ────');
       for (const l of lines) p.sys(l);
       p.sys('채팅 접두어: !외치기  @이름 귓속말  #그룹말');
+      if (p.isGm) p.sys('운영자 명령의 [이름] 자리에 @이름 을 쓰면 그 캐릭터가 없을 때 실수로 나에게 적용되지 않습니다. 예) /레벨업 @철수 10');
     },
   },
   {
@@ -107,7 +147,7 @@ const COMMANDS: Command[] = [
     level: 'player',
     usage: '/귓 이름 내용',
     desc: '귓속말을 보냅니다. (@이름 내용 도 가능)',
-    run: ({ world, p }, args) => whisper(world, p, args[0] ?? '', args.slice(1).join(' ')),
+    run: ({ world, p }, args) => whisper(world, p, nm(args[0]), args.slice(1).join(' ')),
   },
   {
     names: ['답장', 'r', 'reply'],
@@ -133,13 +173,13 @@ const COMMANDS: Command[] = [
     desc: '그룹(파티)을 관리합니다. #내용 으로 그룹 대화.',
     run: ({ world, p }, args) => {
       const sub = (args[0] ?? '').toLowerCase();
-      const name = args[1] ?? '';
+      const name = nm(args[1]);
       if (['초대', 'invite', 'i'].includes(sub)) return world.groups.invite(p, name);
       if (['수락', 'accept', 'a', 'y'].includes(sub)) return world.groups.reply(p, true);
       if (['거절', 'decline', 'n'].includes(sub)) return world.groups.reply(p, false);
       if (['탈퇴', 'leave', 'l'].includes(sub)) return world.groups.leave(p);
       if (['추방', 'kick', 'k'].includes(sub)) return world.groups.kick(p, name);
-      if (sub && world.findPlayer(sub)) return world.groups.invite(p, sub);
+      if (sub && world.findPlayer(nm(sub))) return world.groups.invite(p, nm(sub));
       p.err('사용법: /파티 초대 이름 | /파티 수락 | /파티 거절 | /파티 탈퇴 | /파티 추방 이름');
     },
   },
@@ -198,11 +238,11 @@ const COMMANDS: Command[] = [
     names: ['만렙', 'max', 'maxout'],
     level: 'gm',
     usage: '/만렙 [이름] [직업]',
-    desc: '만렙 + 능력치 최대 + 모든 기술 + 최고 장비를 한 번에!',
+    desc: '만렙 + 능력치 최대 + 모든 기술(숙련도 최대) + 최고 장비를 한 번에! (2차 직업은 어빌도 최대)',
     run: (ctx, args) => {
       const { target, rest } = split(ctx, args, 0);
       const cls = rest[0] ? parseClass(rest[0]) : null;
-      if (rest[0] && !cls) return ctx.p.err('직업: 전사/도적/마법사/성직자/무도가');
+      if (rest[0] && !cls) return ctx.p.err(`직업: ${CLASS_LIST.join('/')}`);
       report(ctx.p, ctx.admin.maxOut(ctx.p.name, target, cls ?? undefined));
     },
   },
@@ -258,12 +298,12 @@ const COMMANDS: Command[] = [
   {
     names: ['직업', 'class'],
     level: 'gm',
-    usage: '/직업 [이름] 전사|도적|마법사|성직자|무도가|평민',
+    usage: `/직업 [이름] ${CLASS_LIST.join('|')}|평민`,
     desc: '직업을 바꿉니다.',
     run: (ctx, args) => {
       const { target, rest } = split(ctx, args, 1);
       const cls = parseClass(rest[0]);
-      if (!cls) return ctx.p.err('사용법: /직업 [이름] 전사|도적|마법사|성직자|무도가|평민');
+      if (!cls) return ctx.p.err(`사용법: /직업 [이름] ${CLASS_LIST.join('|')}|평민`);
       report(ctx.p, ctx.admin.setClass(ctx.p.name, target, cls));
     },
   },
@@ -277,6 +317,74 @@ const COMMANDS: Command[] = [
       const what = rest.join(' ');
       if (!what || what === '전부' || what === 'all' || what === '모두') return report(ctx.p, ctx.admin.learnAll(ctx.p.name, target));
       report(ctx.p, ctx.admin.learnAbility(ctx.p.name, target, what));
+    },
+  },
+  {
+    names: ['숙련도', 'prof'],
+    level: 'gm',
+    usage: '/숙련도 [이름] 전부|기술이름 [값]',
+    desc: '배운 기술·마법의 숙련도를 설정합니다. (값을 빼면 최대)',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 1);
+      let list = [...rest];
+      let value: number | undefined;
+      const last = num(list[list.length - 1]);
+      if (list.length > 1 && last !== null) {
+        value = last;
+        list = list.slice(0, -1);
+      }
+      const what = list.join(' ');
+      if (!what) return ctx.p.err('사용법: /숙련도 [이름] 전부|기술이름 [값]');
+      const all = ['전부', '모두', 'all'].includes(what);
+      report(ctx.p, ctx.admin.setProficiency(ctx.p.name, target, all ? 'all' : what, value));
+    },
+  },
+  {
+    names: ['어빌', 'ability'],
+    level: 'gm',
+    usage: '/어빌 [이름] 레벨',
+    desc: '2차 직업의 어빌리티 레벨을 설정합니다.',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 1);
+      const n = num(rest[0]);
+      if (n === null) return ctx.p.err('사용법: /어빌 [이름] 레벨');
+      report(ctx.p, ctx.admin.setAbilityLevel(ctx.p.name, target, n));
+    },
+  },
+  {
+    names: ['승급', 'ascend'],
+    level: 'gm',
+    usage: '/승급 [이름] [켜기|끄기]',
+    desc: '승급 여부(칭호, 2차 전직 조건)를 바꿉니다.',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 0);
+      const v = (rest[0] ?? '').toLowerCase();
+      const on = ['켜기', 'on', '1'].includes(v) ? true : ['끄기', 'off', '0'].includes(v) ? false : null;
+      report(ctx.p, ctx.admin.setAscended(ctx.p.name, target, on));
+    },
+  },
+  {
+    names: ['전직횟수', 'rebirths'],
+    level: 'gm',
+    usage: '/전직횟수 [이름] 수',
+    desc: '전직(환골탈태) 횟수를 설정합니다.',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 1);
+      const n = num(rest[0]);
+      if (n === null) return ctx.p.err('사용법: /전직횟수 [이름] 수');
+      report(ctx.p, ctx.admin.setRebirths(ctx.p.name, target, n));
+    },
+  },
+  {
+    names: ['계통', 'beast'],
+    level: 'gm',
+    usage: '/계통 [이름] 포유류|조류|파충류|없음',
+    desc: '수인의 계통을 바꿉니다. (없음: 2차 직업 인도자에게서 다시 고르게)',
+    run: (ctx, args) => {
+      const { target, rest } = split(ctx, args, 1);
+      const v = rest[0];
+      if (!v) return ctx.p.err('사용법: /계통 [이름] 포유류|조류|파충류|없음');
+      report(ctx.p, ctx.admin.setBeastType(ctx.p.name, target, ['없음', 'none'].includes(v) ? null : v));
     },
   },
   {
@@ -294,13 +402,17 @@ const COMMANDS: Command[] = [
     run: (ctx, args) => {
       let target = ctx.p.name;
       let list = [...args];
-      if (list.length >= 2 && (ctx.world.findPlayer(list[0]!) || ctx.world.store.has(list[0]!))) {
+      if (list[0]?.startsWith('@')) {
+        target = split(ctx, list, 0).target;
+        list = list.slice(1);
+      } else if (list.length >= 2 && exists(ctx, list[0]!)) {
         const restQuery = list.slice(1).filter((x) => num(x) === null).join(' ');
         if (ctx.world.data.findItem(restQuery)) {
           target = list[0]!;
           list = list.slice(1);
         }
       }
+      guard(ctx, target);
       let qty = 1;
       const last = num(list[list.length - 1]);
       if (list.length > 1 && last !== null) {
@@ -384,7 +496,8 @@ const COMMANDS: Command[] = [
     desc: '다른 사람을 맵으로 보냅니다.',
     run: (ctx, args) => {
       if (!args[0] || !args[1]) return ctx.p.err('사용법: /보내기 이름 맵 [x y]');
-      report(ctx.p, ctx.admin.teleport(ctx.p.name, args[0], args[1], num(args[2]) ?? undefined, num(args[3]) ?? undefined));
+      guard(ctx, nm(args[0]));
+      report(ctx.p, ctx.admin.teleport(ctx.p.name, nm(args[0]), args[1], num(args[2]) ?? undefined, num(args[3]) ?? undefined));
     },
   },
   {
@@ -393,8 +506,9 @@ const COMMANDS: Command[] = [
     usage: '/소환 이름',
     desc: '접속 중인 사람을 내 옆으로 데려옵니다.',
     run: ({ world, p, admin }, args) => {
-      const t = world.findPlayer(args[0] ?? '');
+      const t = world.findPlayer(nm(args[0]));
       if (!t || !p.map) return p.err('접속 중인 사람이 아닙니다.');
+      guard({ world, p, admin }, t.name);
       report(p, admin.teleport(p.name, t.name, p.map.id, p.x, p.y));
     },
   },
@@ -404,7 +518,7 @@ const COMMANDS: Command[] = [
     usage: '/찾아가기 이름',
     desc: '접속 중인 사람에게 갑니다.',
     run: ({ world, p, admin }, args) => {
-      const t = world.findPlayer(args[0] ?? '');
+      const t = world.findPlayer(nm(args[0]));
       if (!t || !t.map) return p.err('접속 중인 사람이 아닙니다.');
       report(p, admin.teleport(p.name, p.name, t.map.id, t.x, t.y));
     },
@@ -448,11 +562,18 @@ const COMMANDS: Command[] = [
     usage: '/정보 이름',
     desc: '캐릭터 정보를 봅니다.',
     run: ({ world, p, admin }, args) => {
-      const d = admin.characterDetail(args[0] ?? p.name);
+      const d = admin.characterDetail(nm(args[0]) || p.name);
       if (!d) return p.err('캐릭터를 찾을 수 없습니다.');
       const cls = world.data.classes.get(d.classId)?.name ?? d.classId;
+      const beast = d.beastType ? world.data.progression.second.beastTypes.find((b) => b.id === d.beastType)?.name ?? d.beastType : '';
+      const growth = [
+        `전직 ${d.rebirths}번`,
+        ...(d.ascended ? [world.data.progression.ascend.title] : []),
+        ...(d.abilityLevel > 0 ? [`어빌 ${d.abilityLevel}`] : []),
+        ...(beast ? [`${beast} 계통`] : []),
+      ].join(' · ');
       p.sys(
-        `${d.name} — ${cls} ${d.level}레벨, 경험치 ${formatNumber(d.exp)}, 골드 ${formatNumber(d.gold)}, ` +
+        `${d.name} — ${cls} ${d.level}레벨 (${growth}), 경험치 ${formatNumber(d.exp)}, 골드 ${formatNumber(d.gold)}, ` +
           `힘${d.stats.str} 지능${d.stats.int} 지혜${d.stats.wis} 건강${d.stats.con} 민첩${d.stats.dex}, ` +
           `포인트 ${d.statPoints}, 권한 ${ROLE_NAMES[d.role]}, ${d.online ? '접속 중' : '오프라인'} (${d.mapId} ${d.x},${d.y})`,
       );
@@ -472,7 +593,8 @@ const COMMANDS: Command[] = [
     desc: '접속을 강제로 종료시킵니다.',
     run: (ctx, args) => {
       if (!args[0]) return ctx.p.err('사용법: /추방 이름 [사유]');
-      report(ctx.p, ctx.admin.kick(ctx.p.name, args[0], args.slice(1).join(' ') || undefined));
+      guard(ctx, nm(args[0]));
+      report(ctx.p, ctx.admin.kick(ctx.p.name, nm(args[0]), args.slice(1).join(' ') || undefined));
     },
   },
 
@@ -502,7 +624,7 @@ const COMMANDS: Command[] = [
     run: (ctx, args) => {
       const role = parseRole(args[1]);
       if (!args[0] || !role) return ctx.p.err('사용법: /권한 이름 일반|운영자|관리자');
-      report(ctx.p, ctx.admin.setRole(ctx.p.name, args[0], role));
+      report(ctx.p, ctx.admin.setRole(ctx.p.name, nm(args[0]), role));
     },
   },
   {
@@ -512,7 +634,7 @@ const COMMANDS: Command[] = [
     desc: '접속을 금지합니다.',
     run: (ctx, args) => {
       if (!args[0]) return ctx.p.err('사용법: /금지 이름 [사유]');
-      report(ctx.p, ctx.admin.ban(ctx.p.name, args[0], args.slice(1).join(' ')));
+      report(ctx.p, ctx.admin.ban(ctx.p.name, nm(args[0]), args.slice(1).join(' ')));
     },
   },
   {
@@ -522,7 +644,7 @@ const COMMANDS: Command[] = [
     desc: '접속 금지를 풉니다.',
     run: (ctx, args) => {
       if (!args[0]) return ctx.p.err('사용법: /금지해제 이름');
-      report(ctx.p, ctx.admin.unban(ctx.p.name, args[0]));
+      report(ctx.p, ctx.admin.unban(ctx.p.name, nm(args[0])));
     },
   },
 ];
@@ -549,7 +671,8 @@ export async function runCommand(world: World, admin: AdminService, p: Player, l
   try {
     await cmd.run({ world, p, admin }, args.filter(Boolean), rest);
   } catch (e) {
-    p.err(`명령 실행 중 오류: ${(e as Error).message}`);
+    if (e instanceof CommandError) p.err(e.message);
+    else p.err(`명령 실행 중 오류: ${(e as Error).message}`);
   }
 }
 

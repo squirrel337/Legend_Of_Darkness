@@ -30,7 +30,8 @@ export class Spawner {
   tick(now: number): void {
     if (!this.initialized) {
       this.initialized = true;
-      for (let i = 0; i < this.def.count; i++) this.spawnOne();
+      // 자리가 없어 실패한 몫은 잠시 뒤 다시 시도합니다
+      for (let i = 0; i < this.def.count; i++) if (!this.spawnOne()) this.respawnAt.push(now + 3000);
       return;
     }
     for (let i = this.respawnAt.length - 1; i >= 0; i--) {

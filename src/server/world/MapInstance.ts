@@ -110,7 +110,7 @@ export class MapInstance {
         this.items.add(e as GroundItem);
         break;
     }
-    if (e.blocks && (e.kind === 'player' || e.kind === 'monster')) this.occ.set(this.idx(e.x, e.y), e as Creature);
+    if (e.blocks && (e.kind === 'player' || e.kind === 'monster')) this.occupy(e as Creature);
     const snap = e.snapshot();
     this.broadcast({ t: 'add', e: snap }, e.kind === 'player' ? (e as Player) : undefined);
   }
@@ -122,27 +122,42 @@ export class MapInstance {
     this.monsters.delete(e as Monster);
     this.npcs.delete(e as Npc);
     this.items.delete(e as GroundItem);
-    const k = this.idx(e.x, e.y);
-    if (this.occ.get(k) === e) this.occ.delete(k);
+    this.vacate(e);
     e.map = null;
     this.broadcast(fx ? { t: 'remove', id: e.id, fx } : { t: 'remove', id: e.id });
   }
 
   /** 좌표만 옮깁니다 (알림은 호출한 쪽에서) */
   move(e: Entity, nx: number, ny: number): void {
-    const k = this.idx(e.x, e.y);
-    if (this.occ.get(k) === e) this.occ.delete(k);
+    this.vacate(e);
     e.x = nx;
     e.y = ny;
-    if (e.blocks && (e.kind === 'player' || e.kind === 'monster')) this.occ.set(this.idx(nx, ny), e as Creature);
+    if (e.blocks && (e.kind === 'player' || e.kind === 'monster')) this.occupy(e as Creature);
   }
 
   /** 엔티티의 '칸 막음' 여부가 바뀌었을 때 (유령이 되거나 부활할 때) */
   refreshBlocking(e: Creature): void {
+    if (e.blocks) this.occupy(e);
+    else this.vacate(e);
+  }
+
+  /** 칸을 차지합니다. 이미 다른 생물이 있으면 덮어쓰지 않습니다 (그 생물이 떠나면 대신 등록됨) */
+  private occupy(e: Creature): void {
     const k = this.idx(e.x, e.y);
-    if (e.blocks) {
-      if (!this.occ.has(k)) this.occ.set(k, e);
-    } else if (this.occ.get(k) === e) this.occ.delete(k);
+    if (!this.occ.has(k)) this.occ.set(k, e);
+  }
+
+  /** 칸을 비웁니다. 같은 칸에 겹쳐 서 있던 다른 생물이 있으면 그 생물로 다시 등록합니다 */
+  private vacate(e: Entity): void {
+    const k = this.idx(e.x, e.y);
+    if (this.occ.get(k) !== e) return;
+    this.occ.delete(k);
+    for (const c of [...this.players, ...this.monsters] as Creature[]) {
+      if (c !== e && c.blocks && c.x === e.x && c.y === e.y) {
+        this.occ.set(k, c);
+        break;
+      }
+    }
   }
 
   broadcast(msg: S2C, except?: Player): void {

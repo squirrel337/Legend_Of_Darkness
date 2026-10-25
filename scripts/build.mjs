@@ -24,6 +24,19 @@ const clientOptions = {
   logLevel: 'info',
 };
 
+// 바닥 조각·벽·물체 그림을 굽는 작업자 (Web Worker). 어느 브라우저에서나 뜨도록 모듈이 아닌 보통 스크립트로 묶습니다
+const workerOptions = {
+  entryPoints: { 'bake-worker': path.join(root, 'src/client/render/bake-worker.ts') },
+  outdir: path.join(root, 'public/build'),
+  bundle: true,
+  format: 'iife',
+  platform: 'browser',
+  target: ['es2022'],
+  sourcemap: true,
+  minify: !dev,
+  logLevel: 'info',
+};
+
 const serverOptions = {
   entryPoints: [path.join(root, 'src/server/index.ts')],
   outfile: path.join(root, 'dist/server.js'),
@@ -38,7 +51,7 @@ const serverOptions = {
 };
 
 if (!dev) {
-  await Promise.all([esbuild.build(clientOptions), esbuild.build(serverOptions)]);
+  await Promise.all([esbuild.build(clientOptions), esbuild.build(workerOptions), esbuild.build(serverOptions)]);
 } else {
   let child = null;
   const restart = () => {
@@ -57,10 +70,11 @@ if (!dev) {
     },
   };
   const clientCtx = await esbuild.context(clientOptions);
+  const workerCtx = await esbuild.context(workerOptions);
   const serverCtx = await esbuild.context({ ...serverOptions, plugins: [restartPlugin] });
-  await Promise.all([clientCtx.watch(), serverCtx.watch()]);
+  await Promise.all([clientCtx.watch(), workerCtx.watch(), serverCtx.watch()]);
   const stop = async () => {
-    await Promise.all([clientCtx.dispose(), serverCtx.dispose()]);
+    await Promise.all([clientCtx.dispose(), workerCtx.dispose(), serverCtx.dispose()]);
     if (child) child.kill('SIGTERM');
     process.exit(0);
   };

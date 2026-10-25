@@ -2,14 +2,36 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  CLASS_FALLBACK_NAMES,
   CLASS_IDS,
   ELEMENTS,
   EQUIP_SLOTS,
   isClassId,
   isStatKey,
   isStatusId,
+  MAX_BONUS,
+  MAX_EXP_GRANT,
+  MAX_STAT_VALUE,
   type ClassId,
 } from '../shared/constants';
+import {
+  abilityExpTotal,
+  bigNumber,
+  classTier,
+  CONDITION_TYPES,
+  FIRST_CLASSES,
+  publicProgression,
+  SECOND_CLASSES,
+  TREE_MAX_COLS,
+  TREE_MAX_ROWS,
+  type AbilityPatch,
+  type Condition,
+  type DesignIssue,
+  type ProgressionConfig,
+  type SkillTreeConfig,
+  type SkillTreeNode,
+  type SkillTreesConfig,
+} from '../shared/progression';
 import { isKnownTile, tileInfo } from '../shared/tiles';
 import type {
   AbilityDef,
@@ -41,9 +63,10 @@ const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isElement = (v: unknown) => typeof v === 'string' && (ELEMENTS as readonly string[]).includes(v);
 
-const TARGETINGS = ['front', 'around', 'around8', 'self', 'enemy', 'ally', 'enemyArea', 'line'];
-const EFFECT_TYPES = ['physical', 'magic', 'heal', 'status', 'cleanse', 'revive', 'restoreMp', 'sacrifice', 'dash'];
-const SERVICE_TYPES = ['shop', 'buy', 'class', 'revive', 'heal', 'ascend', 'teleport', 'resetStats', 'storage', 'talk'];
+const TARGETINGS = ['front', 'around', 'around8', 'self', 'enemy', 'ally', 'enemyArea', 'line', 'party'];
+const EFFECT_TYPES = ['physical', 'magic', 'heal', 'status', 'cleanse', 'revive', 'restoreMp', 'sacrifice', 'dash', 'summon'];
+const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
+const SERVICE_TYPES = ['shop', 'buy', 'class', 'revive', 'heal', 'ascend', 'secondJob', 'teleport', 'resetStats', 'storage', 'talk'];
 const BODY_PLANS = [
   'rat',
   'bat',
@@ -69,6 +92,17 @@ export class GameData {
   readonly monsters = new Map<string, MonsterDef>();
   readonly npcs = new Map<string, NpcDef>();
   readonly maps = new Map<string, MapDef>();
+  /**
+   * 성장 규칙 (gamedata/progression.json). 관리자가 바꾸면 applyDesign 이 통째로 바꿔 끼우므로,
+   * 오래 붙잡아 두지 말고 쓸 때마다 world.data.progression 으로 읽으세요.
+   */
+  progression!: ProgressionConfig;
+  /** 직업별 스킬트리 (gamedata/skilltrees.json). progression 과 마찬가지로 바꿔 끼워집니다 */
+  skillTrees!: SkillTreesConfig;
+  /** 설계 검사의 경고 (서버 시작 때 기록에 남기고 관리자 편집기에 보여 줌) */
+  designWarnings: DesignIssue[] = [];
+  /** 기술 id → 그 기술이 있는 트리의 직업과 노드 */
+  private treeIndex = new Map<string, { classId: ClassId; node: SkillTreeNode }>();
   private clientCache: { key: string; json: ClientGameData } | null = null;
 
   static load(dir: string): GameData {
@@ -90,8 +124,108 @@ export class GameData {
       if (!f.endsWith('.json')) continue;
       gd.addMap(readJson(path.join(mapDir, f)), f);
     }
+    // 마을 → 권장 레벨이 없는 맵 → 권장 레벨 순으로 정렬 (목록 표시용)
+    const ordered = [...gd.maps.values()].sort((a, b) => {
+      if (a.id === 'town' || b.id === 'town') return a.id === 'town' ? -1 : 1;
+      return (a.levelRange?.[0] ?? -1) - (b.levelRange?.[0] ?? -1);
+    });
+    gd.maps.clear();
+    for (const m of ordered) gd.maps.set(m.id, m);
     gd.crossCheck();
+    // 성장 체계 설계: 다른 데이터가 모두 읽힌 뒤에 (기술·아이템 id 를 맞춰 봄). 나중에 생긴 항목이 없는 옛 파일은 기본값으로 채움
+    const up = upgradeProgression(readJson(path.join(dir, 'progression.json')));
+    const design = { progression: up.progression, skillTrees: readJson(path.join(dir, 'skilltrees.json')) };
+    const issues = [...up.issues, ...checkDesign(design, gd)];
+    const err = issues.find((i) => i.level === 'error');
+    if (err) fail(err.where, err.msg);
+    gd.setDesign(design.progression as ProgressionConfig, normalizeSkillTrees(design.skillTrees), issues);
     return gd;
+  }
+
+  /** 검사를 통과한 설계를 바꿔 끼웁니다 (트리 색인과 클라이언트용 데이터도 새로) */
+  private setDesign(progression: ProgressionConfig, skillTrees: SkillTreesConfig, issues: DesignIssue[]): void {
+    this.progression = clone(progression);
+    this.skillTrees = skillTrees;
+    this.designWarnings = issues.filter((i) => i.level === 'warn');
+    this.treeIndex.clear();
+    for (const classId of CLASS_IDS) for (const node of skillTrees.trees[classId].nodes) this.treeIndex.set(node.ability, { classId, node });
+    this.clientCache = null;
+  }
+
+  /** 직업의 스킬트리 */
+  treeOf(classId: ClassId): SkillTreeConfig {
+    return this.skillTrees.trees[classId];
+  }
+
+  /** 기술이 있는 트리의 직업과 노드 (어느 트리에도 없으면 배울 수 없는 기술) */
+  nodeOf(abilityId: string): { classId: ClassId; node: SkillTreeNode } | undefined {
+    return this.treeIndex.get(abilityId);
+  }
+
+  /**
+   * 관리자 편집기가 저장한 설계를 검사해 실행 중인 게임 데이터에 바로 반영합니다 (서버를 끄지 않고).
+   * 주지 않은 부분은 지금 값을 그대로 씁니다. 오류가 하나라도 있으면 아무것도 바꾸지 않고, 돌려주는 목록에 오류가 들어 있습니다.
+   * 파일 쓰기·판 기록·접속자에게 { t: 'design' } 보내기·플레이어 다시 계산은 부르는 쪽(관리자 트랙의 design.ts)이 합니다.
+   */
+  applyDesign(next: DesignUpdate): DesignIssue[] {
+    const { issues, apply } = this.prepareDesign(next);
+    if (!issues.some(isError)) apply();
+    return issues;
+  }
+
+  /** applyDesign 과 같은 검사만 하고 아무것도 바꾸지 않습니다 (관리자 편집기의 dryRun, 저장 전 미리 검사) */
+  checkUpdate(next: DesignUpdate): DesignIssue[] {
+    return this.prepareDesign(next).issues;
+  }
+
+  /** 새 설계를 검사하고, 오류가 없을 때 부를 반영 함수를 함께 돌려줍니다 */
+  private prepareDesign(next: DesignUpdate): { issues: DesignIssue[]; apply: () => void } {
+    const patches = next.abilities ?? [];
+    const issues = checkAbilityPatches(patches, this);
+    if (issues.some(isError)) return { issues, apply: () => undefined };
+    // 기술 이름이 바뀌어도 검사 메시지가 새 이름을 쓰도록, 고친 기술로 검사합니다
+    const abilities = new Map(this.abilities);
+    for (const p of patches) abilities.set(p.id, { ...abilities.get(p.id)!, ...pickPatch(p) });
+    // 판 기록의 옛 설계로 되돌리거나 옛 파일을 다시 읽을 때: 나중에 생긴 항목은 기본값으로
+    const up = upgradeProgression(next.progression ?? this.progression);
+    issues.push(...up.issues);
+    const design = { progression: up.progression, skillTrees: next.skillTrees ?? this.skillTrees };
+    const refs = { classes: this.classes, items: this.items, abilities };
+    let found = checkDesign(design, refs);
+    // 관리자 저장: 노드의 필요 레벨(어빌)·골드를 abilities.json 의 level·price 에도 맞춘 뒤 다시 검사 (맞추고 나면 사라질 경고를 남기지 않음)
+    const defaults = next.syncAbilityDefaults && !found.some(isError) ? treeAbilityDefaults(normalizeSkillTrees(design.skillTrees)) : null;
+    if (defaults) {
+      for (const [id, v] of defaults) {
+        const a = abilities.get(id);
+        if (a && (a.level !== v.level || a.price !== v.price)) abilities.set(id, { ...a, ...v });
+      }
+      found = checkDesign(design, refs);
+    }
+    issues.push(...found);
+    return {
+      issues,
+      apply: () => {
+        for (const p of patches) Object.assign(this.abilities.get(p.id)!, pickPatch(p));
+        if (defaults) for (const [id, v] of defaults) Object.assign(this.abilities.get(id) ?? {}, v);
+        this.setDesign(design.progression as ProgressionConfig, normalizeSkillTrees(design.skillTrees), issues);
+      },
+    };
+  }
+
+  /**
+   * gamedata 폴더의 progression.json 과 skilltrees.json 을 다시 읽어 applyDesign 합니다
+   * (기술 수정은 applyDesign 의 abilities 로 넘기므로 abilities.json 은 다시 읽지 않음). 읽지 못하면 오류 하나를 돌려줍니다.
+   */
+  reloadDesign(dir: string): DesignIssue[] {
+    let progression: unknown;
+    let skillTrees: unknown;
+    try {
+      progression = readJson(path.join(dir, 'progression.json'));
+      skillTrees = readJson(path.join(dir, 'skilltrees.json'));
+    } catch (e) {
+      return [{ level: 'error', where: 'gamedata', msg: (e as Error).message }];
+    }
+    return this.applyDesign({ progression, skillTrees });
   }
 
   private addClass(raw: unknown): void {
@@ -121,6 +255,10 @@ export class GameData {
     }
     if (it.dmg !== undefined && (!Array.isArray(it.dmg) || it.dmg.length !== 2 || !it.dmg.every(isNum) || it.dmg[0] > it.dmg[1]))
       fail(where, 'dmg 는 [최소, 최대] 형식이어야 합니다.');
+    if (it.range !== undefined) {
+      if (!isInt(it.range, 1, 10)) fail(where, 'range 는 1~10 정수여야 합니다.');
+      if (it.slot !== 'weapon') fail(where, 'range 는 무기에만 쓸 수 있습니다.');
+    }
     if (!isNum(it.price) || it.price < 0) fail(where, 'price 는 0 이상이어야 합니다.');
     if (it.stack !== undefined && (!Number.isInteger(it.stack) || it.stack < 1)) fail(where, 'stack 은 1 이상의 정수여야 합니다.');
     if (it.classes) for (const c of it.classes) if (!isClassId(c)) fail(where, `알 수 없는 직업 ${c}`);
@@ -148,6 +286,16 @@ export class GameData {
       if (!isObj(e) || !EFFECT_TYPES.includes(e.type as string)) fail(where, `알 수 없는 효과 ${JSON.stringify(e)}`);
       if (e.type === 'status' && !isStatusId(e.status)) fail(where, `알 수 없는 상태 ${String(e.status)}`);
       if ((e.type === 'magic' || e.type === 'heal') && e.stat !== undefined && !isStatKey(e.stat)) fail(where, `알 수 없는 능력치 ${String(e.stat)}`);
+      if (e.type === 'physical') {
+        if (e.hits !== undefined && !isInt(e.hits, 1, 5)) fail(where, 'physical.hits 는 1~5 정수여야 합니다.');
+        if (e.lifesteal !== undefined && (!isNum(e.lifesteal) || e.lifesteal < 0 || e.lifesteal > 1)) fail(where, 'physical.lifesteal 은 0~1 이어야 합니다.');
+      }
+      if (e.type === 'summon') {
+        if (!isStr(e.monster)) fail(where, 'summon.monster 가 필요합니다.');
+        if (!isNum(e.durationMs) || e.durationMs <= 0) fail(where, 'summon.durationMs 는 0보다 커야 합니다.');
+        if (!isInt(e.max, 1, 5)) fail(where, 'summon.max 는 1~5 정수여야 합니다.');
+        if (e.count !== undefined && !isInt(e.count, 1, 3)) fail(where, 'summon.count 는 1~3 정수여야 합니다.');
+      }
     }
     if (!isObj(a.icon)) fail(where, 'icon 이 필요합니다.');
     this.abilities.set(a.id, a);
@@ -178,6 +326,7 @@ export class GameData {
     if (this.npcs.has(n.id)) fail(where, '중복된 id 입니다.');
     if (!isStr(n.name)) fail(where, 'name 이 필요합니다.');
     if (!isObj(n.look)) fail(where, 'look 이 필요합니다.');
+    if (n.look.outfit !== undefined && !isClassId(n.look.outfit)) fail(where, `look.outfit 은 ${CLASS_IDS.join('/')} 중 하나여야 합니다.`);
     if (!Array.isArray(n.services)) fail(where, 'services 배열이 필요합니다.');
     for (const s of n.services) {
       if (!isObj(s) || !SERVICE_TYPES.includes(s.type as string)) fail(where, `알 수 없는 서비스 ${JSON.stringify(s)}`);
@@ -235,6 +384,18 @@ export class GameData {
     }
     for (const c of this.classes.values())
       for (const id of c.starterItems ?? []) if (!this.items.has(id)) fail(`classes.json(${c.id})`, `시작 아이템 '${id}' 이 없습니다.`);
+    // 소환 기술은 summon: true 인 몬스터만 부를 수 있고, 소환수는 맵에 생성되지 않습니다
+    for (const a of this.abilities.values()) {
+      for (const e of a.effects) {
+        if (e.type !== 'summon') continue;
+        const m = this.monsters.get(e.monster);
+        if (!m) fail(`abilities.json(${a.id})`, `소환할 몬스터 '${e.monster}' 이 없습니다.`);
+        if (!m.summon) fail(`abilities.json(${a.id})`, `'${e.monster}' 은 소환수(summon: true)가 아닙니다.`);
+      }
+    }
+    for (const m of this.maps.values())
+      for (const s of m.spawns)
+        if (this.monsters.get(s.monster)?.summon) fail(`maps(${m.id})`, `소환수 '${s.monster}' 은 맵에 생성할 수 없습니다.`);
   }
 
   clientData(server: PublicServerInfo): ClientGameData {
@@ -250,9 +411,12 @@ export class GameData {
         level: m.level,
         look: m.look,
         ...(m.boss ? { boss: true } : {}),
+        ...(m.summon ? { summon: true } : {}),
       })),
       maps: [...this.maps.values()].map((m) => ({ id: m.id, name: m.name, ...(m.levelRange ? { levelRange: m.levelRange } : {}) })),
       server,
+      skillTrees: this.skillTrees.trees,
+      progression: publicProgression(this.progression),
     };
     this.clientCache = { key, json };
     return json;
@@ -289,4 +453,749 @@ function findByNameOrId<T extends { id: string; name: string }>(map: Map<string,
     if (!partial && norm(v.name).includes(nq)) partial = v;
   }
   return partial;
+}
+
+// ───────────────────────── 성장 체계 설계 검사 (progression.json, skilltrees.json) ─────────────────────────
+// 서버 시작(GameData.load)과 관리자 편집기의 저장(applyDesign)이 같은 검사를 씁니다. 관리자 트랙은 저장하기 전에
+// checkDesign / checkAbilityPatches 로 미리 검사해 편집기에 문제 목록을 보여 줄 수 있습니다.
+// 문제를 모두 모아 돌려주며, level 'error' 가 하나라도 있으면 그 설계는 쓸 수 없습니다.
+
+/** 설계 검사에 필요한 다른 게임 데이터 (GameData 를 그대로 넘기면 됩니다) */
+export interface DesignRefs {
+  readonly classes: ReadonlyMap<ClassId, ClassDef>;
+  readonly items: ReadonlyMap<string, ItemDef>;
+  readonly abilities: ReadonlyMap<string, AbilityDef>;
+  /** 서버 최대 레벨 (주지 않으면 999 까지 허용, 게임은 서버 최대 레벨로 다시 자름) */
+  readonly maxLevel?: number;
+}
+
+/** applyDesign 에 넘기는 새 설계 (아직 검사 전이라 unknown). 주지 않은 부분은 지금 값을 그대로 씁니다 */
+export interface DesignUpdate {
+  progression?: unknown;
+  skillTrees?: unknown;
+  /** 기술의 이름·설명·마나·재사용 대기 수정 */
+  abilities?: AbilityPatch[];
+  /**
+   * (관리자 저장) 트리 노드의 필요 레벨(2차 직업은 필요 어빌)·골드를 abilities.json 의 level·price 에도 맞춥니다.
+   * 두 값이 다르면 검사가 경고하므로, 편집기 저장·되돌리기는 늘 켜서 함께 맞춥니다. 트리에 없는 기술은 그대로 둡니다.
+   */
+  syncAbilityDefaults?: boolean;
+}
+
+/** 트리에 놓인 기술마다 abilities.json 에 맞춰 쓸 level(2차 직업은 필요 어빌)·price(골드) */
+export function treeAbilityDefaults(trees: SkillTreesConfig): Map<string, { level: number; price: number }> {
+  const out = new Map<string, { level: number; price: number }>();
+  for (const classId of CLASS_IDS) {
+    const second = classTier(classId) === 2;
+    for (const n of trees.trees[classId].nodes) {
+      const level = second ? n.abilityLevel : n.level;
+      if (level !== undefined) out.set(n.ability, { level, price: n.gold });
+    }
+  }
+  return out;
+}
+
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+const isError = (i: DesignIssue) => i.level === 'error';
+
+/** 한 파일의 검사 결과를 모읍니다. 위치는 "파일(경로)" 로 적습니다 */
+class IssueList {
+  readonly list: DesignIssue[] = [];
+  constructor(private readonly file: string) {}
+  private where(p: string): string {
+    return p ? `${this.file}(${p})` : this.file;
+  }
+  error(p: string, msg: string): void {
+    this.list.push({ level: 'error', where: this.where(p), msg });
+  }
+  warn(p: string, msg: string): void {
+    this.list.push({ level: 'warn', where: this.where(p), msg });
+  }
+}
+
+/** 정해진 항목 말고 다른 것이 있으면 (대개 오타) 오류 */
+function onlyKeys(out: IssueList, w: string, o: Record<string, unknown>, keys: readonly string[]): void {
+  for (const k of Object.keys(o)) if (!keys.includes(k)) out.error(w, `알 수 없는 항목 '${k}' 이(가) 있습니다. (쓸 수 있는 항목: ${keys.join(', ')})`);
+}
+
+function intField(out: IssueList, w: string, o: Record<string, unknown>, key: string, lo: number, hi: number, optional = false): number | undefined {
+  const v = o[key];
+  if (v === undefined && optional) return undefined;
+  if (!isInt(v, lo, hi)) {
+    const range = hi >= Number.MAX_SAFE_INTEGER ? `${lo} 이상의` : `${lo}~${hi} 사이의`;
+    out.error(w, `${key} 는 ${range} 정수여야 합니다. (지금: ${JSON.stringify(v) ?? '없음'})`);
+    return undefined;
+  }
+  return v;
+}
+
+function numField(out: IssueList, w: string, o: Record<string, unknown>, key: string, lo: number, hi: number): number | undefined {
+  const v = o[key];
+  if (!isNum(v) || v < lo || v > hi) {
+    out.error(w, `${key} 는 ${lo}~${hi} 사이의 숫자여야 합니다. (지금: ${JSON.stringify(v) ?? '없음'})`);
+    return undefined;
+  }
+  return v;
+}
+
+function boolField(out: IssueList, w: string, o: Record<string, unknown>, key: string): void {
+  if (typeof o[key] !== 'boolean') out.error(w, `${key} 는 true 또는 false 여야 합니다.`);
+}
+
+const designClassName = (refs: DesignRefs, id: ClassId): string => refs.classes.get(id)?.name ?? CLASS_FALLBACK_NAMES[id];
+
+/** keys 의 직업마다 하나씩 값이 있는 객체인지 확인하고, 값마다 fn 으로 검사합니다 */
+function perClass<K extends ClassId>(
+  out: IssueList,
+  refs: DesignRefs,
+  w: string,
+  v: unknown,
+  keys: readonly K[],
+  fn: (val: unknown, w: string, id: K) => void,
+): void {
+  if (!isObj(v)) {
+    out.error(w, `직업별 객체여야 합니다. (${keys.join(', ')})`);
+    return;
+  }
+  for (const k of Object.keys(v))
+    if (!(keys as readonly string[]).includes(k)) out.error(w, `여기에는 ${keys.map((id) => designClassName(refs, id)).join('·')}만 적을 수 있습니다. ('${k}')`);
+  for (const k of keys) {
+    if (!(k in v)) out.error(w, `${designClassName(refs, k)}(${k}) 항목이 없습니다.`);
+    else fn(v[k], `${w}.${k}`, k);
+  }
+}
+
+/** 직업 id 배열 (allowed 중에서, 겹치지 않게) */
+function classList(out: IssueList, refs: DesignRefs, w: string, v: unknown, allowed: readonly ClassId[]): void {
+  if (!Array.isArray(v)) {
+    out.error(w, '직업 id 배열이어야 합니다.');
+    return;
+  }
+  const seen = new Set<string>();
+  for (const x of v) {
+    if (typeof x !== 'string' || !(allowed as readonly string[]).includes(x))
+      out.error(w, `'${String(x)}' 은(는) 여기에 쓸 수 없습니다. (${allowed.map((id) => `${designClassName(refs, id)}(${id})`).join(', ')} 중에서)`);
+    else if (seen.has(x)) out.error(w, `${designClassName(refs, x as ClassId)} 이(가) 두 번 있습니다.`);
+    seen.add(String(x));
+  }
+}
+
+function checkCondition(out: IssueList, refs: DesignRefs, w: string, c: unknown, profMax: number, maxLv: number): void {
+  if (!isObj(c) || typeof c.type !== 'string') {
+    out.error(w, '조건은 { "type": "..." } 모양의 객체여야 합니다.');
+    return;
+  }
+  const keys = (...k: string[]) => onlyKeys(out, w, c, ['type', ...k]);
+  switch (c.type) {
+    case 'level':
+      keys('min');
+      intField(out, w, c, 'min', 1, maxLv);
+      break;
+    case 'ascended':
+      keys();
+      break;
+    case 'rebirths':
+      keys('min');
+      intField(out, w, c, 'min', 0, 1_000_000);
+      break;
+    case 'pureHp':
+    case 'pureMp':
+      keys('min');
+      intField(out, w, c, 'min', 0, MAX_BONUS);
+      break;
+    case 'exp':
+      keys('min', 'consume');
+      intField(out, w, c, 'min', 0, MAX_EXP_GRANT);
+      boolField(out, w, c, 'consume');
+      break;
+    case 'payHp':
+    case 'payMp':
+      keys('amount');
+      intField(out, w, c, 'amount', 1, MAX_BONUS);
+      break;
+    case 'gold':
+      keys('min', 'consume');
+      intField(out, w, c, 'min', 0, Number.MAX_SAFE_INTEGER);
+      boolField(out, w, c, 'consume');
+      break;
+    case 'item':
+      keys('item', 'qty', 'consume');
+      if (!isStr(c.item) || !refs.items.has(c.item)) out.error(w, `아이템 '${String(c.item)}' 이 items.json 에 없습니다.`);
+      intField(out, w, c, 'qty', 1, 1_000_000);
+      boolField(out, w, c, 'consume');
+      break;
+    case 'skillProf': {
+      keys('ability', 'min');
+      const a = isStr(c.ability) ? refs.abilities.get(c.ability) : undefined;
+      if (!a || a.classId === 'monster') out.error(w, `기술 '${String(c.ability)}' 이 abilities.json 에 없거나 몬스터 전용입니다.`);
+      intField(out, w, c, 'min', 0, profMax);
+      break;
+    }
+    default:
+      out.error(w, `알 수 없는 조건 종류 '${c.type}' (쓸 수 있는 것: ${CONDITION_TYPES.join(', ')})`);
+  }
+}
+
+/** progression.json 의 ability 항목 (파일에 쓰는 순서) */
+const ABILITY_KEYS = ['maxLevel', 'expRatio', 'expBase', 'expGrowth', 'hpPerLevel', 'mpPerLevel', 'powerMin', 'powerMax'] as const;
+
+/**
+ * 나중에 생긴 ability 항목의 기본값 (어빌 표, 2차 직업 위력). 이 항목이 생기기 전의 progression.json(손으로 고친 파일,
+ * 관리자 페이지의 판 기록)은 이 값을 채워 읽고 경고합니다. 관리자 페이지에서 한 번 저장하면 파일에 적힙니다.
+ */
+export const ABILITY_ADDED_DEFAULTS: Readonly<Record<string, number>> = { expBase: 1_000_000, expGrowth: 1.05, powerMin: 1.05, powerMax: 1.15 };
+
+/** 옛 progression.json 에 없는 ability 항목을 기본값으로 채운 복사본과 그 경고 (모양이 틀린 값은 검사가 알리도록 그대로) */
+export function upgradeProgression(raw: unknown): { progression: unknown; issues: DesignIssue[] } {
+  if (!isObj(raw) || !isObj(raw.ability)) return { progression: raw, issues: [] };
+  const old = raw.ability;
+  const filled = Object.keys(ABILITY_ADDED_DEFAULTS).filter((k) => !(k in old));
+  if (filled.length === 0) return { progression: raw, issues: [] };
+  const ability: Record<string, unknown> = { ...old };
+  for (const k of filled) ability[k] = ABILITY_ADDED_DEFAULTS[k];
+  const list = filled.map((k) => `${k} ${ABILITY_ADDED_DEFAULTS[k]}`).join(', ');
+  return {
+    progression: { ...raw, ability },
+    issues: [{ level: 'warn', where: 'progression.json(ability)', msg: `이 항목이 생기기 전의 설계라 기본값(${list})으로 채웠습니다. 관리자 페이지에서 저장하면 파일에 적힙니다.` }],
+  };
+}
+
+/** progression.json 내용을 검사합니다 */
+export function checkProgression(raw: unknown, refs: DesignRefs): DesignIssue[] {
+  const out = new IssueList('progression.json');
+  if (!isObj(raw)) {
+    out.error('', '최상위가 객체여야 합니다.');
+    return out.list;
+  }
+  onlyKeys(out, '', raw, ['version', 'rebirth', 'ascend', 'second', 'ability', 'proficiency']);
+  if (raw.version !== 1) out.error('version', 'version 은 1 이어야 합니다.');
+  const maxLv = refs.maxLevel ?? 999;
+  const section = (key: string, keys: readonly string[]): Record<string, unknown> | undefined => {
+    const v = raw[key];
+    if (!isObj(v)) {
+      out.error(key, `${key} 객체가 필요합니다.`);
+      return undefined;
+    }
+    onlyKeys(out, key, v, keys);
+    return v;
+  };
+
+  // 숙련도 (skillProf 조건의 최대를 정하므로 먼저)
+  let profMax = 100;
+  const prof = section('proficiency', ['max', 'baseChance', 'slowdown', 'minChance', 'effectMin', 'effectMax']);
+  if (prof) {
+    profMax = intField(out, 'proficiency', prof, 'max', 1, 1000) ?? 100;
+    const base = numField(out, 'proficiency', prof, 'baseChance', 0, 1);
+    numField(out, 'proficiency', prof, 'slowdown', 0, 1);
+    const min = numField(out, 'proficiency', prof, 'minChance', 0, 1);
+    if (base === 0 && min === 0)
+      out.warn('proficiency', 'baseChance 와 minChance 가 모두 0 이라 숙련도가 오르지 않습니다. 숙련도가 필요한 선수과목과 승급 조건을 아무도 채울 수 없습니다.');
+    else if (base !== undefined && min !== undefined && min > base)
+      out.warn('proficiency', 'minChance 가 baseChance 보다 커서 숙련도와 상관없이 늘 같은 확률로 오릅니다.');
+    const lo = numField(out, 'proficiency', prof, 'effectMin', 0.01, 10);
+    const hi = numField(out, 'proficiency', prof, 'effectMax', 0.01, 10);
+    if (lo !== undefined && hi !== undefined && hi < lo) out.error('proficiency', 'effectMax 는 effectMin 이상이어야 합니다.');
+  }
+  const conditionList = (v: unknown, w: string): void => {
+    if (!Array.isArray(v)) return out.error(w, '조건 목록(배열)이어야 합니다.');
+    v.forEach((c, i) => checkCondition(out, refs, `${w}[${i}]`, c, profMax, maxLv));
+  };
+
+  // 어빌리티
+  const ab = section('ability', ABILITY_KEYS);
+  if (ab) {
+    const abMax = intField(out, 'ability', ab, 'maxLevel', 1, 999);
+    const ratio = numField(out, 'ability', ab, 'expRatio', 0, 10);
+    if (ratio === 0 && abMax !== 1)
+      out.warn('ability', 'expRatio 가 0 이라 어빌 경험치를 받지 않아 2차 직업이 어빌 1 에 머뭅니다 (어빌 2 이상이 필요한 2차 직업 기술을 배울 수 없음).');
+    // 어빌 표: 어빌 L → L+1 = expBase × expGrowth^(L−1)
+    const base = intField(out, 'ability', ab, 'expBase', 1, MAX_EXP_GRANT);
+    const growth = numField(out, 'ability', ab, 'expGrowth', 1, 2);
+    if (abMax !== undefined && base !== undefined && growth !== undefined) {
+      const total = abilityExpTotal(abMax, { maxLevel: abMax, expRatio: ratio ?? 0, expBase: base, expGrowth: growth, hpPerLevel: 0, mpPerLevel: 0, powerMin: 1, powerMax: 1 });
+      if (!(total <= MAX_EXP_GRANT))
+        out.error('ability', `어빌 1 → ${abMax} 에 필요한 어빌 경험치가 ${Number.isFinite(total) ? bigNumber(total) : '끝없이'} 로 너무 큽니다 (1,000조까지). expBase 나 expGrowth 를 낮춰 주세요.`);
+    }
+    intField(out, 'ability', ab, 'hpPerLevel', 0, 100_000);
+    intField(out, 'ability', ab, 'mpPerLevel', 0, 100_000);
+    // 2차 직업 위력: 어빌 1 → 어빌 최대로 직선
+    const lo = numField(out, 'ability', ab, 'powerMin', 0.1, 10);
+    const hi = numField(out, 'ability', ab, 'powerMax', 0.1, 10);
+    if (lo !== undefined && hi !== undefined && hi < lo) out.error('ability', 'powerMax(어빌 최대의 위력)는 powerMin(어빌 1 의 위력) 이상이어야 합니다.');
+    else if (lo !== undefined && lo < 1)
+      out.warn('ability', `powerMin 이 ${Math.round(lo * 100)}% 라 2차 전직 직후(어빌 1)에 이어받은 1차 직업보다 약해질 수 있습니다 (2차 직업 기술이 열리기 전에는 1차 직업과 같은 기술로 싸움).`);
+  }
+
+  // 전직
+  const rb = section('rebirth', ['level', 'restartLevel', 'allowAfterAscend', 'targets', 'conditions', 'names']);
+  if (rb) {
+    const lv = intField(out, 'rebirth', rb, 'level', 1, maxLv);
+    intField(out, 'rebirth', rb, 'restartLevel', 1, lv ?? maxLv);
+    boolField(out, 'rebirth', rb, 'allowAfterAscend');
+    perClass(out, refs, 'rebirth.targets', rb.targets, FIRST_CLASSES, (v, w, id) => {
+      classList(out, refs, w, v, FIRST_CLASSES);
+      // 정해진 규칙 (편집기에서도 잠김): 무도가는 환골탈태로 무도가로만, 다른 직업은 무도가로 전직할 수 없음
+      if (Array.isArray(v) && id === 'monk' && !(v.length === 1 && v[0] === 'monk'))
+        out.error(w, `${designClassName(refs, 'monk')}은(는) 환골탈태로 ${designClassName(refs, 'monk')}(으)로만 다시 태어납니다. (["monk"] 여야 하는 정해진 규칙)`);
+      else if (Array.isArray(v) && id !== 'monk' && v.includes('monk'))
+        out.error(w, `${designClassName(refs, id)}은(는) ${designClassName(refs, 'monk')}(으)로 전직할 수 없습니다. (정해진 규칙)`);
+      else if (Array.isArray(v) && v.length === 0) out.warn(w, `${designClassName(refs, id)}은(는) 전직할 수 없습니다 (갈 수 있는 직업이 없음).`);
+    });
+    perClass(out, refs, 'rebirth.conditions', rb.conditions, FIRST_CLASSES, conditionList);
+    perClass(out, refs, 'rebirth.names', rb.names, FIRST_CLASSES, (v, w) => {
+      if (!isStr(v) || v.length > 12) out.error(w, '이름은 1~12자 글자여야 합니다.');
+    });
+  }
+
+  // 승급
+  const as = section('ascend', ['level', 'expTrade', 'hpToStat', 'conditions', 'title']);
+  if (as) {
+    intField(out, 'ascend', as, 'level', 1, maxLv);
+    if (!isObj(as.expTrade)) out.error('ascend.expTrade', 'expTrade 는 { "exp", "hp", "mp" } 객체여야 합니다.');
+    else {
+      onlyKeys(out, 'ascend.expTrade', as.expTrade, ['exp', 'hp', 'mp']);
+      intField(out, 'ascend.expTrade', as.expTrade, 'exp', 1, MAX_EXP_GRANT);
+      intField(out, 'ascend.expTrade', as.expTrade, 'hp', 0, 1_000_000);
+      intField(out, 'ascend.expTrade', as.expTrade, 'mp', 0, 1_000_000);
+    }
+    if (!isObj(as.hpToStat)) out.error('ascend.hpToStat', 'hpToStat 은 { "hp", "stat" } 객체여야 합니다.');
+    else {
+      onlyKeys(out, 'ascend.hpToStat', as.hpToStat, ['hp', 'stat']);
+      intField(out, 'ascend.hpToStat', as.hpToStat, 'hp', 1, MAX_BONUS);
+      intField(out, 'ascend.hpToStat', as.hpToStat, 'stat', 1, 1000);
+    }
+    if (!isStr(as.title) || as.title.length > 12) out.error('ascend.title', '칭호는 1~12자 글자여야 합니다.');
+    perClass(out, refs, 'ascend.conditions', as.conditions, FIRST_CLASSES, (v, w, id) => {
+      conditionList(v, w);
+      // 숙련도 조건의 기술은 대개 그 직업의 핵심 기술
+      if (Array.isArray(v))
+        v.forEach((c, i) => {
+          const a = isObj(c) && c.type === 'skillProf' && isStr(c.ability) ? refs.abilities.get(c.ability) : undefined;
+          if (a && a.classId !== id) out.warn(`${w}[${i}]`, `${a.name} 은(는) ${designClassName(refs, id)}의 기술이 아닙니다.`);
+        });
+    });
+  }
+
+  // 2차 전직
+  const sc = section('second', ['from', 'conditions', 'beastTypes']);
+  if (sc) {
+    perClass(out, refs, 'second.from', sc.from, SECOND_CLASSES, (v, w, id) => {
+      classList(out, refs, w, v, FIRST_CLASSES);
+      if (Array.isArray(v) && v.length === 0) out.warn(w, `${designClassName(refs, id)}(으)로 2차 전직할 수 있는 1차 직업이 없습니다.`);
+    });
+    perClass(out, refs, 'second.conditions', sc.conditions, SECOND_CLASSES, (v, w, id) => {
+      conditionList(v, w);
+      // 원작(과 설계 문서)은 승급한 뒤에만 2차 전직
+      if (Array.isArray(v) && !v.some((c) => isObj(c) && c.type === 'ascended'))
+        out.warn(w, `승급 조건(ascended)이 없어 승급하지 않아도 ${designClassName(refs, id)}(으)로 2차 전직할 수 있습니다.`);
+    });
+    if (!Array.isArray(sc.beastTypes) || sc.beastTypes.length === 0)
+      out.error('second.beastTypes', '수인 계통이 하나 이상 있어야 합니다. ([{ "id": "mammal", "name": "포유류" }, ...])');
+    else {
+      const ids = new Set<string>();
+      sc.beastTypes.forEach((b: unknown, i: number) => {
+        const w = `second.beastTypes[${i}]`;
+        if (!isObj(b)) return out.error(w, '계통은 { "id", "name" } 객체여야 합니다.');
+        onlyKeys(out, w, b, ['id', 'name']);
+        if (!isStr(b.id) || !/^[a-z][a-z0-9_]{0,23}$/.test(b.id)) out.error(w, 'id 는 영문 소문자로 시작하는 24자 이하의 영문 소문자·숫자·_ 여야 합니다.');
+        else if (ids.has(b.id)) out.error(w, `계통 id '${b.id}' 가 두 번 있습니다.`);
+        else ids.add(b.id);
+        if (!isStr(b.name) || b.name.length > 12) out.error(w, '이름은 1~12자 글자여야 합니다.');
+      });
+    }
+  }
+  return out.list;
+}
+
+/**
+ * skilltrees.json 내용을 검사합니다. progression 을 주면 숙련도 최대·어빌 최대·수인 계통까지 맞춰 봅니다
+ * (주지 않으면 숙련도 100, 어빌 999 까지 허용하고 계통은 보지 않음).
+ */
+export function checkSkillTrees(raw: unknown, refs: DesignRefs, progression?: ProgressionConfig): DesignIssue[] {
+  const out = new IssueList('skilltrees.json');
+  if (!isObj(raw)) {
+    out.error('', '최상위가 객체여야 합니다.');
+    return out.list;
+  }
+  onlyKeys(out, '', raw, ['version', 'trees']);
+  if (raw.version !== 1) out.error('version', 'version 은 1 이어야 합니다.');
+  const trees = raw.trees;
+  if (!isObj(trees)) {
+    out.error('trees', 'trees 객체가 필요합니다. ({ "warrior": { "nodes": [...] }, ... })');
+    return out.list;
+  }
+  const maxLv = refs.maxLevel ?? 999;
+  const profMax = progression?.proficiency.max ?? 100;
+  const abilMax = progression?.ability.maxLevel ?? 999;
+  const beastIds = progression ? progression.second.beastTypes.map((b) => b.id) : null;
+  const aname = (id: string) => refs.abilities.get(id)?.name ?? id;
+  for (const k of Object.keys(trees)) if (!isClassId(k)) out.error(k, `알 수 없는 직업 '${k}' 의 트리입니다.`);
+  /** 기술 → 선수과목들 (순환 검사용) */
+  const reqs = new Map<string, string[]>();
+  /** 기술 → 놓인 트리의 직업과 필요 레벨(어빌) */
+  const placed = new Map<string, { classId: ClassId; need: number }>();
+
+  for (const classId of CLASS_IDS) {
+    const t = trees[classId];
+    if (t === undefined) {
+      out.error(classId, '이 직업의 트리가 없습니다. 배울 기술이 없으면 { "nodes": [] } 로 적어 주세요.');
+      continue;
+    }
+    if (!isObj(t)) {
+      out.error(classId, '트리는 { "nodes": [...] } 모양의 객체여야 합니다.');
+      continue;
+    }
+    onlyKeys(out, classId, t, ['columns', 'nodes']);
+    if (
+      t.columns !== undefined &&
+      (!Array.isArray(t.columns) || t.columns.length > TREE_MAX_COLS || !t.columns.every((c) => typeof c === 'string' && c.length <= 12))
+    )
+      out.error(`${classId}/columns`, `열 제목은 ${TREE_MAX_COLS}개까지, 각각 12자 이하의 글자여야 합니다.`);
+    if (!Array.isArray(t.nodes)) {
+      out.error(classId, 'nodes 배열이 필요합니다.');
+      continue;
+    }
+    const tier = classTier(classId);
+    const cells = new Map<string, string>();
+    t.nodes.forEach((n: unknown, i: number) => {
+      const w = `${classId}/${isObj(n) && isStr(n.ability) ? n.ability : `#${i}`}`;
+      if (!isObj(n)) return out.error(w, '노드는 객체여야 합니다.');
+      onlyKeys(out, w, n, ['ability', 'row', 'col', 'level', 'abilityLevel', 'gold', 'items', 'requires', 'stats', 'beastType']);
+      const a = isStr(n.ability) ? refs.abilities.get(n.ability) : undefined;
+      if (!a) return out.error(w, `기술 '${String(n.ability)}' 이 abilities.json 에 없습니다.`);
+      if (a.classId !== classId)
+        out.error(
+          w,
+          a.classId === 'monster'
+            ? `${a.name} 은(는) 몬스터 전용 기술입니다.`
+            : `${a.name} 은(는) ${designClassName(refs, a.classId)}의 기술입니다. 그 직업의 트리에 넣어 주세요.`,
+        );
+      if (placed.has(a.id)) out.error(w, `${a.name} 이(가) 트리에 두 번 있습니다.`);
+      // 칸
+      const row = intField(out, w, n, 'row', 0, TREE_MAX_ROWS - 1);
+      const col = intField(out, w, n, 'col', 0, TREE_MAX_COLS - 1);
+      if (row !== undefined && col !== undefined) {
+        const other = cells.get(`${row},${col}`);
+        if (other) out.error(w, `칸 (줄 ${row}, 칸 ${col}) 에 이미 ${aname(other)} 이(가) 있습니다.`);
+        else cells.set(`${row},${col}`, a.id);
+      }
+      // 필요 레벨 / 어빌
+      const level = intField(out, w, n, 'level', 1, maxLv, true);
+      const abilityLevel = intField(out, w, n, 'abilityLevel', 1, abilMax, true);
+      if (tier === 2) {
+        if (n.abilityLevel === undefined) out.error(w, '2차 직업 기술에는 필요 어빌(abilityLevel)이 있어야 합니다.');
+      } else {
+        if (n.level === undefined) out.error(w, '필요 레벨(level)이 있어야 합니다.');
+        if (n.abilityLevel !== undefined) out.error(w, '필요 어빌(abilityLevel)은 2차 직업 트리에서만 씁니다.');
+      }
+      const gold = intField(out, w, n, 'gold', 0, 1_000_000_000_000);
+      // 재료
+      if (n.items !== undefined) {
+        if (!Array.isArray(n.items)) out.error(w, 'items 는 [{ "item": id, "qty": 개수 }] 배열이어야 합니다.');
+        else {
+          const seen = new Set<string>();
+          n.items.forEach((x: unknown, j: number) => {
+            const ww = `${w}.items[${j}]`;
+            if (!isObj(x)) return out.error(ww, '재료는 { "item": id, "qty": 개수 } 객체여야 합니다.');
+            onlyKeys(out, ww, x, ['item', 'qty']);
+            if (!isStr(x.item) || !refs.items.has(x.item)) out.error(ww, `아이템 '${String(x.item)}' 이 items.json 에 없습니다.`);
+            else if (seen.has(x.item)) out.error(ww, '같은 재료가 두 번 있습니다. 개수를 합쳐 주세요.');
+            else seen.add(x.item);
+            intField(out, ww, x, 'qty', 1, 1000);
+          });
+        }
+      }
+      // 선수과목
+      const reqIds: string[] = [];
+      if (n.requires !== undefined) {
+        if (!Array.isArray(n.requires)) out.error(w, 'requires 는 [{ "ability": id, "prof": 숙련도 }] 배열이어야 합니다.');
+        else
+          n.requires.forEach((x: unknown, j: number) => {
+            const ww = `${w}.requires[${j}]`;
+            if (!isObj(x)) return out.error(ww, '선수과목은 { "ability": id, "prof": 숙련도 } 객체여야 합니다.');
+            onlyKeys(out, ww, x, ['ability', 'prof']);
+            const ra = isStr(x.ability) ? refs.abilities.get(x.ability) : undefined;
+            if (!ra || ra.classId === 'monster') out.error(ww, `선수과목 '${String(x.ability)}' 이 abilities.json 에 없거나 몬스터 전용입니다.`);
+            else if (ra.id === a.id) out.error(ww, '자기 자신을 선수과목으로 둘 수 없습니다.');
+            else if (reqIds.includes(ra.id)) out.error(ww, `선수과목 ${ra.name} 이(가) 두 번 있습니다.`);
+            else reqIds.push(ra.id);
+            intField(out, ww, x, 'prof', 0, profMax);
+          });
+      }
+      // 능력치
+      if (n.stats !== undefined) {
+        if (!isObj(n.stats)) out.error(w, 'stats 는 { "str": 50 } 같은 객체여야 합니다.');
+        else
+          for (const [k, v] of Object.entries(n.stats)) {
+            if (!isStatKey(k)) out.error(w, `알 수 없는 능력치 '${k}' (str/int/wis/con/dex)`);
+            else if (!isInt(v, 1, MAX_STAT_VALUE)) out.error(w, `필요 능력치 ${k} 는 1~${MAX_STAT_VALUE} 사이의 정수여야 합니다.`);
+          }
+      }
+      // 수인 계통
+      if (n.beastType !== undefined) {
+        if (classId !== 'beastkin') out.error(w, '계통(beastType)은 수인 트리에서만 씁니다.');
+        else if (!isStr(n.beastType)) out.error(w, 'beastType 은 계통 id 글자여야 합니다.');
+        else if (beastIds && !beastIds.includes(n.beastType))
+          out.error(w, `알 수 없는 수인 계통 '${n.beastType}' (progression.json 의 second.beastTypes: ${beastIds.join(', ')})`);
+      }
+      // abilities.json 의 기본값과 다르면 알림 (서클·밸런스 계산은 abilities.json 의 level/price 를 봄)
+      const need = tier === 2 ? abilityLevel : level;
+      if (need !== undefined && need !== a.level)
+        out.warn(w, `필요 ${tier === 2 ? '어빌' : '레벨'} ${need} 이(가) abilities.json 의 level ${a.level} 과 다릅니다.`);
+      if (gold !== undefined && gold !== a.price) out.warn(w, `골드 ${gold} 이(가) abilities.json 의 price ${a.price} 와 다릅니다.`);
+      if (!placed.has(a.id)) placed.set(a.id, { classId, need: need ?? 0 });
+      reqs.set(a.id, reqIds);
+    });
+  }
+
+  // 선수과목: 어느 트리에도 없으면 배울 수 없어 오류, 같은 트리에서 더 늦게 열리면 경고, 돌고 돌면 오류
+  for (const [id, list] of reqs) {
+    const me = placed.get(id)!;
+    for (const r of list) {
+      const p = placed.get(r);
+      if (!p) out.error(`${me.classId}/${id}`, `선수과목 ${aname(r)} 은(는) 어느 트리에도 없어 배울 수 없습니다.`);
+      else if (p.classId === me.classId && p.need > me.need)
+        out.warn(`${me.classId}/${id}`, `선수과목 ${aname(r)}(${p.need}) 이(가) 이 기술(${me.need})보다 늦게 열립니다.`);
+    }
+  }
+  for (const cycle of findCycles(reqs))
+    out.error(`${placed.get(cycle[0]!)?.classId ?? '?'}/${cycle[0]}`, `선수과목이 돌고 돕니다: ${[...cycle, cycle[0]!].map(aname).join(' → ')}`);
+  // 트리에 없는 기술은 아무도 배울 수 없음
+  for (const a of refs.abilities.values())
+    if (a.classId !== 'monster' && !placed.has(a.id)) out.warn(a.classId, `${a.name}(${a.id}) 은(는) 트리에 없어 배울 수 없습니다.`);
+  return out.list;
+}
+
+/** 선수과목 그래프(기술 → 선수과목들)의 순환을 찾습니다. 순환마다 그 안의 기술 id 들 (같은 순환은 한 번만) */
+function findCycles(graph: ReadonlyMap<string, readonly string[]>): string[][] {
+  const state = new Map<string, 1 | 2>(); // 1: 살펴보는 중, 2: 끝
+  const stack: string[] = [];
+  const out: string[][] = [];
+  const seen = new Set<string>();
+  const visit = (id: string): void => {
+    state.set(id, 1);
+    stack.push(id);
+    for (const next of graph.get(id) ?? []) {
+      const s = state.get(next);
+      if (s === 1) {
+        const cycle = stack.slice(stack.indexOf(next));
+        const key = [...cycle].sort().join(',');
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(cycle);
+        }
+      } else if (s === undefined && graph.has(next)) visit(next);
+    }
+    stack.pop();
+    state.set(id, 2);
+  };
+  for (const id of graph.keys()) if (!state.has(id)) visit(id);
+  return out;
+}
+
+/**
+ * 두 설계 파일을 함께 검사합니다 (서버 시작, 관리자 저장 전).
+ * progression.json 에 오류가 없으면 그 값으로 스킬트리의 숙련도·어빌·계통까지 맞춰 보고,
+ * 전직·승급·2차 전직의 숙련도 조건 기술이 어느 트리에도 없으면 경고합니다.
+ */
+export function checkDesign(design: { progression: unknown; skillTrees: unknown }, refs: DesignRefs): DesignIssue[] {
+  const p = checkProgression(design.progression, refs);
+  const progOk = !p.some(isError);
+  const t = checkSkillTrees(design.skillTrees, refs, progOk ? (design.progression as ProgressionConfig) : undefined);
+  const issues = [...p, ...t];
+  if (progOk && !t.some(isError)) {
+    const trees = normalizeSkillTrees(design.skillTrees);
+    const inTree = new Set(CLASS_IDS.flatMap((c) => trees.trees[c].nodes.map((n) => n.ability)));
+    const cfg = design.progression as ProgressionConfig;
+    const lists: [string, Condition[]][] = [
+      ...FIRST_CLASSES.map((c): [string, Condition[]] => [`rebirth.conditions.${c}`, cfg.rebirth.conditions[c]]),
+      ...FIRST_CLASSES.map((c): [string, Condition[]] => [`ascend.conditions.${c}`, cfg.ascend.conditions[c]]),
+      ...SECOND_CLASSES.map((c): [string, Condition[]] => [`second.conditions.${c}`, cfg.second.conditions[c]]),
+    ];
+    for (const [w, list] of lists)
+      list.forEach((c, i) => {
+        if (c.type === 'skillProf' && !inTree.has(c.ability))
+          issues.push({
+            level: 'warn',
+            where: `progression.json(${w}[${i}])`,
+            msg: `${refs.abilities.get(c.ability)?.name ?? c.ability} 은(는) 트리에 없어 배울 수 없습니다.`,
+          });
+      });
+  }
+  return issues;
+}
+
+/** 검사를 통과한 skilltrees.json 을 게임에서 쓰는 모양으로 (깊은 복사, 빠진 items/requires 는 빈 배열) */
+export function normalizeSkillTrees(raw: unknown): SkillTreesConfig {
+  type RawNode = Omit<SkillTreeNode, 'items' | 'requires'> & Partial<Pick<SkillTreeNode, 'items' | 'requires'>>;
+  const src = raw as { trees: Record<ClassId, { columns?: string[]; nodes: RawNode[] }> };
+  const trees = {} as Record<ClassId, SkillTreeConfig>;
+  for (const classId of CLASS_IDS) {
+    const t = src.trees[classId];
+    trees[classId] = {
+      ...(t.columns ? { columns: [...t.columns] } : {}),
+      nodes: t.nodes.map((n) => ({ ...clone(n), items: clone(n.items ?? []), requires: clone(n.requires ?? []) })),
+    };
+  }
+  return { version: 1, trees };
+}
+
+/** 편집기의 기술 수정(이름·설명·마나·재사용 대기)을 검사합니다 (abilities.json) */
+export function checkAbilityPatches(patches: unknown, refs: DesignRefs): DesignIssue[] {
+  const out = new IssueList('abilities.json');
+  if (!Array.isArray(patches)) {
+    out.error('', '기술 수정은 배열이어야 합니다.');
+    return out.list;
+  }
+  const seen = new Set<string>();
+  patches.forEach((p: unknown, i: number) => {
+    const w = isObj(p) && isStr(p.id) ? p.id : `#${i}`;
+    if (!isObj(p)) return out.error(w, '기술 수정은 객체여야 합니다.');
+    onlyKeys(out, w, p, ['id', 'name', 'desc', 'mp', 'cooldownMs']);
+    const a = isStr(p.id) ? refs.abilities.get(p.id) : undefined;
+    if (!a || a.classId === 'monster') return out.error(w, `기술 '${String(p.id)}' 이 없거나 몬스터 전용입니다.`);
+    if (seen.has(a.id)) out.error(w, '같은 기술을 두 번 고쳤습니다.');
+    seen.add(a.id);
+    if (p.name !== undefined && (!isStr(p.name) || p.name.length > 20)) out.error(w, '이름은 1~20자 글자여야 합니다.');
+    if (p.desc !== undefined && (typeof p.desc !== 'string' || p.desc.length > 300)) out.error(w, '설명은 300자 이하의 글자여야 합니다.');
+    intField(out, w, p, 'mp', 0, 100_000, true);
+    intField(out, w, p, 'cooldownMs', 0, 3_600_000, true);
+  });
+  return out.list;
+}
+
+/** 기술 수정에서 바꿀 값만 */
+function pickPatch(p: AbilityPatch): Partial<AbilityDef> {
+  const o: Partial<AbilityDef> = {};
+  if (p.name !== undefined) o.name = p.name;
+  if (p.desc !== undefined) o.desc = p.desc;
+  if (p.mp !== undefined) o.mp = p.mp;
+  if (p.cooldownMs !== undefined) o.cooldownMs = p.cooldownMs;
+  return o;
+}
+
+// ───────────────────────── 설계 파일 쓰기 모양 ─────────────────────────
+// 관리자 편집기가 gamedata/ 에 다시 쓸 때 지금 파일과 같은 모양으로 써서, 바꾼 곳만 git 차이로 보이게 합니다.
+
+/** 배열 파일(abilities.json, items.json …): 한 줄에 항목 하나. 지금 파일을 그대로 다시 만듭니다 */
+export function formatListFile(list: readonly unknown[]): string {
+  return `[\n${list.map((x) => `  ${JSON.stringify(x)}`).join(',\n')}\n]\n`;
+}
+
+/** 스킬트리 노드의 항목 순서 (파일에 쓸 때) */
+function canonNode(n: SkillTreeNode): SkillTreeNode {
+  return {
+    ability: n.ability,
+    row: n.row,
+    col: n.col,
+    ...(n.level !== undefined ? { level: n.level } : {}),
+    ...(n.abilityLevel !== undefined ? { abilityLevel: n.abilityLevel } : {}),
+    gold: n.gold,
+    items: n.items.map((x) => ({ item: x.item, qty: x.qty })),
+    requires: n.requires.map((x) => ({ ability: x.ability, prof: x.prof })),
+    ...(n.stats ? { stats: Object.fromEntries(STAT_KEY_ORDER.filter((k) => n.stats![k] !== undefined).map((k) => [k, n.stats![k]])) } : {}),
+    ...(n.beastType !== undefined ? { beastType: n.beastType } : {}),
+  };
+}
+
+const STAT_KEY_ORDER = ['str', 'int', 'wis', 'con', 'dex'] as const;
+
+/** skilltrees.json: 직업 순서대로, 노드 한 줄에 하나 */
+export function formatSkillTrees(cfg: SkillTreesConfig): string {
+  const lines = ['{', '  "version": 1,', '  "trees": {'];
+  CLASS_IDS.forEach((id, i) => {
+    const t = cfg.trees[id];
+    lines.push(`    ${JSON.stringify(id)}: {`);
+    if (t.columns) lines.push(`      "columns": ${JSON.stringify(t.columns)},`);
+    if (t.nodes.length === 0) lines.push('      "nodes": []');
+    else {
+      lines.push('      "nodes": [');
+      t.nodes.forEach((n, j) => lines.push(`        ${JSON.stringify(canonNode(n))}${j < t.nodes.length - 1 ? ',' : ''}`));
+      lines.push('      ]');
+    }
+    lines.push(`    }${i < CLASS_IDS.length - 1 ? ',' : ''}`);
+  });
+  lines.push('  }', '}', '');
+  return lines.join('\n');
+}
+
+/** 조건의 항목 순서 (type 먼저) */
+const CONDITION_KEY_ORDER = ['type', 'ability', 'item', 'min', 'qty', 'amount', 'consume'];
+
+function canonCondition(c: Condition): Condition {
+  const keys = Object.keys(c).sort((a, b) => CONDITION_KEY_ORDER.indexOf(a) - CONDITION_KEY_ORDER.indexOf(b));
+  return Object.fromEntries(keys.map((k) => [k, (c as unknown as Record<string, unknown>)[k]])) as unknown as Condition;
+}
+
+/** progression.json 의 항목 순서 (파일에 쓸 때) */
+function canonProgression(c: ProgressionConfig): ProgressionConfig {
+  const byClass = <K extends string, V>(keys: readonly K[], rec: Record<K, V>, f: (v: V) => V = (v) => v): Record<K, V> =>
+    Object.fromEntries(keys.map((k) => [k, f(rec[k])])) as Record<K, V>;
+  const conds = (list: Condition[]) => list.map(canonCondition);
+  return {
+    version: 1,
+    rebirth: {
+      level: c.rebirth.level,
+      restartLevel: c.rebirth.restartLevel,
+      allowAfterAscend: c.rebirth.allowAfterAscend,
+      names: byClass(FIRST_CLASSES, c.rebirth.names),
+      targets: byClass(FIRST_CLASSES, c.rebirth.targets),
+      conditions: byClass(FIRST_CLASSES, c.rebirth.conditions, conds),
+    },
+    ascend: {
+      level: c.ascend.level,
+      expTrade: { exp: c.ascend.expTrade.exp, hp: c.ascend.expTrade.hp, mp: c.ascend.expTrade.mp },
+      hpToStat: { hp: c.ascend.hpToStat.hp, stat: c.ascend.hpToStat.stat },
+      title: c.ascend.title,
+      conditions: byClass(FIRST_CLASSES, c.ascend.conditions, conds),
+    },
+    second: {
+      from: byClass(SECOND_CLASSES, c.second.from),
+      conditions: byClass(SECOND_CLASSES, c.second.conditions, conds),
+      beastTypes: c.second.beastTypes.map((b) => ({ id: b.id, name: b.name })),
+    },
+    ability: {
+      maxLevel: c.ability.maxLevel,
+      expRatio: c.ability.expRatio,
+      expBase: c.ability.expBase,
+      expGrowth: c.ability.expGrowth,
+      hpPerLevel: c.ability.hpPerLevel,
+      mpPerLevel: c.ability.mpPerLevel,
+      powerMin: c.ability.powerMin,
+      powerMax: c.ability.powerMax,
+    },
+    proficiency: {
+      max: c.proficiency.max,
+      baseChance: c.proficiency.baseChance,
+      slowdown: c.proficiency.slowdown,
+      minChance: c.proficiency.minChance,
+      effectMin: c.proficiency.effectMin,
+      effectMax: c.proficiency.effectMax,
+    },
+  };
+}
+
+/** 한 줄로 쓴 JSON ({ "a": 1, "b": [1, 2] } 모양) */
+function inlineJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(inlineJson).join(', ')}]`;
+  if (typeof v === 'object' && v !== null) {
+    const e = Object.entries(v);
+    return e.length ? `{ ${e.map(([k, x]) => `${JSON.stringify(k)}: ${inlineJson(x)}`).join(', ')} }` : '{}';
+  }
+  return JSON.stringify(v);
+}
+
+/** 한 줄(들여쓰기·이름 포함)이 width 글자 안이면 한 줄로, 넘으면 두 칸 들여쓰기로 펼칩니다 */
+function prettyJson(v: unknown, indent: string, prefixLen: number, width: number): string {
+  const one = inlineJson(v);
+  if (typeof v !== 'object' || v === null || indent.length + prefixLen + one.length <= width) return one;
+  const inner = `${indent}  `;
+  if (Array.isArray(v)) return `[\n${v.map((x) => inner + prettyJson(x, inner, 0, width)).join(',\n')}\n${indent}]`;
+  const lines = Object.entries(v).map(([k, x]) => `${inner}${JSON.stringify(k)}: ${prettyJson(x, inner, JSON.stringify(k).length + 2, width)}`);
+  return `{\n${lines.join(',\n')}\n${indent}}`;
+}
+
+/** progression.json: 항목 순서를 맞추고, 짧은 객체·배열은 한 줄로 */
+export function formatProgression(cfg: ProgressionConfig): string {
+  return `${prettyJson(canonProgression(cfg), '', 0, 120)}\n`;
 }
