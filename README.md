@@ -65,7 +65,21 @@
 
 ## 빠른 시작
 
-### 방법 1. Node.js 로 실행
+### 방법 1. 릴리즈 실행 꾸러미로 실행 (빌드 없이)
+
+[Releases](https://github.com/squirrel337/Legend_Of_Darkness/releases) 에서 `legend-of-darkness-<버전>.tar.gz`(또는 `.zip`)를 받습니다. [Node.js](https://nodejs.org) 20.10 이상(22 권장)이 필요합니다.
+
+```bash
+tar xzf legend-of-darkness-v1.0.0.tar.gz
+cd legend-of-darkness-v1.0.0
+npm ci --omit=dev        # 실행에 필요한 것(ws)만 설치
+cp .env.example .env      # 선택: 관리자 비밀번호, 배율 등을 정할 수 있습니다
+npm start
+```
+
+새 버전으로 바꿀 때는 새 꾸러미를 풀고, 예전 폴더의 `data/`(캐릭터 저장)와 `.env` 를 옮겨 오면 됩니다. 관리자 페이지의 직업·스킬트리 탭에서 설계를 고쳤다면 예전 `gamedata/` 의 `skilltrees.json`·`progression.json`·`abilities.json` 도 옮겨 오세요.
+
+### 방법 2. 소스에서 빌드해 실행
 
 [Node.js](https://nodejs.org) 20.10 이상(22 권장)이 필요합니다.
 
@@ -93,7 +107,7 @@ npm start
 
 <img src="docs/screenshots/create.jpg" alt="캐릭터 만들기" width="560">
 
-### 방법 2. Docker 로 실행
+### 방법 3. Docker 로 실행
 
 ```bash
 cp .env.example .env            # 선택
