@@ -16,6 +16,7 @@ import {
 import { computeDerived, START_STAT, type DerivedStats } from '../../shared/formulas';
 import {
   abilityExpToNext,
+  abilityPower,
   abilityVitals,
   bigNumber,
   classTier,
@@ -664,6 +665,15 @@ export function gainProficiency(p: Player, abilityId: string): boolean {
   if (prof >= max) p.sys(`${name}의 숙련도가 최대(${max})에 이르렀습니다!`);
   else if (prof % 10 === 0) p.sys(`${name}의 숙련도가 ${prof}(으)로 올랐습니다.`);
   return true;
+}
+
+/**
+ * 2차 직업의 위력 배율 = abilityPower(어빌): 어빌 1 에 ability.powerMin(105%), 어빌 최대에 powerMax(115%), 1차 직업·평민은 1.
+ * 2차 직업 캐릭터가 주는 피해(평타·기술·마법·희생)와 회복, 부른 소환수의 체력·피해에 곱합니다 (combat.ts·summons.ts).
+ * 중독·출혈·재생의 틱과 상태 이상의 확률에는 곱하지 않습니다
+ */
+export function secondJobPower(p: Player): number {
+  return abilityPower(p.data.abilityLevel, p.world.data.progression.ability);
 }
 
 /**

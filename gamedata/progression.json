@@ -129,7 +129,16 @@
       { "id": "reptile", "name": "파충류" }
     ]
   },
-  "ability": { "maxLevel": 99, "expRatio": 0.25, "hpPerLevel": 30, "mpPerLevel": 15 },
+  "ability": {
+    "maxLevel": 99,
+    "expRatio": 0.25,
+    "expBase": 1000000,
+    "expGrowth": 1.05,
+    "hpPerLevel": 30,
+    "mpPerLevel": 15,
+    "powerMin": 1.05,
+    "powerMax": 1.15
+  },
   "proficiency": {
     "max": 100,
     "baseChance": 0.35,

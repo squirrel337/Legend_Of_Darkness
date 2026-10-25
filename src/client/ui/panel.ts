@@ -1,7 +1,7 @@
 // 아래 패널의 가운데 칸(소지품/기술/마법/대화/능력치)과 오른쪽 단추들
 import { ELEMENT_NAMES, INVENTORY_SIZE, STAT_KEYS, STAT_NAMES, circleOf } from '../../shared/constants';
 import type { Game } from '../game';
-import { abilityExpPct, abilityExpTitle, classLabel, profInfo, rebirthWord } from '../progression';
+import { abilityExpPct, abilityExpText, abilityExpTitle, classLabel, profInfo, rebirthWord, secondPowerText } from '../progression';
 import { abilityIconUrl, iconUrl } from '../render/icons';
 import { clear, fmt, h } from './dom';
 import { svgIcon, type BottomFrame } from './frame';
@@ -310,7 +310,7 @@ export class Panel {
           row('경험치', s.expNext > 0 ? `${fmt(s.exp)} / ${fmt(s.expNext)}` : `만렙 (${fmt(s.exp)})`),
           // 2차 직업은 레벨이 99 그대로라 경험치 막대 대신 어빌 경험치 막대
           ab === null ? h('div', { class: 'bar tiny exp' }, h('div', { class: 'bar-fill exp', style: { width: `${pct}%` } })) : null,
-          ab !== null ? row(`어빌 ${s.abilityLevel}`, s.abilityExpNext > 0 ? `${fmt(s.abilityExp)} / ${fmt(s.abilityExpNext)}` : '어빌 만렙') : null,
+          ab !== null ? row(`어빌 ${s.abilityLevel}`, abilityExpText(s)) : null,
           ab !== null ? h('div', { class: 'bar tiny abil', title: abilityExpTitle(s) }, h('div', { class: 'bar-fill abil', style: { width: `${ab}%` } })) : null,
           h('button', { class: 'btn small', onclick: () => this.game.charWin.toggle(true) }, '장비·일러스트 (C)'),
         ),
@@ -329,6 +329,8 @@ export class Panel {
           row('무기 피해', `${s.stats.dmgMin}~${s.stats.dmgMax}${s.stats.dmgBonus ? ` +${s.stats.dmgBonus}` : ''}`),
           row('명중 / 마법', `+${s.stats.hit}% / +${s.stats.magic}%`),
           row('공격/방어 속성', `${ELEMENT_NAMES[s.stats.offense]} / ${ELEMENT_NAMES[s.stats.defense]}`),
+          // 2차 직업은 어빌에 따라 주는 피해·회복이 커짐
+          ab !== null ? row('2차 직업 위력', secondPowerText(s, prog)) : null,
         ),
       ),
     );

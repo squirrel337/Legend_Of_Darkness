@@ -15,7 +15,7 @@ import type { World } from '../world/World';
 import { canFit } from './character';
 import { playerAssail, playerUseAbility } from './combat';
 import { pickup, useItem } from './inventory';
-import { proficiencyMultiplier } from './progression';
+import { proficiencyMultiplier, secondJobPower } from './progression';
 
 /** 한 칸 걷는 평균 간격 (직접 걷기보다 조금 느리게) */
 export const AUTO_STEP_MS = Math.round(WALK_MS * 1.1);
@@ -779,7 +779,8 @@ function reachPlan(c: Ctx, def: AbilityDef, t: Monster): ReachPlan | null {
 
 /**
  * 기술의 대략적인 기대 피해 (고르는 순서용). 맞는 몬스터마다 남은 체력보다 큰 피해는 쳐 주지 않습니다.
- * 숙련도 배율을 곱하므로, 갓 배운 기술보다 숙련도가 높은 (이전 직업의 기술일 수도 있는) 기술을 먼저 고를 수 있습니다
+ * 숙련도 배율을 곱하므로, 갓 배운 기술보다 숙련도가 높은 (이전 직업의 기술일 수도 있는) 기술을 먼저 고를 수 있습니다.
+ * 2차 직업 위력도 곱해 남은 체력과 견주는 값이 실제 피해와 맞게 합니다
  */
 function valueOf(c: Ctx, def: AbilityDef, hit: readonly Monster[]): number {
   const { p } = c;
@@ -792,7 +793,7 @@ function valueOf(c: Ctx, def: AbilityDef, hit: readonly Monster[]): number {
     else if (e.type === 'sacrifice') v += p.hp * e.hpPct * e.mult;
     else if (e.type === 'status' && STATUS_INFO[e.status].kind === 'debuff') v += phys * 0.8;
   }
-  v *= proficiencyMultiplier(p, def.id);
+  v *= proficiencyMultiplier(p, def.id) * secondJobPower(p);
   let sum = 0;
   for (const m of hit) sum += Math.min(v, m.hp);
   return sum;
@@ -871,12 +872,12 @@ function rebuff(c: Ctx, fighting: boolean): boolean {
 
 // ───────────────────────── 회복 ─────────────────────────
 
-/** 회복 기술의 회복량 (숙련도 배율 포함) */
+/** 회복 기술의 회복량 (숙련도 배율과 2차 직업 위력 포함) */
 function healAmount(c: Ctx, def: AbilityDef): number {
   const d = c.p.derived;
   let v = 0;
   for (const e of def.effects) if (e.type === 'heal') v += magicBase(e.base, e.ratio, d[e.stat ?? 'wis'], c.p.level, d.magic);
-  return v * proficiencyMultiplier(c.p, def.id);
+  return v * proficiencyMultiplier(c.p, def.id) * secondJobPower(c.p);
 }
 
 /** 모자란 양을 채우는 가장 작은 것, 없으면 가장 큰 것 */

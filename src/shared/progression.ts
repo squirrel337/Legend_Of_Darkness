@@ -2,7 +2,6 @@
 // gamedata/progression.json · gamedata/skilltrees.json 의 형식, 서버·클라이언트·관리자 페이지가 함께 쓰는 공식,
 // 관리자 편집기("직업·스킬트리" 탭) API 의 형식을 모아 둡니다. 규칙은 docs/progression.md 를 보세요.
 import { formatNumber, MAX_ABILITIES, STAT_KEYS, STAT_NAMES, type ClassId, type StatKey } from './constants';
-import { expToNext } from './formulas';
 import type { AbilityDef, ItemDef } from './types';
 
 // ───────────────────────── 직업 단계 ─────────────────────────
@@ -174,10 +173,25 @@ export interface AbilityLevelConfig {
   maxLevel: number;
   /** 몬스터를 잡아 받은 일반 경험치 중 어빌 경험치로도 받는 비율 (0.25) */
   expRatio: number;
+  /** 어빌 1 → 2 에 필요한 어빌 경험치 (100만) */
+  expBase: number;
+  /**
+   * 어빌이 하나 오를 때마다 다음 어빌의 필요 어빌 경험치에 곱하는 배율 (1.05): 어빌 L → L+1 은 expBase × expGrowth^(L−1).
+   * 원작처럼 어빌을 긴 목표로 두는 가파른 표입니다 (기본값이면 어빌 99 의 마지막 한 칸이 어빌 1 의 약 114배)
+   */
+  expGrowth: number;
   /** 어빌 레벨이 오를 때마다 늘어나는 최대 체력 (30) */
   hpPerLevel: number;
   /** 어빌 레벨이 오를 때마다 늘어나는 최대 마나 (15) */
   mpPerLevel: number;
+  /**
+   * 2차 직업의 위력 배율 (어빌 1, 기본 1.05): 2차 직업 캐릭터가 주는 피해(평타·기술·마법·희생, 소환수의 체력·피해)와
+   * 회복에 숙련도 배율과 함께 곱합니다. 2차 직업 기술은 어빌 5 부터 열리므로, 2차 전직 직후(어빌 1)에도
+   * 이어받은 1차 직업 99레벨보다 세게 합니다
+   */
+  powerMin: number;
+  /** 어빌 maxLevel 의 위력 배율 (기본 1.15). 그 사이는 어빌에 따라 직선으로 오릅니다 */
+  powerMax: number;
 }
 
 /** 숙련도: 배운 기술·마법마다 0 ~ max, 쓸 때마다 확률로 1씩 오름 */
@@ -314,10 +328,61 @@ export function abilityVitals(abilityLevel: number, c: AbilityLevelConfig): { hp
   return { hp: n * c.hpPerLevel, mp: n * c.mpPerLevel };
 }
 
-/** 어빌 레벨 L → L+1 에 필요한 어빌 경험치 (일반 레벨 표와 같음). 2차 직업이 아니거나(0) 만렙이면 0 */
+/**
+ * 어빌 레벨 L → L+1 에 필요한 어빌 경험치 = expBase × expGrowth^(L−1) (반올림). 2차 직업이 아니거나(0) 만렙이면 0.
+ * 일반 레벨 표(expToNext)보다 훨씬 가파르게, 원작처럼 어빌 99 를 수백 시간 걸리는 긴 목표로 둡니다 (docs/progression.md 4장)
+ */
 export function abilityExpToNext(abilityLevel: number, c: AbilityLevelConfig): number {
   if (abilityLevel < 1 || abilityLevel >= c.maxLevel) return 0;
-  return expToNext(abilityLevel);
+  return Math.round(c.expBase * Math.pow(c.expGrowth, Math.floor(abilityLevel) - 1));
+}
+
+/** 어빌 1(어빌 경험치 0)에서 어빌 level 이 되기까지 모아야 하는 어빌 경험치 (level 이 1 이하면 0, 최대 어빌에서 멈춤) */
+export function abilityExpTotal(level: number, c: AbilityLevelConfig): number {
+  let sum = 0;
+  for (let l = 1; l < Math.min(level, c.maxLevel); l++) sum += abilityExpToNext(l, c);
+  return sum;
+}
+
+/**
+ * 걸리는 시간을 어림할 때 쓰는 사냥 속도 [느림, 빠름]: 경험치 배율 1 에서 만렙 장비로 어둠의 심연을 자동사냥할 때 받는
+ * 분당 경험치 (리뷰에서 잰 값, docs/progression.md 8.7). 배율이 N 이면 N 배입니다
+ */
+export const REFERENCE_EXP_PER_MIN: readonly [number, number] = [300_000, 500_000];
+
+/** 걸리는 시간을 보여 주는 어빌 (첫 2차 직업 기술 5 … 마지막 기술 88, 만렙 99) */
+export const ABILITY_MILESTONES: readonly number[] = [5, 25, 45, 70, 88, 99];
+
+/**
+ * 2차 전직 직후(어빌 1)부터 어빌 level 까지 걸리는 시간(시간 단위): 분당 expPerMin 의 몬스터 경험치를 받을 때
+ * (그 중 expRatio 가 어빌 경험치). 어빌 경험치를 받지 않는 설정이면 Infinity
+ */
+export function abilityHours(level: number, c: AbilityLevelConfig, expPerMin: number): number {
+  const total = abilityExpTotal(level, c);
+  if (total <= 0) return 0;
+  const perMin = expPerMin * c.expRatio;
+  return perMin > 0 ? total / perMin / 60 : Infinity;
+}
+
+/**
+ * 2차 직업의 위력 배율: 어빌 1 은 powerMin, 어빌 maxLevel 은 powerMax, 그 사이는 직선 (2차 직업이 아니면(어빌 0) 1).
+ * 2차 직업 캐릭터가 주는 피해(평타·기술·마법·희생, 소환수의 체력·피해)와 회복에 곱합니다. 중독·출혈·재생의 틱과
+ * 해로운 상태의 확률은 그대로입니다 (숙련도 배율과 달리)
+ */
+export function abilityPower(abilityLevel: number, c: AbilityLevelConfig): number {
+  if (abilityLevel < 1) return 1;
+  if (c.maxLevel <= 1) return c.powerMin;
+  const t = Math.min(1, (Math.floor(abilityLevel) - 1) / (c.maxLevel - 1));
+  return c.powerMin + (c.powerMax - c.powerMin) * t;
+}
+
+/** 걸리는 시간(시간 단위)을 글자로: 1시간 미만은 분, 10시간 미만은 소수 한 자리 (예: "52분", "8.9시간", "284시간") */
+export function formatHours(hours: number): string {
+  if (!Number.isFinite(hours)) return '끝없음';
+  if (hours <= 0) return '0분';
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}분`;
+  if (hours < 10) return `${Math.round(hours * 10) / 10}시간`;
+  return `${formatNumber(Math.round(hours))}시간`;
 }
 
 /** 칭호 (승급하면 ascend.title, 아니면 빈 문자열) */
@@ -539,6 +604,8 @@ export interface DesignBundle {
   maxLevel: number;
   /** 능력치 최대 */
   statCap: number;
+  /** 지금 서버의 경험치 배율 (어빌 표의 걸리는 시간 어림에 씀) */
+  expRate: number;
   /** 지금 설계의 경고 (오류는 저장되지 않으므로 없음) */
   warnings: DesignIssue[];
 }

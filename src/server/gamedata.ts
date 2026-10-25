@@ -15,6 +15,8 @@ import {
   type ClassId,
 } from '../shared/constants';
 import {
+  abilityExpTotal,
+  bigNumber,
   classTier,
   CONDITION_TYPES,
   FIRST_CLASSES,
@@ -130,9 +132,10 @@ export class GameData {
     gd.maps.clear();
     for (const m of ordered) gd.maps.set(m.id, m);
     gd.crossCheck();
-    // 성장 체계 설계: 다른 데이터가 모두 읽힌 뒤에 (기술·아이템 id 를 맞춰 봄)
-    const design = { progression: readJson(path.join(dir, 'progression.json')), skillTrees: readJson(path.join(dir, 'skilltrees.json')) };
-    const issues = checkDesign(design, gd);
+    // 성장 체계 설계: 다른 데이터가 모두 읽힌 뒤에 (기술·아이템 id 를 맞춰 봄). 나중에 생긴 항목이 없는 옛 파일은 기본값으로 채움
+    const up = upgradeProgression(readJson(path.join(dir, 'progression.json')));
+    const design = { progression: up.progression, skillTrees: readJson(path.join(dir, 'skilltrees.json')) };
+    const issues = [...up.issues, ...checkDesign(design, gd)];
     const err = issues.find((i) => i.level === 'error');
     if (err) fail(err.where, err.msg);
     gd.setDesign(design.progression as ProgressionConfig, normalizeSkillTrees(design.skillTrees), issues);
@@ -183,7 +186,10 @@ export class GameData {
     // 기술 이름이 바뀌어도 검사 메시지가 새 이름을 쓰도록, 고친 기술로 검사합니다
     const abilities = new Map(this.abilities);
     for (const p of patches) abilities.set(p.id, { ...abilities.get(p.id)!, ...pickPatch(p) });
-    const design = { progression: next.progression ?? this.progression, skillTrees: next.skillTrees ?? this.skillTrees };
+    // 판 기록의 옛 설계로 되돌리거나 옛 파일을 다시 읽을 때: 나중에 생긴 항목은 기본값으로
+    const up = upgradeProgression(next.progression ?? this.progression);
+    issues.push(...up.issues);
+    const design = { progression: up.progression, skillTrees: next.skillTrees ?? this.skillTrees };
     const refs = { classes: this.classes, items: this.items, abilities };
     let found = checkDesign(design, refs);
     // 관리자 저장: 노드의 필요 레벨(어빌)·골드를 abilities.json 의 level·price 에도 맞춘 뒤 다시 검사 (맞추고 나면 사라질 경고를 남기지 않음)
@@ -630,6 +636,30 @@ function checkCondition(out: IssueList, refs: DesignRefs, w: string, c: unknown,
   }
 }
 
+/** progression.json 의 ability 항목 (파일에 쓰는 순서) */
+const ABILITY_KEYS = ['maxLevel', 'expRatio', 'expBase', 'expGrowth', 'hpPerLevel', 'mpPerLevel', 'powerMin', 'powerMax'] as const;
+
+/**
+ * 나중에 생긴 ability 항목의 기본값 (어빌 표, 2차 직업 위력). 이 항목이 생기기 전의 progression.json(손으로 고친 파일,
+ * 관리자 페이지의 판 기록)은 이 값을 채워 읽고 경고합니다. 관리자 페이지에서 한 번 저장하면 파일에 적힙니다.
+ */
+export const ABILITY_ADDED_DEFAULTS: Readonly<Record<string, number>> = { expBase: 1_000_000, expGrowth: 1.05, powerMin: 1.05, powerMax: 1.15 };
+
+/** 옛 progression.json 에 없는 ability 항목을 기본값으로 채운 복사본과 그 경고 (모양이 틀린 값은 검사가 알리도록 그대로) */
+export function upgradeProgression(raw: unknown): { progression: unknown; issues: DesignIssue[] } {
+  if (!isObj(raw) || !isObj(raw.ability)) return { progression: raw, issues: [] };
+  const old = raw.ability;
+  const filled = Object.keys(ABILITY_ADDED_DEFAULTS).filter((k) => !(k in old));
+  if (filled.length === 0) return { progression: raw, issues: [] };
+  const ability: Record<string, unknown> = { ...old };
+  for (const k of filled) ability[k] = ABILITY_ADDED_DEFAULTS[k];
+  const list = filled.map((k) => `${k} ${ABILITY_ADDED_DEFAULTS[k]}`).join(', ');
+  return {
+    progression: { ...raw, ability },
+    issues: [{ level: 'warn', where: 'progression.json(ability)', msg: `이 항목이 생기기 전의 설계라 기본값(${list})으로 채웠습니다. 관리자 페이지에서 저장하면 파일에 적힙니다.` }],
+  };
+}
+
 /** progression.json 내용을 검사합니다 */
 export function checkProgression(raw: unknown, refs: DesignRefs): DesignIssue[] {
   const out = new IssueList('progression.json');
@@ -672,14 +702,28 @@ export function checkProgression(raw: unknown, refs: DesignRefs): DesignIssue[] 
   };
 
   // 어빌리티
-  const ab = section('ability', ['maxLevel', 'expRatio', 'hpPerLevel', 'mpPerLevel']);
+  const ab = section('ability', ABILITY_KEYS);
   if (ab) {
     const abMax = intField(out, 'ability', ab, 'maxLevel', 1, 999);
     const ratio = numField(out, 'ability', ab, 'expRatio', 0, 10);
     if (ratio === 0 && abMax !== 1)
       out.warn('ability', 'expRatio 가 0 이라 어빌 경험치를 받지 않아 2차 직업이 어빌 1 에 머뭅니다 (어빌 2 이상이 필요한 2차 직업 기술을 배울 수 없음).');
+    // 어빌 표: 어빌 L → L+1 = expBase × expGrowth^(L−1)
+    const base = intField(out, 'ability', ab, 'expBase', 1, MAX_EXP_GRANT);
+    const growth = numField(out, 'ability', ab, 'expGrowth', 1, 2);
+    if (abMax !== undefined && base !== undefined && growth !== undefined) {
+      const total = abilityExpTotal(abMax, { maxLevel: abMax, expRatio: ratio ?? 0, expBase: base, expGrowth: growth, hpPerLevel: 0, mpPerLevel: 0, powerMin: 1, powerMax: 1 });
+      if (!(total <= MAX_EXP_GRANT))
+        out.error('ability', `어빌 1 → ${abMax} 에 필요한 어빌 경험치가 ${Number.isFinite(total) ? bigNumber(total) : '끝없이'} 로 너무 큽니다 (1,000조까지). expBase 나 expGrowth 를 낮춰 주세요.`);
+    }
     intField(out, 'ability', ab, 'hpPerLevel', 0, 100_000);
     intField(out, 'ability', ab, 'mpPerLevel', 0, 100_000);
+    // 2차 직업 위력: 어빌 1 → 어빌 최대로 직선
+    const lo = numField(out, 'ability', ab, 'powerMin', 0.1, 10);
+    const hi = numField(out, 'ability', ab, 'powerMax', 0.1, 10);
+    if (lo !== undefined && hi !== undefined && hi < lo) out.error('ability', 'powerMax(어빌 최대의 위력)는 powerMin(어빌 1 의 위력) 이상이어야 합니다.');
+    else if (lo !== undefined && lo < 1)
+      out.warn('ability', `powerMin 이 ${Math.round(lo * 100)}% 라 2차 전직 직후(어빌 1)에 이어받은 1차 직업보다 약해질 수 있습니다 (2차 직업 기술이 열리기 전에는 1차 직업과 같은 기술로 싸움).`);
   }
 
   // 전직
@@ -1110,7 +1154,16 @@ function canonProgression(c: ProgressionConfig): ProgressionConfig {
       conditions: byClass(SECOND_CLASSES, c.second.conditions, conds),
       beastTypes: c.second.beastTypes.map((b) => ({ id: b.id, name: b.name })),
     },
-    ability: { maxLevel: c.ability.maxLevel, expRatio: c.ability.expRatio, hpPerLevel: c.ability.hpPerLevel, mpPerLevel: c.ability.mpPerLevel },
+    ability: {
+      maxLevel: c.ability.maxLevel,
+      expRatio: c.ability.expRatio,
+      expBase: c.ability.expBase,
+      expGrowth: c.ability.expGrowth,
+      hpPerLevel: c.ability.hpPerLevel,
+      mpPerLevel: c.ability.mpPerLevel,
+      powerMin: c.ability.powerMin,
+      powerMax: c.ability.powerMax,
+    },
     proficiency: {
       max: c.proficiency.max,
       baseChance: c.proficiency.baseChance,

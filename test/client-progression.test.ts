@@ -25,6 +25,7 @@ import {
   TREE_PAD,
   TREE_ROW_H,
   abilityExpPct,
+  abilityExpText,
   abilityExpTitle,
   beastColumns,
   bezierPoint,
@@ -44,6 +45,7 @@ import {
   refreshLearnEntries,
   reqDetail,
   reqText,
+  secondPowerText,
   teacherOf,
   treeNote,
   treeTabs,
@@ -578,6 +580,16 @@ test('어빌 경험치 막대: 2차 직업이 아니면 없음, 만렙이면 가
   assert.equal(abilityExpPct(self({ abilityLevel: 3, abilityExp: 50, abilityExpNext: 200 })), 25);
   assert.equal(abilityExpPct(self({ abilityLevel: 99, abilityExp: 0, abilityExpNext: 0 })), 100);
   assert.equal(abilityExpTitle(self({ abilityLevel: 3, abilityExp: 1234, abilityExpNext: 5678 })), '어빌 경험치 1,234 / 5,678');
+  // 어빌 표가 가팔라 뒤쪽 어빌은 한 칸이 1억을 넘으므로 큰 수는 한글 단위로 (능력치 칸 G 의 어빌 줄)
+  assert.equal(abilityExpText(self({ abilityLevel: 98, abilityExp: 56_800_000, abilityExpNext: 113_595_731 })), '5,680만 / 1억 1,359만 5,731');
+  assert.equal(abilityExpText(self({ abilityLevel: 3, abilityExp: 1234, abilityExpNext: 5678 })), '1,234 / 5,678');
+  assert.equal(abilityExpText(self({ abilityLevel: 99 })), '어빌 만렙');
+  assert.equal(abilityExpText(self({})), '');
+  // 2차 직업 위력 (능력치 칸 G): 어빌 1 105% → 어빌 99 115%, 2차 직업이 아니면 없음
+  assert.equal(secondPowerText(self({ abilityLevel: 1 }), PROG), '105%');
+  assert.equal(secondPowerText(self({ abilityLevel: 50 }), PROG), '110%');
+  assert.equal(secondPowerText(self({ abilityLevel: 99 }), PROG), '115%');
+  assert.equal(secondPowerText(self({}), PROG), '');
   assert.equal(abilityExpTitle(self({ abilityLevel: 99 })), '어빌 99 (만렙)');
   assert.equal(abilityExpTitle(self({})), '');
 });
